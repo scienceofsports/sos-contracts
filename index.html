@@ -1,0 +1,2546 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SOS Contracts | Science of Sports</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
+<style>
+  :root { --navy-deep:#0A1628; --navy-mid:#1E3A5F; --blue-primary:#2563EB; --green:#10B981; --amber:#F59E0B; --red:#EF4444; --purple:#8B5CF6; --slate:#94A3B8; --bg:#F8FAFC; --border:#E2E8F0; }
+  html, body { font-family: 'Inter', sans-serif; background: var(--bg); }
+  .font-display { font-weight:700; font-size:28px; }
+  .font-heading { font-weight:600; font-size:18px; }
+  .font-data { font-weight:500; font-size:14px; font-variant-numeric: tabular-nums; }
+  ::-webkit-scrollbar { width:8px; height:8px; }
+  ::-webkit-scrollbar-thumb { background:#CBD5E1; border-radius:4px; }
+  .skeleton { background: linear-gradient(90deg,#e2e8f0 25%,#eef2f6 37%,#e2e8f0 63%); background-size:400% 100%; animation: skeleton-loading 1.4s ease infinite; }
+  @keyframes skeleton-loading { 0%{background-position:100% 50%} 100%{background-position:0 50%} }
+  @media print {
+    .no-print { display:none !important; }
+    body { background: white !important; }
+  }
+</style>
+</head>
+<body class="bg-[var(--bg)] text-slate-800">
+<div id="root"></div>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useMemo, useRef, useCallback } = React;
+
+/* =========================================================================
+   CONSTANTS
+   ========================================================================= */
+const STATUS_BADGE = {
+  draft:    { bg:'bg-slate-100',  text:'text-slate-600'  },
+  sent:     { bg:'bg-amber-100',  text:'text-amber-700'  },
+  signed:   { bg:'bg-blue-100',   text:'text-blue-700'   },
+  active:   { bg:'bg-green-100',  text:'text-green-700'  },
+  expired:  { bg:'bg-red-100',    text:'text-red-700'    },
+  cancelled:{ bg:'bg-slate-100',  text:'text-slate-500'  },
+  paid:     { bg:'bg-green-100',  text:'text-green-700'  },
+  pending:  { bg:'bg-amber-100',  text:'text-amber-700'  },
+  overdue:  { bg:'bg-red-100',    text:'text-red-700'    },
+  disputed: { bg:'bg-purple-100', text:'text-purple-700' },
+};
+
+const CONTRACT_TYPES = [
+  { value:'platform_subscription', label:'Platform Subscription' },
+  { value:'data_license', label:'Data License' },
+  { value:'consulting', label:'Consulting' },
+  { value:'partnership', label:'Partnership' },
+  { value:'custom', label:'Custom' },
+];
+
+const PAYMENT_TYPES = [
+  { value:'one_time', label:'One-time' },
+  { value:'monthly', label:'Monthly' },
+  { value:'quarterly', label:'Quarterly' },
+  { value:'annually', label:'Annually' },
+  { value:'milestone', label:'Milestone-based' },
+];
+
+const CURRENCIES = ['EUR','AED','USD'];
+const CURRENCY_SYMBOL = { EUR:'€', AED:'AED ', USD:'$' };
+
+/* =========================================================================
+   UTILITIES
+   ========================================================================= */
+function uuid() {
+  if (crypto && crypto.randomUUID) return crypto.randomUUID();
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = Math.random()*16|0, v = c === 'x' ? r : (r&0x3|0x8);
+    return v.toString(16);
+  });
+}
+
+function nowISO() { return new Date().toISOString(); }
+
+function fmtDate(iso, fmt) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  const dd = String(d.getDate()).padStart(2,'0');
+  const mm = String(d.getMonth()+1).padStart(2,'0');
+  const yyyy = d.getFullYear();
+  if (fmt === 'MM/DD/YYYY') return `${mm}/${dd}/${yyyy}`;
+  return `${dd}/${mm}/${yyyy}`;
+}
+
+function fmtDateTime(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return `${fmtDate(iso)} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')} UTC`;
+}
+
+function fmtMoney(amount, currency) {
+  const sym = CURRENCY_SYMBOL[currency] || '';
+  const n = Number(amount || 0);
+  return `${sym}${n.toLocaleString('en-US', { minimumFractionDigits:2, maximumFractionDigits:2 })}`;
+}
+
+function daysBetween(a, b) {
+  const MS = 1000*60*60*24;
+  return Math.round((new Date(b) - new Date(a)) / MS);
+}
+
+async function sha256(text) {
+  const enc = new TextEncoder().encode(text);
+  const buf = await crypto.subtle.digest('SHA-256', enc);
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+}
+
+function validateEmail(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email || '');
+}
+
+/* =========================================================================
+   LOCAL STORAGE LAYER (raw persistence — services below abstract this away)
+   ========================================================================= */
+const DB_KEYS = {
+  company: 'sos_company',
+  users: 'sos_users',
+  clients: 'sos_clients',
+  contracts: 'sos_contracts',
+  seeded: 'sos_seeded_v1',
+};
+
+function dbGet(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch (e) { return fallback; }
+}
+function dbSet(key, value) {
+  localStorage.setItem(key, JSON.stringify(value));
+}
+
+/* =========================================================================
+   SEED DATA
+   ========================================================================= */
+function seedIfEmpty() {
+  if (dbGet(DB_KEYS.seeded, false)) return;
+
+  const company = {
+    name: 'C.C. Science of Sports Ltd',
+    registeredAddress: 'Michalaki Karaoli 8, 1022 Nicosia, Cyprus',
+    vatNumber: 'CY60030297Y',
+    registrationNumber: 'HE449875',
+    contactEmail: 'contracts@scienceofsports.com',
+    website: 'www.scienceofsports.com',
+    bankName: 'Hellenic Bank',
+    bankIBAN: 'CY61 0050 0109 0001 0901 H183 8501',
+    bankSWIFT: 'HEBACY2N',
+    logo: null,
+  };
+
+  const users = [
+    { id: uuid(), name: 'Constantinos Charalambides', email: 'admin@scienceofsports.com', password: 'Admin2026!', role: 'admin', createdAt: nowISO() },
+    { id: uuid(), name: 'Board Viewer', email: 'viewer@scienceofsports.com', password: 'Viewer2026!', role: 'viewer', createdAt: nowISO() },
+  ];
+
+  const clients = [
+    { id: uuid(), companyName: 'AEK Larnaca FC', contactName: 'Marios Georgiou', contactEmail: 'marios@aeklarnaca.com.cy', contactPhone: '+357 99 123456', address: 'Larnaca, Cyprus', country: 'CY', vatNumber: null, currency: 'EUR', createdAt: nowISO() },
+    { id: uuid(), companyName: 'FC Metaframe Amsterdam', contactName: 'Jeroen de Vries', contactEmail: 'jeroen@metaframefc.nl', contactPhone: '+31 6 1234 5678', address: 'Amsterdam, Netherlands', country: 'NL', vatNumber: 'NL123456789B01', currency: 'EUR', createdAt: nowISO() },
+    { id: uuid(), companyName: 'Al Fateh SC', contactName: 'Khalid Al-Otaibi', contactEmail: 'khalid@alfateh.sa', contactPhone: '+966 50 123 4567', address: 'Al Ahsa, Saudi Arabia', country: 'SA', vatNumber: null, currency: 'AED', createdAt: nowISO() },
+  ];
+
+  const c1Start = new Date(); c1Start.setMonth(c1Start.getMonth() - 6);
+  const c1End = new Date(c1Start); c1End.setFullYear(c1End.getFullYear() + 1);
+  const c2Sent = new Date(); c2Sent.setDate(c2Sent.getDate() - 3);
+  const p1Due = new Date(); p1Due.setMonth(p1Due.getMonth() - 5);
+  const p2Due = new Date(); p2Due.setDate(p2Due.getDate() + 10);
+  const p3Due = new Date(); p3Due.setDate(p3Due.getDate() - 12);
+
+  const contracts = [
+    {
+      id: uuid(), contractNumber: 'SOS-C-2026-001', clientId: clients[0].id,
+      title: 'Full Platform & Scouting Access — AEK Larnaca FC',
+      type: 'platform_subscription', status: 'active', value: 12000, currency: 'EUR',
+      startDate: c1Start.toISOString(), endDate: c1End.toISOString(),
+      paymentType: 'quarterly', paymentTermsDays: 30, latePaymentPenalty: 1.5,
+      governingLaw: 'Republic of Cyprus', jurisdiction: 'Nicosia, Cyprus',
+      description: 'Annual platform access including scouting reports, fitness data and match analysis for the first team squad.',
+      templateId: null, attachmentBase64: null, attachmentName: null,
+      version: 1, versionHistory: [],
+      sentAt: c1Start.toISOString(), sentBy: users[0].id,
+      signerName: 'Marios Georgiou', signerTitle: 'Sporting Director', signerCompany: 'AEK Larnaca FC', signerEmail: clients[0].contactEmail,
+      signedAt: c1Start.toISOString(), signerIP: '94.65.12.101',
+      documentHashBefore: 'seed-hash-before-1', documentHashAfter: 'seed-hash-before-1',
+      consentElectronic: true, consentAuthorized: true, consentRead: true,
+      auditLog: [
+        { id: uuid(), type: 'created', message: 'Contract created', at: c1Start.toISOString(), by: users[0].id },
+        { id: uuid(), type: 'sent', message: 'Contract sent to Marios Georgiou', at: c1Start.toISOString(), by: users[0].id },
+        { id: uuid(), type: 'signed', message: 'Contract signed by Marios Georgiou', at: c1Start.toISOString(), by: null },
+      ],
+      payments: [
+        { id: uuid(), contractId: null, accountingRef: 'SOS-2026-001', description: 'Q1 Platform Access Fee', dueDate: p1Due.toISOString(), amount: 3000, vatRate: 0.19, vatAmount: 570, totalAmount: 3570, currency: 'EUR', status: 'paid', paidAt: p1Due.toISOString(), paidAmount: 3570, markedPaidBy: users[0].id, remindersSent: [], notes: '', createdAt: c1Start.toISOString() },
+        { id: uuid(), contractId: null, accountingRef: 'SOS-2026-002', description: 'Q2 Platform Access Fee', dueDate: p2Due.toISOString(), amount: 3000, vatRate: 0.19, vatAmount: 570, totalAmount: 3570, currency: 'EUR', status: 'pending', paidAt: null, paidAmount: null, markedPaidBy: null, remindersSent: [], notes: '', createdAt: nowISO() },
+        { id: uuid(), contractId: null, accountingRef: 'SOS-2026-003', description: 'Q3 Platform Access Fee', dueDate: p3Due.toISOString(), amount: 3000, vatRate: 0.19, vatAmount: 570, totalAmount: 3570, currency: 'EUR', status: 'overdue', paidAt: null, paidAmount: null, markedPaidBy: null, remindersSent: [], notes: '', createdAt: nowISO() },
+      ],
+      renewalStatus: 'not_started', renewalReminderSent: false,
+      createdAt: c1Start.toISOString(), createdBy: users[0].id,
+    },
+    {
+      id: uuid(), contractNumber: 'SOS-C-2026-002', clientId: clients[1].id,
+      title: 'Data License Agreement — FC Metaframe Amsterdam',
+      type: 'data_license', status: 'sent', value: 18500, currency: 'EUR',
+      startDate: new Date().toISOString(), endDate: (() => { const d = new Date(); d.setFullYear(d.getFullYear()+1); return d.toISOString(); })(),
+      paymentType: 'one_time', paymentTermsDays: 30, latePaymentPenalty: 1.5,
+      governingLaw: 'Republic of Cyprus', jurisdiction: 'Nicosia, Cyprus',
+      description: 'Licensing of match and fitness data feeds for the 2026/27 season, including API access.',
+      templateId: null, attachmentBase64: null, attachmentName: null,
+      version: 1, versionHistory: [],
+      sentAt: c2Sent.toISOString(), sentBy: users[0].id,
+      signerName: null, signerTitle: null, signerCompany: null, signerEmail: null,
+      signedAt: null, signerIP: null,
+      documentHashBefore: 'seed-hash-before-2', documentHashAfter: null,
+      consentElectronic: false, consentAuthorized: false, consentRead: false,
+      auditLog: [
+        { id: uuid(), type: 'created', message: 'Contract created', at: c2Sent.toISOString(), by: users[0].id },
+        { id: uuid(), type: 'sent', message: 'Contract sent to Jeroen de Vries', at: c2Sent.toISOString(), by: users[0].id },
+      ],
+      payments: [],
+      renewalStatus: null, renewalReminderSent: false,
+      createdAt: c2Sent.toISOString(), createdBy: users[0].id,
+    },
+    {
+      id: uuid(), contractNumber: 'SOS-C-2026-003', clientId: clients[2].id,
+      title: 'Consulting Engagement — Al Fateh SC Performance Review',
+      type: 'consulting', status: 'draft', value: 9500, currency: 'AED',
+      startDate: '', endDate: '',
+      paymentType: 'milestone', paymentTermsDays: 15, latePaymentPenalty: 1.5,
+      governingLaw: 'Republic of Cyprus', jurisdiction: 'Nicosia, Cyprus',
+      description: 'One-off consulting engagement covering squad performance review and recommendations.',
+      templateId: null, attachmentBase64: null, attachmentName: null,
+      version: 1, versionHistory: [],
+      sentAt: null, sentBy: null,
+      signerName: null, signerTitle: null, signerCompany: null, signerEmail: null,
+      signedAt: null, signerIP: null,
+      documentHashBefore: null, documentHashAfter: null,
+      consentElectronic: false, consentAuthorized: false, consentRead: false,
+      auditLog: [ { id: uuid(), type: 'created', message: 'Contract created', at: nowISO(), by: users[0].id } ],
+      payments: [],
+      renewalStatus: null, renewalReminderSent: false,
+      createdAt: nowISO(), createdBy: users[0].id,
+    },
+  ];
+  contracts.forEach(c => c.payments.forEach(p => p.contractId = c.id));
+
+  dbSet(DB_KEYS.company, company);
+  dbSet(DB_KEYS.users, users);
+  dbSet(DB_KEYS.clients, clients);
+  dbSet(DB_KEYS.contracts, contracts);
+  dbSet(DB_KEYS.seeded, true);
+}
+
+/* =========================================================================
+   SERVICE LAYER — all data access must go through these. Swap localStorage
+   for API calls here later with zero UI changes.
+   ========================================================================= */
+const companyService = {
+  get: async () => dbGet(DB_KEYS.company, null),
+  update: async (patch) => {
+    const c = { ...dbGet(DB_KEYS.company, {}), ...patch };
+    dbSet(DB_KEYS.company, c);
+    return c;
+  },
+  clearClientsAndContracts: async () => {
+    dbSet(DB_KEYS.clients, []);
+    dbSet(DB_KEYS.contracts, []);
+  },
+};
+
+const userService = {
+  getAll: async () => dbGet(DB_KEYS.users, []),
+  getById: async (id) => dbGet(DB_KEYS.users, []).find(u => u.id === id) || null,
+  getCurrentUser: async () => {
+    const session = getSession();
+    if (!session) return null;
+    return dbGet(DB_KEYS.users, []).find(u => u.id === session.userId) || null;
+  },
+  login: async (email, password) => {
+    const users = dbGet(DB_KEYS.users, []);
+    const account = users.find(u => u.email.toLowerCase() === (email||'').toLowerCase());
+    if (account && !account.password) throw new Error('This account has not completed setup yet. Use your setup link to create a password first.');
+    const user = users.find(u => u.email.toLowerCase() === (email||'').toLowerCase() && u.password === password);
+    if (!user) throw new Error('Invalid email or password.');
+    const expiresAt = Date.now() + 8*60*60*1000;
+    sessionStorage.setItem('sos_session', JSON.stringify({ userId: user.id, role: user.role, expiresAt }));
+    return user;
+  },
+  logout: async () => { sessionStorage.removeItem('sos_session'); },
+  create: async (data) => {
+    const users = dbGet(DB_KEYS.users, []);
+    if (users.some(u => u.email.toLowerCase() === data.email.toLowerCase())) {
+      throw new Error('A user with this email already exists.');
+    }
+    const setupTokenExpiry = new Date(); setupTokenExpiry.setDate(setupTokenExpiry.getDate() + 7);
+    const user = {
+      id: uuid(), createdAt: nowISO(), password: null,
+      setupToken: uuid(), setupTokenExpiresAt: setupTokenExpiry.toISOString(),
+      ...data,
+    };
+    users.push(user);
+    dbSet(DB_KEYS.users, users);
+    return user;
+  },
+  delete: async (id) => {
+    const users = dbGet(DB_KEYS.users, []).filter(u => u.id !== id);
+    dbSet(DB_KEYS.users, users);
+  },
+  getBySetupToken: async (token) => {
+    const user = dbGet(DB_KEYS.users, []).find(u => u.setupToken === token);
+    if (!user) return null;
+    if (!user.setupTokenExpiresAt || new Date() > new Date(user.setupTokenExpiresAt)) return null;
+    return user;
+  },
+  completeSetup: async (token, password) => {
+    const users = dbGet(DB_KEYS.users, []);
+    const idx = users.findIndex(u => u.setupToken === token);
+    if (idx === -1) throw new Error('This setup link is invalid.');
+    if (!users[idx].setupTokenExpiresAt || new Date() > new Date(users[idx].setupTokenExpiresAt)) throw new Error('This setup link has expired.');
+    users[idx].password = password;
+    users[idx].setupToken = null;
+    users[idx].setupTokenExpiresAt = null;
+    dbSet(DB_KEYS.users, users);
+    return users[idx];
+  },
+};
+
+function getSession() {
+  try {
+    const raw = sessionStorage.getItem('sos_session');
+    if (!raw) return null;
+    const session = JSON.parse(raw);
+    if (Date.now() > session.expiresAt) { sessionStorage.removeItem('sos_session'); return null; }
+    return session;
+  } catch (e) { return null; }
+}
+
+const clientService = {
+  getAll: async () => dbGet(DB_KEYS.clients, []),
+  getById: async (id) => dbGet(DB_KEYS.clients, []).find(c => c.id === id) || null,
+  create: async (data) => {
+    const clients = dbGet(DB_KEYS.clients, []);
+    const client = { id: uuid(), createdAt: nowISO(), ...data };
+    clients.push(client);
+    dbSet(DB_KEYS.clients, clients);
+    return client;
+  },
+  update: async (id, patch) => {
+    const clients = dbGet(DB_KEYS.clients, []);
+    const idx = clients.findIndex(c => c.id === id);
+    if (idx === -1) throw new Error('Client not found');
+    clients[idx] = { ...clients[idx], ...patch };
+    dbSet(DB_KEYS.clients, clients);
+    return clients[idx];
+  },
+};
+
+const contractService = {
+  getAll: async () => dbGet(DB_KEYS.contracts, []),
+  getById: async (id) => dbGet(DB_KEYS.contracts, []).find(c => c.id === id) || null,
+  create: async (data) => {
+    const contracts = dbGet(DB_KEYS.contracts, []);
+    const year = new Date().getFullYear();
+    const seq = contracts.filter(c => c.contractNumber.includes(`-${year}-`)).length + 1;
+    const contract = {
+      id: uuid(),
+      contractNumber: `SOS-C-${year}-${String(seq).padStart(3,'0')}`,
+      version: 1, versionHistory: [], auditLog: [], payments: [],
+      sentAt: null, sentBy: null,
+      signerName: null, signerTitle: null, signerCompany: null, signerEmail: null,
+      signedAt: null, signerIP: null,
+      documentHashBefore: null, documentHashAfter: null,
+      consentElectronic: false, consentAuthorized: false, consentRead: false,
+      renewalStatus: null, renewalReminderSent: false,
+      createdAt: nowISO(),
+      ...data,
+    };
+    contract.auditLog.push({ id: uuid(), type: 'created', message: 'Contract created', at: nowISO(), by: data.createdBy });
+    contracts.push(contract);
+    dbSet(DB_KEYS.contracts, contracts);
+    return contract;
+  },
+  update: async (id, patch) => {
+    const contracts = dbGet(DB_KEYS.contracts, []);
+    const idx = contracts.findIndex(c => c.id === id);
+    if (idx === -1) throw new Error('Contract not found');
+    contracts[idx] = { ...contracts[idx], ...patch };
+    dbSet(DB_KEYS.contracts, contracts);
+    return contracts[idx];
+  },
+  updateStatus: async (id, status, extra) => {
+    const contracts = dbGet(DB_KEYS.contracts, []);
+    const idx = contracts.findIndex(c => c.id === id);
+    if (idx === -1) throw new Error('Contract not found');
+    contracts[idx] = { ...contracts[idx], status, ...(extra||{}) };
+    dbSet(DB_KEYS.contracts, contracts);
+    return contracts[idx];
+  },
+  addAuditEntry: async (id, entry) => {
+    const contracts = dbGet(DB_KEYS.contracts, []);
+    const idx = contracts.findIndex(c => c.id === id);
+    if (idx === -1) throw new Error('Contract not found');
+    contracts[idx].auditLog.push({ id: uuid(), at: nowISO(), ...entry });
+    dbSet(DB_KEYS.contracts, contracts);
+    return contracts[idx];
+  },
+  addVersion: async (id, versionEntry) => {
+    const contracts = dbGet(DB_KEYS.contracts, []);
+    const idx = contracts.findIndex(c => c.id === id);
+    if (idx === -1) throw new Error('Contract not found');
+    contracts[idx].versionHistory.push(versionEntry);
+    contracts[idx].version += 1;
+    dbSet(DB_KEYS.contracts, contracts);
+    return contracts[idx];
+  },
+  delete: async (id) => {
+    const contracts = dbGet(DB_KEYS.contracts, []).filter(c => c.id !== id);
+    dbSet(DB_KEYS.contracts, contracts);
+  },
+};
+
+const paymentService = {
+  getByContractId: async (contractId) => {
+    const contract = await contractService.getById(contractId);
+    return contract ? contract.payments : [];
+  },
+  getAllOutstanding: async () => {
+    const contracts = await contractService.getAll();
+    const out = [];
+    contracts.forEach(c => c.payments.forEach(p => {
+      if (p.status === 'pending' || p.status === 'overdue' || p.status === 'disputed') {
+        out.push({ ...p, contractTitle: c.title, contractNumber: c.contractNumber, clientId: c.clientId });
+      }
+    }));
+    return out;
+  },
+  create: async (contractId, data) => {
+    const contracts = dbGet(DB_KEYS.contracts, []);
+    const idx = contracts.findIndex(c => c.id === contractId);
+    if (idx === -1) throw new Error('Contract not found');
+    const payment = { id: uuid(), contractId, status: 'pending', paidAt: null, paidAmount: null, markedPaidBy: null, remindersSent: [], notes: '', createdAt: nowISO(), ...data };
+    contracts[idx].payments.push(payment);
+    dbSet(DB_KEYS.contracts, contracts);
+    return payment;
+  },
+  markPaid: async (contractId, paymentId, paidAmount, userId, paidAt) => {
+    const contracts = dbGet(DB_KEYS.contracts, []);
+    const cidx = contracts.findIndex(c => c.id === contractId);
+    if (cidx === -1) throw new Error('Contract not found');
+    const pidx = contracts[cidx].payments.findIndex(p => p.id === paymentId);
+    if (pidx === -1) throw new Error('Payment not found');
+    contracts[cidx].payments[pidx] = {
+      ...contracts[cidx].payments[pidx],
+      status: 'paid', paidAt: paidAt || nowISO(), paidAmount, markedPaidBy: userId,
+    };
+    dbSet(DB_KEYS.contracts, contracts);
+    return contracts[cidx].payments[pidx];
+  },
+  updateStatus: async (contractId, paymentId, status) => {
+    const contracts = dbGet(DB_KEYS.contracts, []);
+    const cidx = contracts.findIndex(c => c.id === contractId);
+    if (cidx === -1) throw new Error('Contract not found');
+    const pidx = contracts[cidx].payments.findIndex(p => p.id === paymentId);
+    if (pidx === -1) throw new Error('Payment not found');
+    contracts[cidx].payments[pidx].status = status;
+    dbSet(DB_KEYS.contracts, contracts);
+    return contracts[cidx].payments[pidx];
+  },
+  addReminder: async (contractId, paymentId, reminder) => {
+    const contracts = dbGet(DB_KEYS.contracts, []);
+    const cidx = contracts.findIndex(c => c.id === contractId);
+    if (cidx === -1) throw new Error('Contract not found');
+    const pidx = contracts[cidx].payments.findIndex(p => p.id === paymentId);
+    if (pidx === -1) throw new Error('Payment not found');
+    contracts[cidx].payments[pidx].remindersSent.push({ id: uuid(), at: nowISO(), ...reminder });
+    dbSet(DB_KEYS.contracts, contracts);
+    return contracts[cidx].payments[pidx];
+  },
+};
+
+/* VAT logic */
+function computeVAT(client, amount) {
+  if (!client) return { vatRate: 0, vatAmount: 0, note: '' };
+  if (client.country === 'CY') {
+    return { vatRate: 0.19, vatAmount: round2(amount * 0.19), note: '' };
+  }
+  const EU_COUNTRIES = ['AT','BE','BG','HR','CY','CZ','DK','EE','FI','FR','DE','GR','HU','IE','IT','LV','LT','LU','MT','NL','PL','PT','RO','SK','SI','ES','SE'];
+  if (EU_COUNTRIES.includes(client.country) && client.vatNumber) {
+    return { vatRate: 0, vatAmount: 0, note: 'VAT reverse charge applies (Article 196, EU VAT Directive).' };
+  }
+  if (EU_COUNTRIES.includes(client.country)) {
+    return { vatRate: 0.19, vatAmount: round2(amount * 0.19), note: '' };
+  }
+  return { vatRate: 0, vatAmount: 0, note: 'Outside scope of VAT.' };
+}
+function round2(n) { return Math.round(n * 100) / 100; }
+
+/* =========================================================================
+   TOAST CONTEXT
+   ========================================================================= */
+const ToastContext = React.createContext(null);
+function ToastProvider({ children }) {
+  const [toasts, setToasts] = useState([]);
+  const push = useCallback((message, type) => {
+    const id = uuid();
+    setToasts(t => [...t, { id, message, type }]);
+    if (type === 'success') {
+      setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 3000);
+    }
+  }, []);
+  const dismiss = (id) => setToasts(t => t.filter(x => x.id !== id));
+  return (
+    <ToastContext.Provider value={{ push }}>
+      {children}
+      <div className="fixed bottom-4 right-4 z-[100] space-y-2 no-print">
+        {toasts.map(t => (
+          <div key={t.id} className={`min-w-[280px] max-w-sm rounded-lg shadow-lg px-4 py-3 flex items-start gap-3 text-sm text-white ${t.type === 'success' ? 'bg-emerald-600' : 'bg-red-600'}`}>
+            <span className="flex-1">{t.message}</span>
+            <button onClick={() => dismiss(t.id)} className="opacity-80 hover:opacity-100">✕</button>
+          </div>
+        ))}
+      </div>
+    </ToastContext.Provider>
+  );
+}
+function useToast() { return React.useContext(ToastContext); }
+
+/* =========================================================================
+   SHARED UI COMPONENTS
+   ========================================================================= */
+function Badge({ status }) {
+  const s = STATUS_BADGE[status] || STATUS_BADGE.draft;
+  return <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium capitalize ${s.bg} ${s.text}`}>{status ? status.replace('_',' ') : '—'}</span>;
+}
+
+function Skeleton({ className }) {
+  return <div className={`skeleton rounded ${className||'h-4 w-full'}`}></div>;
+}
+
+function EmptyState({ title, subtitle, ctaLabel, onCta, icon }) {
+  return (
+    <div className="flex flex-col items-center justify-center text-center py-16 px-6">
+      <div className="w-14 h-14 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center text-2xl mb-4">{icon || '📄'}</div>
+      <div className="font-heading text-slate-700">{title}</div>
+      {subtitle && <div className="text-sm text-slate-500 mt-1 max-w-sm">{subtitle}</div>}
+      {ctaLabel && <button onClick={onCta} className="mt-5 px-4 py-2 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">{ctaLabel}</button>}
+    </div>
+  );
+}
+
+function Modal({ open, onClose, title, children, footer, size }) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 no-print">
+      <div className="absolute inset-0 bg-slate-900/50" onClick={onClose}></div>
+      <div className={`relative bg-white rounded-xl shadow-2xl w-full ${size || 'max-w-lg'} max-h-[90vh] flex flex-col`}>
+        <div className="px-6 py-4 border-b border-[var(--border)] flex items-center justify-between">
+          <div className="font-heading">{title}</div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-lg leading-none">✕</button>
+        </div>
+        <div className="px-6 py-4 overflow-y-auto flex-1">{children}</div>
+        {footer && <div className="px-6 py-4 border-t border-[var(--border)] flex items-center justify-end gap-3">{footer}</div>}
+      </div>
+    </div>
+  );
+}
+
+function ConfirmModal({ open, onClose, onConfirm, title, message, confirmLabel, danger }) {
+  return (
+    <Modal open={open} onClose={onClose} title={title} footer={
+      <React.Fragment>
+        <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-[var(--border)] hover:bg-slate-50">Cancel</button>
+        <button onClick={onConfirm} className={`px-4 py-2 text-sm rounded-lg text-white ${danger ? 'bg-red-600 hover:bg-red-700' : 'bg-[var(--blue-primary)] hover:bg-blue-700'}`}>{confirmLabel || 'Confirm'}</button>
+      </React.Fragment>
+    }>
+      <p className="text-sm text-slate-600">{message}</p>
+    </Modal>
+  );
+}
+
+function Field({ label, error, children, required }) {
+  return (
+    <div className="mb-4">
+      <label className="block text-xs font-medium text-slate-600 mb-1.5">{label}{required && <span className="text-red-500 ml-0.5">*</span>}</label>
+      {children}
+      {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
+    </div>
+  );
+}
+
+const inputCls = (error) => `w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-200 ${error ? 'border-red-400' : 'border-[var(--border)] focus:border-blue-400'}`;
+
+/* =========================================================================
+   AUTH CONTEXT
+   ========================================================================= */
+const AuthContext = React.createContext(null);
+function AuthProvider({ children }) {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const toast = useToast();
+
+  const refresh = useCallback(async () => {
+    const session = getSession();
+    if (!session) { setUser(null); setLoading(false); return; }
+    const u = await userService.getCurrentUser();
+    setUser(u);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const session = getSession();
+      if (!session && user) {
+        setUser(null);
+        toast.push('Your session has expired. Please log in again.', 'error');
+      }
+    }, 15000);
+    return () => clearInterval(interval);
+  }, [user, toast]);
+
+  const login = async (email, password) => {
+    const u = await userService.login(email, password);
+    setUser(u);
+    return u;
+  };
+  const logout = async () => { await userService.logout(); setUser(null); };
+
+  return <AuthContext.Provider value={{ user, loading, login, logout, isAdmin: user && user.role === 'admin' }}>{children}</AuthContext.Provider>;
+}
+function useAuth() { return React.useContext(AuthContext); }
+
+/* =========================================================================
+   LOGIN SCREEN
+   ========================================================================= */
+function LoginScreen() {
+  const auth = useAuth();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setError('');
+    if (!validateEmail(email)) { setError('Enter a valid email address.'); return; }
+    if (!password) { setError('Password is required.'); return; }
+    setBusy(true);
+    try {
+      await auth.login(email, password);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-[var(--navy-deep)] px-4">
+      <div className="w-full max-w-md">
+        <div className="text-center mb-8">
+          <div className="text-white font-display">SOS Contracts</div>
+          <div className="text-slate-400 text-sm mt-1">Science of Sports — Internal Contract Management</div>
+        </div>
+        <form onSubmit={submit} className="bg-white rounded-xl shadow-2xl p-8">
+          <Field label="Email" required>
+            <input type="email" value={email} onChange={e=>setEmail(e.target.value)} className={inputCls(false)} placeholder="admin@scienceofsports.com" autoFocus />
+          </Field>
+          <Field label="Password" required>
+            <input type="password" value={password} onChange={e=>setPassword(e.target.value)} className={inputCls(false)} placeholder="••••••••" />
+          </Field>
+          {error && <p className="text-xs text-red-500 mb-4">{error}</p>}
+          <button disabled={busy} className="w-full py-2.5 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition disabled:opacity-50">
+            {busy ? 'Signing in…' : 'Sign In'}
+          </button>
+          <div className="mt-5 pt-5 border-t border-[var(--border)] text-xs text-slate-400 space-y-1">
+            <div>Demo admin: admin@scienceofsports.com / Admin2026!</div>
+            <div>Demo viewer: viewer@scienceofsports.com / Viewer2026!</div>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+/* =========================================================================
+   SIDEBAR / SHELL
+   ========================================================================= */
+const NAV = [
+  { key:'dashboard', label:'Dashboard', icon:'📊' },
+  { key:'contracts', label:'Contracts', icon:'📄', children:[
+    { key:'contracts:all', label:'All Contracts' },
+    { key:'contracts:new', label:'New Contract' },
+  ]},
+  { key:'payments', label:'Payments', icon:'💳', children:[
+    { key:'payments:receivables', label:'Receivables' },
+    { key:'payments:history', label:'Payment History' },
+  ]},
+  { key:'clients', label:'Clients', icon:'🏟️' },
+  { key:'reports', label:'Reports', icon:'📈', children:[
+    { key:'reports:revenue', label:'Revenue Report' },
+    { key:'reports:board', label:'Board Export' },
+  ]},
+  { key:'settings', label:'Settings', icon:'⚙️', children:[
+    { key:'settings:company', label:'Company Profile' },
+    { key:'settings:users', label:'Users & Roles' },
+  ]},
+];
+
+function Sidebar({ route, navigate, mobileOpen, setMobileOpen }) {
+  const auth = useAuth();
+  const [expanded, setExpanded] = useState(() => {
+    const top = route.split(':')[0];
+    return { [top]: true };
+  });
+
+  const isActive = (key) => route === key || route.startsWith(key + ':');
+
+  return (
+    <React.Fragment>
+      {mobileOpen && <div className="fixed inset-0 bg-black/40 z-30 md:hidden no-print" onClick={()=>setMobileOpen(false)}></div>}
+      <div className={`fixed md:static z-40 top-0 left-0 h-full w-64 bg-[var(--navy-deep)] flex flex-col transition-transform no-print ${mobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
+        <div className="px-5 py-6 border-b border-white/10">
+          <div className="text-white font-heading">SOS Contracts</div>
+          <div className="text-slate-400 text-xs mt-0.5">Science of Sports</div>
+        </div>
+        <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-1">
+          {NAV.map(item => (
+            <div key={item.key}>
+              <button
+                onClick={() => {
+                  if (item.children) {
+                    setExpanded(e => ({ ...e, [item.key]: !e[item.key] }));
+                  } else {
+                    navigate(item.key); setMobileOpen(false);
+                  }
+                }}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition ${isActive(item.key) && !item.children ? 'bg-[var(--navy-mid)] text-white' : 'text-slate-300 hover:bg-[var(--navy-mid)]/60 hover:text-white'}`}
+              >
+                <span>{item.icon}</span>
+                <span className="flex-1 text-left">{item.label}</span>
+                {item.children && <span className="text-xs opacity-60">{expanded[item.key] ? '▾' : '▸'}</span>}
+              </button>
+              {item.children && expanded[item.key] && (
+                <div className="ml-8 mt-1 space-y-0.5">
+                  {item.children.map(child => (
+                    <button
+                      key={child.key}
+                      onClick={() => { navigate(child.key); setMobileOpen(false); }}
+                      className={`w-full text-left px-3 py-2 rounded-lg text-sm transition ${route === child.key ? 'bg-[var(--navy-mid)] text-white' : 'text-slate-400 hover:bg-[var(--navy-mid)]/60 hover:text-white'}`}
+                    >
+                      {child.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </nav>
+        <div className="px-4 py-4 border-t border-white/10">
+          <div className="text-white text-sm font-medium truncate">{auth.user && auth.user.name}</div>
+          <div className="text-slate-400 text-xs capitalize mb-3">{auth.user && auth.user.role}</div>
+          <button onClick={() => auth.logout()} className="w-full text-left px-3 py-2 rounded-lg text-sm text-slate-300 hover:bg-[var(--navy-mid)]/60 hover:text-white transition">Logout</button>
+        </div>
+      </div>
+    </React.Fragment>
+  );
+}
+
+/* =========================================================================
+   DASHBOARD
+   ========================================================================= */
+function useContractsData() {
+  const [contracts, setContracts] = useState(null);
+  const [clients, setClients] = useState(null);
+  const reload = useCallback(async () => {
+    const [c, cl] = await Promise.all([contractService.getAll(), clientService.getAll()]);
+    setContracts(c); setClients(cl);
+  }, []);
+  useEffect(() => { reload(); }, [reload]);
+  return { contracts, clients, reload };
+}
+
+function MetricCard({ label, value, sub, color }) {
+  return (
+    <div className="bg-white rounded-xl border border-[var(--border)] p-5">
+      <div className="text-xs text-slate-500">{label}</div>
+      <div className="font-data text-2xl mt-1.5" style={{ color: color || '#0f172a' }}>{value}</div>
+      {sub && <div className="text-xs text-slate-400 mt-1">{sub}</div>}
+    </div>
+  );
+}
+
+function ReminderBanners({ contracts, clients }) {
+  if (!contracts) return null;
+  const clientMap = Object.fromEntries((clients||[]).map(c => [c.id, c]));
+  const banners = [];
+  const now = new Date();
+
+  contracts.forEach(c => {
+    c.payments.forEach(p => {
+      if (p.status === 'pending' || p.status === 'overdue') {
+        const days = daysBetween(now, p.dueDate);
+        if (days < 0 && Math.abs(days) >= 30) banners.push({ type:'formal', text:`${p.description} for ${clientMap[c.clientId]?.companyName || 'client'} is ${Math.abs(days)} days overdue — formal notice required.` });
+        else if (days < 0 && Math.abs(days) >= 14) banners.push({ type:'urgent', text:`${p.description} is ${Math.abs(days)} days overdue — urgent reminder due.` });
+        else if (days < 0) banners.push({ type:'warn', text:`${p.description} is overdue by ${Math.abs(days)} day(s).` });
+        else if (days === 0) banners.push({ type:'info', text:`${p.description} is due today.` });
+        else if (days <= 7) banners.push({ type:'info', text:`${p.description} due in ${days} day(s) — friendly reminder window.` });
+      }
+    });
+    if (c.status === 'active' && c.endDate) {
+      const days = daysBetween(now, c.endDate);
+      if (days >= 0 && days <= 60) banners.push({ type:'renewal', text:`${c.title} expires in ${days} days — renewal discussion recommended.` });
+    }
+  });
+
+  if (!banners.length) return null;
+  const styles = {
+    formal: 'bg-red-50 border-red-200 text-red-700',
+    urgent: 'bg-red-50 border-red-200 text-red-700',
+    warn: 'bg-amber-50 border-amber-200 text-amber-700',
+    info: 'bg-blue-50 border-blue-200 text-blue-700',
+    renewal: 'bg-purple-50 border-purple-200 text-purple-700',
+  };
+  return (
+    <div className="space-y-2 mb-6">
+      {banners.slice(0,5).map((b, i) => (
+        <div key={i} className={`border rounded-lg px-4 py-2.5 text-sm ${styles[b.type]}`}>{b.text}</div>
+      ))}
+    </div>
+  );
+}
+
+function Dashboard({ navigate }) {
+  const { contracts, clients, reload } = useContractsData();
+  const toast = useToast();
+
+  if (!contracts) {
+    return (
+      <div className="p-6 space-y-4">
+        {[1,2,3].map(i => <Skeleton key={i} className="h-24 w-full" />)}
+      </div>
+    );
+  }
+
+  const clientMap = Object.fromEntries(clients.map(c => [c.id, c]));
+  const now = new Date();
+
+  const totalActiveValue = contracts.filter(c => c.status === 'active').reduce((s,c) => s + Number(c.value||0), 0);
+  const allPayments = contracts.flatMap(c => c.payments.map(p => ({ ...p, contractTitle: c.title, contractNumber: c.contractNumber, clientId: c.clientId })));
+  const collectedYTD = allPayments.filter(p => p.status === 'paid' && new Date(p.paidAt).getFullYear() === now.getFullYear()).reduce((s,p) => s + Number(p.paidAmount||0), 0);
+  const outstanding = allPayments.filter(p => p.status === 'pending' || p.status === 'overdue' || p.status === 'disputed').reduce((s,p) => s + Number(p.totalAmount||0), 0);
+  const overdue = allPayments.filter(p => p.status === 'overdue').reduce((s,p) => s + Number(p.totalAmount||0), 0);
+  const renewalCount = contracts.filter(c => c.status === 'active' && c.endDate && daysBetween(now, c.endDate) >= 0 && daysBetween(now, c.endDate) <= 60).length;
+
+  const stages = ['draft','sent','signed','active','expired'];
+  const funnel = stages.map(s => {
+    const list = contracts.filter(c => c.status === s);
+    return { stage: s, count: list.length, value: list.reduce((sum,c)=>sum+Number(c.value||0),0) };
+  });
+  const renewalDue = contracts.filter(c => c.status === 'active' && c.endDate && daysBetween(now,c.endDate) >= 0 && daysBetween(now,c.endDate) <= 60);
+  funnel.splice(4, 0, { stage: 'renewal_due', count: renewalDue.length, value: renewalDue.reduce((s,c)=>s+Number(c.value||0),0) });
+  const maxFunnel = Math.max(1, ...funnel.map(f => f.value));
+
+  const months = [0,1,2].map(i => { const d = new Date(now.getFullYear(), now.getMonth()+i, 1); return d; });
+  const cashFlow = months.map(m => {
+    const label = m.toLocaleString('en-US', { month:'short', year:'2-digit' });
+    const expected = allPayments.filter(p => { const d = new Date(p.dueDate); return d.getMonth()===m.getMonth() && d.getFullYear()===m.getFullYear(); }).reduce((s,p)=>s+Number(p.totalAmount||0),0);
+    const received = allPayments.filter(p => p.status==='paid' && p.paidAt && (() => { const d = new Date(p.paidAt); return d.getMonth()===m.getMonth() && d.getFullYear()===m.getFullYear(); })()).reduce((s,p)=>s+Number(p.paidAmount||0),0);
+    return { label, expected, received };
+  });
+  const maxCash = Math.max(1, ...cashFlow.flatMap(c => [c.expected, c.received]));
+
+  const riskWindows = [30,60,90].map(w => {
+    const list = contracts.filter(c => c.status === 'active' && c.endDate && daysBetween(now, c.endDate) >= 0 && daysBetween(now, c.endDate) <= w);
+    return { window: w, count: list.length, value: list.reduce((s,c)=>s+Number(c.value||0),0) };
+  });
+
+  const clientHealth = clients.map(cl => {
+    const clientContracts = contracts.filter(c => c.clientId === cl.id);
+    const activeC = clientContracts.find(c => c.status === 'active');
+    const overdueP = clientContracts.flatMap(c=>c.payments).some(p => p.status === 'overdue');
+    const pendingP = clientContracts.flatMap(c=>c.payments).filter(p => p.status === 'pending').sort((a,b)=>new Date(a.dueDate)-new Date(b.dueDate))[0];
+    let health = 'green';
+    if (overdueP) health = 'red';
+    else if (!activeC && clientContracts.some(c => c.status === 'sent')) health = 'amber';
+    return { client: cl, status: activeC ? activeC.status : (clientContracts[0] ? clientContracts[0].status : 'draft'), health, nextDue: pendingP ? pendingP.dueDate : null };
+  });
+
+  const activityFeed = contracts.flatMap(c => c.auditLog.map(a => ({ ...a, contractTitle: c.title }))).sort((a,b) => new Date(b.at) - new Date(a.at)).slice(0,10);
+
+  const unsignedAging = contracts.filter(c => c.status === 'sent').map(c => ({ ...c, daysSince: daysBetween(c.sentAt, now) })).sort((a,b)=>b.daysSince-a.daysSince);
+
+  const topClients = clients.map(cl => {
+    const clientContracts = contracts.filter(c => c.clientId === cl.id);
+    const totalValue = clientContracts.reduce((s,c)=>s+Number(c.value||0),0);
+    const collected = clientContracts.flatMap(c=>c.payments).filter(p=>p.status==='paid').reduce((s,p)=>s+Number(p.paidAmount||0),0);
+    const outstandingC = clientContracts.flatMap(c=>c.payments).filter(p=>p.status!=='paid').reduce((s,p)=>s+Number(p.totalAmount||0),0);
+    const latestEnd = clientContracts.reduce((latest,c) => c.endDate && (!latest || new Date(c.endDate)>new Date(latest)) ? c.endDate : latest, null);
+    return { client: cl, totalValue, collected, outstanding: outstandingC, endDate: latestEnd };
+  }).sort((a,b)=>b.totalValue-a.totalValue);
+
+  const exportBoardCSV = () => {
+    const mrr = contracts.filter(c=>c.status==='active' && c.paymentType==='monthly').reduce((s,c)=>s+Number(c.value||0),0);
+    const arr = totalActiveValue;
+    const rows = [
+      ['Metric','Value'],
+      ['MRR', mrr.toFixed(2)],
+      ['ARR', arr.toFixed(2)],
+      ['YTD Revenue', collectedYTD.toFixed(2)],
+      ['Outstanding', outstanding.toFixed(2)],
+      ['Renewal Pipeline (60d)', renewalCount],
+    ];
+    const csv = rows.map(r => r.join(',')).join('\r\n');
+    downloadFile('sos-board-export.csv', '﻿' + csv, 'text/csv');
+    toast.push('Board export downloaded.', 'success');
+  };
+
+  return (
+    <div className="p-4 md:p-6">
+      <div className="flex items-center justify-between mb-6">
+        <div className="font-display">Dashboard</div>
+        <button onClick={exportBoardCSV} className="px-4 py-2 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">Board Export</button>
+      </div>
+
+      <ReminderBanners contracts={contracts} clients={clients} />
+
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
+        <MetricCard label="Total Active Contract Value" value={fmtMoney(totalActiveValue,'EUR')} />
+        <MetricCard label="Collected YTD" value={fmtMoney(collectedYTD,'EUR')} color="#10B981" />
+        <MetricCard label="Outstanding" value={fmtMoney(outstanding,'EUR')} color="#F59E0B" />
+        <MetricCard label="Overdue" value={fmtMoney(overdue,'EUR')} color="#EF4444" />
+        <MetricCard label="Renewals (60 days)" value={renewalCount} />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+        <div className="bg-white rounded-xl border border-[var(--border)] p-5">
+          <div className="font-heading mb-4 text-base">Contract Pipeline Funnel</div>
+          <div className="space-y-3">
+            {funnel.map(f => (
+              <div key={f.stage}>
+                <div className="flex justify-between text-xs mb-1">
+                  <span className="capitalize text-slate-600">{f.stage.replace('_',' ')}</span>
+                  <span className="font-data">{f.count} · {fmtMoney(f.value,'EUR')}</span>
+                </div>
+                <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                  <div className="h-full bg-[var(--blue-primary)] rounded-full" style={{ width: `${(f.value/maxFunnel)*100}%` }}></div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl border border-[var(--border)] p-5">
+          <div className="font-heading mb-4 text-base">Cash Flow Forecast</div>
+          <div className="space-y-4">
+            {cashFlow.map(c => (
+              <div key={c.label}>
+                <div className="text-xs text-slate-500 mb-1">{c.label}</div>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-xs w-16 text-slate-400">Expected</span>
+                  <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-amber-400 rounded-full" style={{ width:`${(c.expected/maxCash)*100}%` }}></div></div>
+                  <span className="text-xs font-data w-16 text-right">{fmtMoney(c.expected,'EUR')}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs w-16 text-slate-400">Received</span>
+                  <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-emerald-500 rounded-full" style={{ width:`${(c.received/maxCash)*100}%` }}></div></div>
+                  <span className="text-xs font-data w-16 text-right">{fmtMoney(c.received,'EUR')}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl border border-[var(--border)] p-5">
+          <div className="font-heading mb-4 text-base">Renewal Risk Radar</div>
+          <div className="space-y-3">
+            {riskWindows.map(r => (
+              <div key={r.window} className="flex items-center justify-between p-3 rounded-lg bg-slate-50">
+                <div>
+                  <div className="text-sm font-medium">{r.window} days</div>
+                  <div className="text-xs text-slate-500">{r.count} contract(s)</div>
+                </div>
+                <div className="font-data text-sm">{fmtMoney(r.value,'EUR')}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+        <div className="bg-white rounded-xl border border-[var(--border)] p-5">
+          <div className="font-heading mb-4 text-base">Client Health</div>
+          {clientHealth.length === 0 ? <EmptyState title="No clients yet" ctaLabel="Add a client" onCta={()=>navigate('clients')} /> : (
+            <div className="space-y-2">
+              {clientHealth.map(h => (
+                <div key={h.client.id} className="flex items-center justify-between py-2 border-b border-[var(--border)] last:border-0">
+                  <div className="flex items-center gap-2.5">
+                    <span className={`w-2.5 h-2.5 rounded-full ${h.health==='green'?'bg-emerald-500':h.health==='amber'?'bg-amber-400':'bg-red-500'}`}></span>
+                    <div>
+                      <div className="text-sm font-medium">{h.client.companyName}</div>
+                      <div className="text-xs text-slate-400">Next due: {h.nextDue ? fmtDate(h.nextDue) : '—'}</div>
+                    </div>
+                  </div>
+                  <Badge status={h.status} />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="bg-white rounded-xl border border-[var(--border)] p-5">
+          <div className="font-heading mb-4 text-base">Recent Activity</div>
+          {activityFeed.length === 0 ? <EmptyState title="No activity yet" icon="🕓" /> : (
+            <div className="space-y-3">
+              {activityFeed.map(a => (
+                <div key={a.id} className="text-sm">
+                  <div className="text-slate-700">{a.message}</div>
+                  <div className="text-xs text-slate-400">{a.contractTitle} · {fmtDateTime(a.at)}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="bg-white rounded-xl border border-[var(--border)] p-5 mb-6">
+        <div className="font-heading mb-4 text-base">Unsigned Contracts Aging</div>
+        {unsignedAging.length === 0 ? <EmptyState title="Nothing pending signature" icon="✅" /> : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead><tr className="text-left text-xs text-slate-400 border-b border-[var(--border)]"><th className="py-2 pr-4">Contract</th><th className="py-2 pr-4">Client</th><th className="py-2 pr-4">Sent</th><th className="py-2 pr-4">Days Since</th></tr></thead>
+              <tbody>
+                {unsignedAging.map(c => (
+                  <tr key={c.id} className="border-b border-[var(--border)] last:border-0 cursor-pointer hover:bg-slate-50" onClick={()=>navigate('contract:'+c.id)}>
+                    <td className="py-2.5 pr-4">{c.title}</td>
+                    <td className="py-2.5 pr-4">{clientMap[c.clientId]?.companyName}</td>
+                    <td className="py-2.5 pr-4">{fmtDate(c.sentAt)}</td>
+                    <td className={`py-2.5 pr-4 font-data ${c.daysSince>14?'text-red-600':c.daysSince>7?'text-amber-600':'text-slate-600'}`}>{c.daysSince}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div className="bg-white rounded-xl border border-[var(--border)] p-5">
+        <div className="font-heading mb-4 text-base">Top Clients by Value</div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead><tr className="text-left text-xs text-slate-400 border-b border-[var(--border)]"><th className="py-2 pr-4">Client</th><th className="py-2 pr-4">Total Value</th><th className="py-2 pr-4">Collected</th><th className="py-2 pr-4">Outstanding</th><th className="py-2 pr-4">End Date</th></tr></thead>
+            <tbody>
+              {topClients.map(t => (
+                <tr key={t.client.id} className="border-b border-[var(--border)] last:border-0 cursor-pointer hover:bg-slate-50" onClick={()=>navigate('client:'+t.client.id)}>
+                  <td className="py-2.5 pr-4">{t.client.companyName}</td>
+                  <td className="py-2.5 pr-4 font-data">{fmtMoney(t.totalValue,'EUR')}</td>
+                  <td className="py-2.5 pr-4 font-data text-emerald-600">{fmtMoney(t.collected,'EUR')}</td>
+                  <td className="py-2.5 pr-4 font-data text-amber-600">{fmtMoney(t.outstanding,'EUR')}</td>
+                  <td className="py-2.5 pr-4">{t.endDate ? fmtDate(t.endDate) : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function downloadFile(filename, content, mime) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+/* =========================================================================
+   CONTRACTS LIST + FORM + DETAIL
+   ========================================================================= */
+function ContractsList({ navigate, filterStatus }) {
+  const { contracts, clients } = useContractsData();
+  const auth = useAuth();
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState(filterStatus || 'all');
+
+  if (!contracts) return <div className="p-6 space-y-3">{[1,2,3,4].map(i=><Skeleton key={i} className="h-14 w-full" />)}</div>;
+  const clientMap = Object.fromEntries(clients.map(c => [c.id, c]));
+
+  const filtered = contracts.filter(c => {
+    if (statusFilter !== 'all' && c.status !== statusFilter) return false;
+    const client = clientMap[c.clientId];
+    const q = search.toLowerCase();
+    return !q || c.title.toLowerCase().includes(q) || c.contractNumber.toLowerCase().includes(q) || (client && client.companyName.toLowerCase().includes(q));
+  });
+
+  return (
+    <div className="p-4 md:p-6">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
+        <div className="font-display">Contracts</div>
+        {auth.isAdmin && <button onClick={()=>navigate('contracts:new')} className="px-4 py-2 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">+ New Contract</button>}
+      </div>
+      <div className="flex flex-wrap gap-3 mb-4">
+        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search contracts…" className="px-3 py-2 text-sm border border-[var(--border)] rounded-lg flex-1 min-w-[200px]" />
+        <select value={statusFilter} onChange={e=>setStatusFilter(e.target.value)} className="px-3 py-2 text-sm border border-[var(--border)] rounded-lg">
+          <option value="all">All statuses</option>
+          {['draft','sent','signed','active','expired','cancelled'].map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+      </div>
+      {filtered.length === 0 ? (
+        <EmptyState title="No contracts found" subtitle="Create your first contract to get started." ctaLabel={auth.isAdmin ? "New Contract" : null} onCta={()=>navigate('contracts:new')} />
+      ) : (
+        <div className="bg-white rounded-xl border border-[var(--border)] overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead><tr className="text-left text-xs text-slate-400 border-b border-[var(--border)]"><th className="py-3 px-4">Number</th><th className="py-3 px-4">Title</th><th className="py-3 px-4">Client</th><th className="py-3 px-4">Value</th><th className="py-3 px-4">Status</th><th className="py-3 px-4">End Date</th></tr></thead>
+            <tbody>
+              {filtered.map(c => (
+                <tr key={c.id} className="border-b border-[var(--border)] last:border-0 cursor-pointer hover:bg-slate-50" onClick={()=>navigate('contract:'+c.id)}>
+                  <td className="py-3 px-4 font-data text-xs text-slate-500">{c.contractNumber}</td>
+                  <td className="py-3 px-4">{c.title}</td>
+                  <td className="py-3 px-4">{clientMap[c.clientId]?.companyName || '—'}</td>
+                  <td className="py-3 px-4 font-data">{fmtMoney(c.value, c.currency)}</td>
+                  <td className="py-3 px-4"><Badge status={c.status} /></td>
+                  <td className="py-3 px-4">{c.endDate ? fmtDate(c.endDate) : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ContractForm({ navigate }) {
+  const auth = useAuth();
+  const toast = useToast();
+  const [clients, setClients] = useState(null);
+  const [form, setForm] = useState({
+    title:'', clientId:'', type:'platform_subscription', value:'', currency:'EUR',
+    startDate:'', endDate:'', paymentType:'one_time', paymentTermsDays:30, latePaymentPenalty:1.5,
+    governingLaw:'Republic of Cyprus', jurisdiction:'Nicosia, Cyprus', description:'',
+  });
+  const [errors, setErrors] = useState({});
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => { clientService.getAll().then(setClients); }, []);
+
+  const set = (k,v) => setForm(f => ({ ...f, [k]: v }));
+
+  const validate = () => {
+    const e = {};
+    if (!form.title.trim()) e.title = 'Title is required.';
+    if (!form.clientId) e.clientId = 'Select a client.';
+    if (!form.value || Number(form.value) <= 0) e.value = 'Enter a positive value.';
+    if (!/^\d+(\.\d{1,2})?$/.test(String(form.value))) e.value = 'Max 2 decimal places.';
+    if (form.startDate && form.endDate && new Date(form.endDate) <= new Date(form.startDate)) e.endDate = 'End date must be after start date.';
+    setErrors(e);
+    return Object.keys(e).length === 0;
+  };
+
+  const submit = async (asDraft) => {
+    if (!validate()) return;
+    setBusy(true);
+    try {
+      const contract = await contractService.create({
+        ...form,
+        value: Number(form.value),
+        status: 'draft',
+        startDate: form.startDate ? new Date(form.startDate).toISOString() : '',
+        endDate: form.endDate ? new Date(form.endDate).toISOString() : '',
+        createdBy: auth.user.id,
+      });
+      toast.push('Contract created.', 'success');
+      navigate('contract:'+contract.id);
+    } catch (err) {
+      toast.push(err.message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!clients) return <div className="p-6"><Skeleton className="h-96 w-full" /></div>;
+
+  return (
+    <div className="p-4 md:p-6 max-w-3xl">
+      <div className="font-display mb-6">New Contract</div>
+      <div className="bg-white rounded-xl border border-[var(--border)] p-6">
+        <Field label="Title" required error={errors.title}>
+          <input value={form.title} onChange={e=>set('title',e.target.value)} className={inputCls(errors.title)} placeholder="e.g. Platform Access — Client Name" />
+        </Field>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Field label="Client" required error={errors.clientId}>
+            <select value={form.clientId} onChange={e=>set('clientId',e.target.value)} className={inputCls(errors.clientId)}>
+              <option value="">Select client…</option>
+              {clients.map(c => <option key={c.id} value={c.id}>{c.companyName}</option>)}
+            </select>
+          </Field>
+          <Field label="Type">
+            <select value={form.type} onChange={e=>set('type',e.target.value)} className={inputCls(false)}>
+              {CONTRACT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+            </select>
+          </Field>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Field label="Value" required error={errors.value}>
+            <input type="number" step="0.01" value={form.value} onChange={e=>set('value',e.target.value)} className={inputCls(errors.value)} placeholder="12000.00" />
+          </Field>
+          <Field label="Currency">
+            <select value={form.currency} onChange={e=>set('currency',e.target.value)} className={inputCls(false)}>
+              {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </Field>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Field label="Start Date">
+            <input type="date" value={form.startDate} onChange={e=>set('startDate',e.target.value)} className={inputCls(false)} />
+          </Field>
+          <Field label="End Date" error={errors.endDate}>
+            <input type="date" value={form.endDate} onChange={e=>set('endDate',e.target.value)} className={inputCls(errors.endDate)} />
+          </Field>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Field label="Payment Type">
+            <select value={form.paymentType} onChange={e=>set('paymentType',e.target.value)} className={inputCls(false)}>
+              {PAYMENT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+            </select>
+          </Field>
+          <Field label="Payment Terms (days)">
+            <select value={form.paymentTermsDays} onChange={e=>set('paymentTermsDays',Number(e.target.value))} className={inputCls(false)}>
+              {[15,30,45].map(d => <option key={d} value={d}>{d} days</option>)}
+            </select>
+          </Field>
+        </div>
+        <Field label="Description">
+          <textarea value={form.description} onChange={e=>set('description',e.target.value)} rows={4} className={inputCls(false)} placeholder="Scope of work, deliverables, terms…" />
+        </Field>
+        <div className="flex justify-end gap-3 pt-2">
+          <button onClick={()=>navigate('contracts:all')} className="px-4 py-2 text-sm rounded-lg border border-[var(--border)] hover:bg-slate-50">Cancel</button>
+          <button disabled={busy} onClick={()=>submit(true)} className="px-4 py-2 text-sm rounded-lg bg-[var(--blue-primary)] text-white hover:bg-blue-700 transition disabled:opacity-50">{busy ? 'Saving…' : 'Save as Draft'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ContractDetail({ contractId, navigate }) {
+  const auth = useAuth();
+  const toast = useToast();
+  const [contract, setContract] = useState(null);
+  const [client, setClient] = useState(null);
+  const [showSendModal, setShowSendModal] = useState(false);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showMarkPaidPayment, setShowMarkPaidPayment] = useState(null);
+  const [showMarkSignedModal, setShowMarkSignedModal] = useState(false);
+
+  const load = useCallback(async () => {
+    const c = await contractService.getById(contractId);
+    setContract(c);
+    if (c) setClient(await clientService.getById(c.clientId));
+  }, [contractId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  if (!contract) return <div className="p-6"><Skeleton className="h-96 w-full" /></div>;
+
+  const sendContract = async () => {
+    const hash = await sha256(contract.title + contract.description + contract.value);
+    await contractService.updateStatus(contract.id, 'sent', {
+      sentAt: nowISO(), sentBy: auth.user.id, documentHashBefore: hash,
+    });
+    await contractService.addAuditEntry(contract.id, { type:'sent', message:`Contract sent to ${client.contactName}`, by: auth.user.id });
+    setShowSendModal(false);
+    toast.push('Contract sent for signature.', 'success');
+    load();
+  };
+
+  const deleteContract = async () => {
+    await contractService.delete(contract.id);
+    toast.push('Contract deleted.', 'success');
+    navigate('contracts:all');
+  };
+
+  const signingLink = `${location.origin}${location.pathname}#/sign/${contract.id}/demo-token`;
+
+  return (
+    <div className="p-4 md:p-6 max-w-5xl">
+      <button onClick={()=>navigate('contracts:all')} className="text-sm text-slate-500 hover:text-slate-700 mb-4">← All Contracts</button>
+      <div className="flex flex-wrap items-start justify-between gap-3 mb-6">
+        <div>
+          <div className="font-display">{contract.title}</div>
+          <div className="text-sm text-slate-400 font-data mt-1">{contract.contractNumber} · v{contract.version}</div>
+        </div>
+        <div className="flex items-center gap-2">
+          <Badge status={contract.status} />
+        </div>
+      </div>
+
+      {auth.isAdmin && (
+        <div className="flex flex-wrap gap-2 mb-6 no-print">
+          {contract.status === 'draft' && <button onClick={()=>setShowSendModal(true)} className="px-4 py-2 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">Send for Signature</button>}
+          {(contract.status === 'draft' || contract.status === 'sent') && <button onClick={()=>setShowMarkSignedModal(true)} className="px-4 py-2 border border-[var(--border)] text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition">Record as Signed Manually</button>}
+          {contract.status === 'sent' && <div className="px-3 py-2 bg-slate-100 rounded-lg text-xs text-slate-500 flex items-center">Signing link: <code className="ml-2 text-blue-600">{signingLink}</code></div>}
+          {(contract.status === 'signed' || contract.status === 'active') && <button onClick={()=>setShowPaymentModal(true)} className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition">+ Add Payment Milestone</button>}
+          {(contract.status === 'draft' || contract.status === 'sent') && <button onClick={()=>setShowDeleteModal(true)} className="px-4 py-2 border border-red-200 text-red-600 rounded-lg text-sm font-medium hover:bg-red-50 transition">Delete</button>}
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+        <div className="bg-white rounded-xl border border-[var(--border)] p-5">
+          <div className="font-heading text-base mb-3">Contract Details</div>
+          <dl className="text-sm space-y-2">
+            <div className="flex justify-between"><dt className="text-slate-500">Client</dt><dd className="font-medium">{client?.companyName}</dd></div>
+            <div className="flex justify-between"><dt className="text-slate-500">Type</dt><dd className="capitalize">{contract.type.replace('_',' ')}</dd></div>
+            <div className="flex justify-between"><dt className="text-slate-500">Value</dt><dd className="font-data">{fmtMoney(contract.value, contract.currency)}</dd></div>
+            <div className="flex justify-between"><dt className="text-slate-500">Payment Terms</dt><dd className="capitalize">{contract.paymentType.replace('_',' ')} · Net {contract.paymentTermsDays}</dd></div>
+            <div className="flex justify-between"><dt className="text-slate-500">Start</dt><dd>{fmtDate(contract.startDate)}</dd></div>
+            <div className="flex justify-between"><dt className="text-slate-500">End</dt><dd>{fmtDate(contract.endDate)}</dd></div>
+            <div className="flex justify-between"><dt className="text-slate-500">Governing Law</dt><dd>{contract.governingLaw}</dd></div>
+          </dl>
+          {contract.description && <p className="text-sm text-slate-600 mt-4 pt-4 border-t border-[var(--border)]">{contract.description}</p>}
+        </div>
+
+        <div className="bg-white rounded-xl border border-[var(--border)] p-5">
+          <div className="font-heading text-base mb-3">Signature Status</div>
+          {contract.signedAt ? (
+            <div className="text-sm space-y-2">
+              <div className="flex justify-between"><dt className="text-slate-500">Signed by</dt><dd className="font-medium">{contract.signerName}</dd></div>
+              {contract.signerTitle && <div className="flex justify-between"><dt className="text-slate-500">Title</dt><dd>{contract.signerTitle}</dd></div>}
+              <div className="flex justify-between"><dt className="text-slate-500">Signed at</dt><dd>{fmtDateTime(contract.signedAt)}</dd></div>
+              {contract.signerIP ? (
+                <React.Fragment>
+                  <div className="flex justify-between"><dt className="text-slate-500">IP Address</dt><dd className="font-data text-xs">{contract.signerIP}</dd></div>
+                  <div className="flex justify-between"><dt className="text-slate-500">Document Integrity</dt><dd className="text-emerald-600">{contract.documentHashBefore === contract.documentHashAfter ? '✓ Verified' : '⚠ Mismatch'}</dd></div>
+                </React.Fragment>
+              ) : (
+                <div className="flex justify-between"><dt className="text-slate-500">Method</dt><dd className="text-slate-500 text-xs">Recorded manually (paper/offline signature)</dd></div>
+              )}
+            </div>
+          ) : (
+            <EmptyState title={contract.status==='sent' ? 'Awaiting signature' : 'Not yet sent'} subtitle={contract.status==='sent' ? 'The client has not signed this contract yet.' : 'Send this contract to collect a signature.'} icon="✍️" />
+          )}
+        </div>
+      </div>
+
+      <div className="bg-white rounded-xl border border-[var(--border)] p-5 mb-6">
+        <div className="font-heading text-base mb-3">Payment Milestones</div>
+        {contract.payments.length === 0 ? <EmptyState title="No payment milestones yet" icon="💳" /> : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead><tr className="text-left text-xs text-slate-400 border-b border-[var(--border)]"><th className="py-2 pr-4">QB Invoice #</th><th className="py-2 pr-4">Description</th><th className="py-2 pr-4">Due</th><th className="py-2 pr-4">Total</th><th className="py-2 pr-4">Status</th><th className="py-2 pr-4"></th></tr></thead>
+              <tbody>
+                {contract.payments.map(p => (
+                  <tr key={p.id} className="border-b border-[var(--border)] last:border-0">
+                    <td className="py-2.5 pr-4 font-data text-xs">{p.accountingRef || '—'}</td>
+                    <td className="py-2.5 pr-4">{p.description}</td>
+                    <td className="py-2.5 pr-4">{fmtDate(p.dueDate)}</td>
+                    <td className="py-2.5 pr-4 font-data">{fmtMoney(p.totalAmount, p.currency)}</td>
+                    <td className="py-2.5 pr-4"><Badge status={p.status} /></td>
+                    <td className="py-2.5 pr-4 no-print space-x-2">
+                      {auth.isAdmin && p.status !== 'paid' && <button onClick={()=>setShowMarkPaidPayment(p)} className="text-emerald-600 hover:underline text-xs">Mark Paid</button>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div className="bg-white rounded-xl border border-[var(--border)] p-5">
+        <div className="font-heading text-base mb-3">Audit Log</div>
+        <div className="space-y-3">
+          {contract.auditLog.slice().reverse().map(a => (
+            <div key={a.id} className="text-sm border-b border-[var(--border)] last:border-0 pb-3 last:pb-0">
+              <div className="text-slate-700">{a.message}</div>
+              <div className="text-xs text-slate-400">{fmtDateTime(a.at)}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <ConfirmModal open={showSendModal} onClose={()=>setShowSendModal(false)} onConfirm={sendContract} title="Send for Signature" message={`This will send "${contract.title}" to ${client?.contactName} (${client?.contactEmail}) for electronic signature. Continue?`} confirmLabel="Send" />
+      <ConfirmModal open={showDeleteModal} onClose={()=>setShowDeleteModal(false)} onConfirm={deleteContract} title="Delete Contract" message="This will permanently delete this contract. It has not been signed yet, but this cannot be undone." confirmLabel="Delete" danger />
+      {showPaymentModal && <AddPaymentModal contract={contract} client={client} onClose={()=>setShowPaymentModal(false)} onDone={()=>{ setShowPaymentModal(false); load(); }} />}
+      {showMarkPaidPayment && <MarkPaidModal contract={contract} payment={showMarkPaidPayment} onClose={()=>setShowMarkPaidPayment(null)} onDone={()=>{ setShowMarkPaidPayment(null); load(); }} />}
+      {showMarkSignedModal && <MarkSignedManuallyModal contract={contract} client={client} onClose={()=>setShowMarkSignedModal(false)} onDone={()=>{ setShowMarkSignedModal(false); load(); }} />}
+    </div>
+  );
+}
+
+function AddPaymentModal({ contract, client, onClose, onDone }) {
+  const toast = useToast();
+  const [description, setDescription] = useState('');
+  const [amount, setAmount] = useState('');
+  const [dueDate, setDueDate] = useState('');
+  const [accountingRef, setAccountingRef] = useState('');
+  const [errors, setErrors] = useState({});
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    const e = {};
+    if (!description.trim()) e.description = 'Description is required.';
+    if (!amount || Number(amount) <= 0) e.amount = 'Enter a positive amount.';
+    if (!dueDate) e.dueDate = 'Due date is required.';
+    setErrors(e);
+    if (Object.keys(e).length) return;
+    setBusy(true);
+    try {
+      const vat = computeVAT(client, Number(amount));
+      await paymentService.create(contract.id, {
+        accountingRef: accountingRef.trim() || null, description, dueDate: new Date(dueDate).toISOString(),
+        amount: Number(amount), vatRate: vat.vatRate, vatAmount: vat.vatAmount,
+        totalAmount: round2(Number(amount) + vat.vatAmount), currency: contract.currency,
+      });
+      toast.push('Payment milestone added.', 'success');
+      onDone();
+    } catch (err) {
+      toast.push(err.message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal open onClose={onClose} title="Add Payment Milestone" footer={
+      <React.Fragment>
+        <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-[var(--border)] hover:bg-slate-50">Cancel</button>
+        <button disabled={busy} onClick={submit} className="px-4 py-2 text-sm rounded-lg bg-[var(--blue-primary)] text-white hover:bg-blue-700">Add</button>
+      </React.Fragment>
+    }>
+      <p className="text-xs text-slate-500 mb-4">This tracks the contract's cash status only — accounting issues the actual invoice from QuickBooks.</p>
+      <Field label="Description" required error={errors.description}>
+        <input value={description} onChange={e=>setDescription(e.target.value)} className={inputCls(errors.description)} placeholder="e.g. Q1 Platform Access Fee" />
+      </Field>
+      <Field label="Amount (excl. VAT)" required error={errors.amount}>
+        <input type="number" step="0.01" value={amount} onChange={e=>setAmount(e.target.value)} className={inputCls(errors.amount)} placeholder="3000.00" />
+      </Field>
+      <Field label="Due Date" required error={errors.dueDate}>
+        <input type="date" value={dueDate} onChange={e=>setDueDate(e.target.value)} className={inputCls(errors.dueDate)} />
+      </Field>
+      <Field label="QuickBooks Invoice # (optional)">
+        <input value={accountingRef} onChange={e=>setAccountingRef(e.target.value)} className={inputCls(false)} placeholder="Fill in once accounting issues it" />
+      </Field>
+    </Modal>
+  );
+}
+
+function MarkPaidModal({ contract, payment, onClose, onDone }) {
+  const auth = useAuth();
+  const toast = useToast();
+  const [amount, setAmount] = useState(payment.totalAmount);
+  const [paidDate, setPaidDate] = useState(() => new Date().toISOString().slice(0,10));
+  const [errors, setErrors] = useState({});
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    const e = {};
+    if (!paidDate) e.paidDate = 'Date received is required.';
+    setErrors(e);
+    if (Object.keys(e).length) return;
+    setBusy(true);
+    try {
+      const paidAt = new Date(paidDate).toISOString();
+      await paymentService.markPaid(contract.id, payment.id, Number(amount), auth.user.id, paidAt);
+      await contractService.addAuditEntry(contract.id, { type:'payment', message:`${payment.description} marked as paid (${fmtMoney(amount, payment.currency)}) — received ${fmtDate(paidAt)}`, by: auth.user.id });
+      toast.push('Payment marked as paid.', 'success');
+      onDone();
+    } catch (err) {
+      toast.push(err.message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal open onClose={onClose} title="Mark Payment as Paid" footer={
+      <React.Fragment>
+        <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-[var(--border)] hover:bg-slate-50">Cancel</button>
+        <button disabled={busy} onClick={submit} className="px-4 py-2 text-sm rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">Confirm Paid</button>
+      </React.Fragment>
+    }>
+      <p className="text-sm text-slate-600 mb-4">Confirm payment received for <strong>{payment.description}</strong>.</p>
+      <Field label="Date Received" required error={errors.paidDate}>
+        <input type="date" value={paidDate} onChange={e=>setPaidDate(e.target.value)} className={inputCls(errors.paidDate)} />
+      </Field>
+      <Field label="Amount Received">
+        <input type="number" step="0.01" value={amount} onChange={e=>setAmount(e.target.value)} className={inputCls(false)} />
+      </Field>
+    </Modal>
+  );
+}
+
+function MarkSignedManuallyModal({ contract, client, onClose, onDone }) {
+  const auth = useAuth();
+  const toast = useToast();
+  const [signerName, setSignerName] = useState('');
+  const [signerTitle, setSignerTitle] = useState('');
+  const [signedDate, setSignedDate] = useState('');
+  const [errors, setErrors] = useState({});
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    const e = {};
+    if (!signerName.trim()) e.signerName = 'Signer name is required.';
+    if (!signedDate) e.signedDate = 'Signed date is required.';
+    setErrors(e);
+    if (Object.keys(e).length) return;
+    setBusy(true);
+    try {
+      const signedAt = new Date(signedDate).toISOString();
+      await contractService.update(contract.id, {
+        status: 'active',
+        signerName: signerName.trim(), signerTitle: signerTitle.trim() || null,
+        signerCompany: client ? client.companyName : null, signerEmail: client ? client.contactEmail : null,
+        signedAt, signerIP: null,
+        documentHashBefore: null, documentHashAfter: null,
+        consentElectronic: false, consentAuthorized: false, consentRead: false,
+      });
+      await contractService.addAuditEntry(contract.id, { type:'signed', message:`Recorded as signed manually (paper/offline signature) by ${signerName.trim()}${signerTitle.trim() ? ', ' + signerTitle.trim() : ''}`, by: auth.user.id });
+      toast.push('Contract recorded as signed.', 'success');
+      onDone();
+    } catch (err) {
+      toast.push(err.message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal open onClose={onClose} title="Record as Signed Manually" footer={
+      <React.Fragment>
+        <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-[var(--border)] hover:bg-slate-50">Cancel</button>
+        <button disabled={busy} onClick={submit} className="px-4 py-2 text-sm rounded-lg bg-[var(--blue-primary)] text-white hover:bg-blue-700">{busy ? 'Saving…' : 'Record as Signed'}</button>
+      </React.Fragment>
+    }>
+      <p className="text-xs text-slate-500 mb-4">Use this for contracts already signed on paper or outside this system — it marks the contract Active without the e-signature audit trail (no IP address or document hash, since it wasn't signed here).</p>
+      <Field label="Signer Name" required error={errors.signerName}>
+        <input value={signerName} onChange={e=>setSignerName(e.target.value)} className={inputCls(errors.signerName)} placeholder="e.g. Andreas Morias" />
+      </Field>
+      <Field label="Signer Title (optional)">
+        <input value={signerTitle} onChange={e=>setSignerTitle(e.target.value)} className={inputCls(false)} />
+      </Field>
+      <Field label="Date Signed" required error={errors.signedDate}>
+        <input type="date" value={signedDate} onChange={e=>setSignedDate(e.target.value)} className={inputCls(errors.signedDate)} />
+      </Field>
+    </Modal>
+  );
+}
+
+/* =========================================================================
+   PAYMENTS (Receivables + History)
+   ========================================================================= */
+function PaymentsReceivables({ navigate }) {
+  const { contracts, clients } = useContractsData();
+  const auth = useAuth();
+  const toast = useToast();
+  const [reminderPayment, setReminderPayment] = useState(null);
+  const [markPaid, setMarkPaid] = useState(null);
+
+  if (!contracts) return <div className="p-6"><Skeleton className="h-96 w-full" /></div>;
+  const clientMap = Object.fromEntries(clients.map(c => [c.id, c]));
+  const rows = contracts.flatMap(c => c.payments.filter(p=>p.status!=='paid').map(p => ({ ...p, contractId: c.id, contract: c })));
+  rows.sort((a,b) => new Date(a.dueDate) - new Date(b.dueDate));
+
+  return (
+    <div className="p-4 md:p-6">
+      <div className="font-display mb-6">Receivables</div>
+      {rows.length === 0 ? <EmptyState title="Nothing outstanding" icon="🎉" /> : (
+        <div className="bg-white rounded-xl border border-[var(--border)] overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead><tr className="text-left text-xs text-slate-400 border-b border-[var(--border)]"><th className="py-3 px-4">Description</th><th className="py-3 px-4">Client</th><th className="py-3 px-4">Due</th><th className="py-3 px-4">Total</th><th className="py-3 px-4">Status</th><th className="py-3 px-4"></th></tr></thead>
+            <tbody>
+              {rows.map(p => (
+                <tr key={p.id} className="border-b border-[var(--border)] last:border-0 hover:bg-slate-50">
+                  <td className="py-3 px-4 text-xs">{p.description}</td>
+                  <td className="py-3 px-4">{clientMap[p.contract.clientId]?.companyName}</td>
+                  <td className="py-3 px-4">{fmtDate(p.dueDate)}</td>
+                  <td className="py-3 px-4 font-data">{fmtMoney(p.totalAmount, p.currency)}</td>
+                  <td className="py-3 px-4"><Badge status={p.status} /></td>
+                  <td className="py-3 px-4 space-x-2">
+                    <button onClick={()=>setReminderPayment(p)} className="text-blue-600 hover:underline text-xs">Send Reminder</button>
+                    {auth.isAdmin && <button onClick={()=>setMarkPaid(p)} className="text-emerald-600 hover:underline text-xs">Mark Paid</button>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {reminderPayment && <ReminderModal payment={reminderPayment} client={clientMap[reminderPayment.contract.clientId]} onClose={()=>setReminderPayment(null)} />}
+      {markPaid && <MarkPaidModal contract={markPaid.contract} payment={markPaid} onClose={()=>setMarkPaid(null)} onDone={()=>{ setMarkPaid(null); location.reload(); }} />}
+    </div>
+  );
+}
+
+function ReminderModal({ payment, client, onClose }) {
+  const toast = useToast();
+  const days = daysBetween(new Date(), payment.dueDate);
+  let tone = 'Friendly reminder', reminderType = 'pre_due_7';
+  if (days === 0) { tone = 'Neutral, factual'; reminderType = 'due_today'; }
+  else if (days < 0 && Math.abs(days) >= 30) { tone = 'Formal notice'; reminderType = 'overdue_30'; }
+  else if (days < 0 && Math.abs(days) >= 14) { tone = 'Urgent reminder'; reminderType = 'overdue_14'; }
+  else if (days < 0 && Math.abs(days) >= 7) { tone = 'Firm reminder'; reminderType = 'overdue_7'; }
+  else if (days < 0) { tone = 'Firm reminder'; reminderType = 'overdue_7'; }
+
+  const [sent, setSent] = useState(false);
+
+  const send = async () => {
+    await paymentService.addReminder(payment.contractId, payment.id, { type: reminderType, tone });
+    setSent(true);
+    toast.push('Reminder logged and simulated email sent.', 'success');
+  };
+
+  const markDisputed = async () => {
+    await paymentService.updateStatus(payment.contractId, payment.id, 'disputed');
+    toast.push('Payment marked as disputed.', 'success');
+    onClose();
+  };
+
+  return (
+    <Modal open onClose={onClose} title="Payment Reminder" footer={
+      <React.Fragment>
+        {reminderType === 'overdue_14' || reminderType === 'overdue_30' ? <button onClick={markDisputed} className="px-4 py-2 text-sm rounded-lg border border-purple-200 text-purple-700 hover:bg-purple-50">Mark as Disputed</button> : null}
+        <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-[var(--border)] hover:bg-slate-50">Close</button>
+        {!sent && <button onClick={send} className="px-4 py-2 text-sm rounded-lg bg-[var(--blue-primary)] text-white hover:bg-blue-700">Send Reminder</button>}
+      </React.Fragment>
+    }>
+      <div className="text-xs text-slate-400 mb-2">Tone: {tone}</div>
+      <div className="bg-slate-50 rounded-lg p-4 text-sm">
+        <div className="text-xs text-slate-400 mb-2">To: {client?.contactEmail}</div>
+        <div className="font-medium mb-2">Subject: {reminderType.includes('overdue') ? 'Overdue Payment Notice' : 'Payment Reminder'} — {payment.description}</div>
+        <p className="text-slate-600">
+          Dear {client?.contactName},<br/><br/>
+          {days >= 0 ? `This is a reminder that ${payment.description} (${fmtMoney(payment.totalAmount, payment.currency)}) is due on ${fmtDate(payment.dueDate)}.` : `${payment.description} (${fmtMoney(payment.totalAmount, payment.currency)}) was due on ${fmtDate(payment.dueDate)} and remains unpaid.`}
+          <br/><br/>Kind regards,<br/>Science of Sports
+        </p>
+      </div>
+      {sent && <div className="text-xs text-emerald-600 mt-3">✓ Reminder sent and logged to audit trail.</div>}
+    </Modal>
+  );
+}
+
+function PaymentsHistory() {
+  const { contracts, clients } = useContractsData();
+  if (!contracts) return <div className="p-6"><Skeleton className="h-96 w-full" /></div>;
+  const clientMap = Object.fromEntries(clients.map(c => [c.id, c]));
+  const rows = contracts.flatMap(c => c.payments.filter(p=>p.status==='paid').map(p => ({ ...p, clientId: c.clientId })));
+  rows.sort((a,b) => new Date(b.paidAt) - new Date(a.paidAt));
+
+  return (
+    <div className="p-4 md:p-6">
+      <div className="font-display mb-6">Payment History</div>
+      {rows.length === 0 ? <EmptyState title="No payments recorded yet" icon="📒" /> : (
+        <div className="bg-white rounded-xl border border-[var(--border)] overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead><tr className="text-left text-xs text-slate-400 border-b border-[var(--border)]"><th className="py-3 px-4">Description</th><th className="py-3 px-4">Client</th><th className="py-3 px-4">Paid On</th><th className="py-3 px-4">Amount</th></tr></thead>
+            <tbody>
+              {rows.map(p => (
+                <tr key={p.id} className="border-b border-[var(--border)] last:border-0">
+                  <td className="py-3 px-4 text-xs">{p.description}</td>
+                  <td className="py-3 px-4">{clientMap[p.clientId]?.companyName}</td>
+                  <td className="py-3 px-4">{fmtDate(p.paidAt)}</td>
+                  <td className="py-3 px-4 font-data text-emerald-600">{fmtMoney(p.paidAmount, p.currency)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* =========================================================================
+   CLIENTS
+   ========================================================================= */
+function ClientsPage({ navigate }) {
+  const auth = useAuth();
+  const toast = useToast();
+  const [clients, setClients] = useState(null);
+  const [showForm, setShowForm] = useState(false);
+  const [editClient, setEditClient] = useState(null);
+
+  const load = useCallback(() => clientService.getAll().then(setClients), []);
+  useEffect(() => { load(); }, [load]);
+
+  if (!clients) return <div className="p-6"><Skeleton className="h-96 w-full" /></div>;
+
+  return (
+    <div className="p-4 md:p-6">
+      <div className="flex items-center justify-between mb-6">
+        <div className="font-display">Clients</div>
+        {auth.isAdmin && <button onClick={()=>setShowForm(true)} className="px-4 py-2 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">+ New Client</button>}
+      </div>
+      {clients.length === 0 ? <EmptyState title="No clients yet" subtitle="Add your first client to start creating contracts." ctaLabel={auth.isAdmin ? "New Client" : null} onCta={()=>setShowForm(true)} icon="🏟️" /> : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {clients.map(c => (
+            <button key={c.id} onClick={()=>setEditClient(c)} className="text-left bg-white rounded-xl border border-[var(--border)] p-5 hover:border-blue-300 hover:shadow-sm transition cursor-pointer">
+              <div className="font-heading text-base">{c.companyName}</div>
+              <div className="text-xs text-slate-400 mb-3">{c.country} · {c.currency}</div>
+              <div className="text-sm text-slate-600 space-y-1">
+                <div>{c.contactName}</div>
+                <div className="text-xs">{c.contactEmail}</div>
+                <div className="text-xs">{c.contactPhone}</div>
+              </div>
+              {(c.vatNumber || c.registrationNumber) && (
+                <div className="text-xs text-slate-400 mt-2 space-y-0.5">
+                  {c.vatNumber && <div>VAT: {c.vatNumber}</div>}
+                  {c.registrationNumber && <div>Reg. No: {c.registrationNumber}</div>}
+                </div>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+      {showForm && <ClientFormModal onClose={()=>setShowForm(false)} onDone={()=>{ setShowForm(false); load(); }} />}
+      {editClient && <ClientFormModal client={editClient} readOnly={!auth.isAdmin} onClose={()=>setEditClient(null)} onDone={()=>{ setEditClient(null); load(); }} />}
+    </div>
+  );
+}
+
+function ClientFormModal({ client, readOnly, onClose, onDone }) {
+  const toast = useToast();
+  const isEdit = !!client;
+  const [form, setForm] = useState(client ? {
+    companyName: client.companyName || '', contactName: client.contactName || '', contactEmail: client.contactEmail || '',
+    contactPhone: client.contactPhone || '', address: client.address || '', country: client.country || 'CY',
+    vatNumber: client.vatNumber || '', registrationNumber: client.registrationNumber || '', currency: client.currency || 'EUR',
+  } : { companyName:'', contactName:'', contactEmail:'', contactPhone:'', address:'', country:'CY', vatNumber:'', registrationNumber:'', currency:'EUR' });
+  const [errors, setErrors] = useState({});
+  const [busy, setBusy] = useState(false);
+  const set = (k,v) => setForm(f=>({...f,[k]:v}));
+
+  const submit = async () => {
+    const e = {};
+    if (!form.companyName.trim()) e.companyName = 'Required.';
+    if (!form.contactName.trim()) e.contactName = 'Required.';
+    if (!validateEmail(form.contactEmail)) e.contactEmail = 'Enter a valid email.';
+    setErrors(e);
+    if (Object.keys(e).length) return;
+    setBusy(true);
+    try {
+      const payload = { ...form, vatNumber: form.vatNumber || null, registrationNumber: form.registrationNumber || null };
+      if (isEdit) {
+        await clientService.update(client.id, payload);
+        toast.push('Client updated.', 'success');
+      } else {
+        await clientService.create(payload);
+        toast.push('Client created.', 'success');
+      }
+      onDone();
+    } catch (err) {
+      toast.push(err.message, 'error');
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <Modal open onClose={onClose} title={isEdit ? form.companyName : 'New Client'} footer={
+      <React.Fragment>
+        <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-[var(--border)] hover:bg-slate-50">{readOnly ? 'Close' : 'Cancel'}</button>
+        {!readOnly && <button disabled={busy} onClick={submit} className="px-4 py-2 text-sm rounded-lg bg-[var(--blue-primary)] text-white hover:bg-blue-700">{busy ? 'Saving…' : (isEdit ? 'Save Changes' : 'Create')}</button>}
+      </React.Fragment>
+    }>
+      <Field label="Company Name" required error={errors.companyName}><input disabled={readOnly} value={form.companyName} onChange={e=>set('companyName',e.target.value)} className={inputCls(errors.companyName)} /></Field>
+      <Field label="Contact Name" required error={errors.contactName}><input disabled={readOnly} value={form.contactName} onChange={e=>set('contactName',e.target.value)} className={inputCls(errors.contactName)} /></Field>
+      <Field label="Contact Email" required error={errors.contactEmail}><input disabled={readOnly} value={form.contactEmail} onChange={e=>set('contactEmail',e.target.value)} className={inputCls(errors.contactEmail)} /></Field>
+      <Field label="Contact Phone"><input disabled={readOnly} value={form.contactPhone} onChange={e=>set('contactPhone',e.target.value)} className={inputCls(false)} /></Field>
+      <Field label="Address"><input disabled={readOnly} value={form.address} onChange={e=>set('address',e.target.value)} className={inputCls(false)} /></Field>
+      <div className="grid grid-cols-2 gap-4">
+        <Field label="Country (ISO code)"><input disabled={readOnly} value={form.country} onChange={e=>set('country',e.target.value.toUpperCase())} maxLength={2} className={inputCls(false)} /></Field>
+        <Field label="Currency">
+          <select disabled={readOnly} value={form.currency} onChange={e=>set('currency',e.target.value)} className={inputCls(false)}>{CURRENCIES.map(c=><option key={c} value={c}>{c}</option>)}</select>
+        </Field>
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <Field label="VAT Number (optional)"><input disabled={readOnly} value={form.vatNumber} onChange={e=>set('vatNumber',e.target.value)} className={inputCls(false)} /></Field>
+        <Field label="Registration Number (optional)"><input disabled={readOnly} value={form.registrationNumber} onChange={e=>set('registrationNumber',e.target.value)} className={inputCls(false)} placeholder="e.g. HE123456" /></Field>
+      </div>
+    </Modal>
+  );
+}
+
+/* =========================================================================
+   REPORTS
+   ========================================================================= */
+function RevenueReport() {
+  const { contracts, clients } = useContractsData();
+  if (!contracts) return <div className="p-6"><Skeleton className="h-96 w-full" /></div>;
+  const clientMap = Object.fromEntries(clients.map(c => [c.id, c]));
+  const allPayments = contracts.flatMap(c => c.payments.map(p => ({ ...p, clientId: c.clientId, contractType: c.type })));
+  const paid = allPayments.filter(p => p.status === 'paid');
+  const byType = {};
+  paid.forEach(p => { byType[p.contractType] = (byType[p.contractType]||0) + Number(p.paidAmount||0); });
+  const byClient = {};
+  paid.forEach(p => { const name = clientMap[p.clientId]?.companyName || 'Unknown'; byClient[name] = (byClient[name]||0) + Number(p.paidAmount||0); });
+  const total = paid.reduce((s,p)=>s+Number(p.paidAmount||0),0);
+
+  return (
+    <div className="p-4 md:p-6">
+      <div className="font-display mb-6">Revenue Report</div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="bg-white rounded-xl border border-[var(--border)] p-5">
+          <div className="font-heading text-base mb-4">Revenue by Contract Type</div>
+          {Object.keys(byType).length === 0 ? <EmptyState title="No revenue collected yet" /> : (
+            <div className="space-y-3">
+              {Object.entries(byType).map(([type,val]) => (
+                <div key={type}>
+                  <div className="flex justify-between text-xs mb-1"><span className="capitalize text-slate-600">{type.replace('_',' ')}</span><span className="font-data">{fmtMoney(val,'EUR')}</span></div>
+                  <div className="h-2 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-[var(--blue-primary)] rounded-full" style={{ width: `${(val/total)*100}%` }}></div></div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="bg-white rounded-xl border border-[var(--border)] p-5">
+          <div className="font-heading text-base mb-4">Revenue by Client</div>
+          {Object.keys(byClient).length === 0 ? <EmptyState title="No revenue collected yet" /> : (
+            <div className="space-y-3">
+              {Object.entries(byClient).sort((a,b)=>b[1]-a[1]).map(([name,val]) => (
+                <div key={name} className="flex justify-between text-sm">
+                  <span>{name}</span><span className="font-data">{fmtMoney(val,'EUR')}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="bg-white rounded-xl border border-[var(--border)] p-5 mt-4">
+        <div className="text-xs text-slate-500">Total Revenue Collected</div>
+        <div className="font-data text-2xl mt-1">{fmtMoney(total,'EUR')}</div>
+      </div>
+    </div>
+  );
+}
+
+function BoardExport() {
+  const { contracts } = useContractsData();
+  const toast = useToast();
+  if (!contracts) return <div className="p-6"><Skeleton className="h-64 w-full" /></div>;
+
+  const now = new Date();
+  const mrr = contracts.filter(c=>c.status==='active' && c.paymentType==='monthly').reduce((s,c)=>s+Number(c.value||0),0);
+  const arr = contracts.filter(c=>c.status==='active').reduce((s,c)=>s+Number(c.value||0),0);
+  const allPayments = contracts.flatMap(c=>c.payments);
+  const ytd = allPayments.filter(p=>p.status==='paid' && new Date(p.paidAt).getFullYear()===now.getFullYear()).reduce((s,p)=>s+Number(p.paidAmount||0),0);
+  const outstanding = allPayments.filter(p=>p.status!=='paid').reduce((s,p)=>s+Number(p.totalAmount||0),0);
+  const renewalPipeline = contracts.filter(c=>c.status==='active' && c.endDate && daysBetween(now,c.endDate)>=0 && daysBetween(now,c.endDate)<=60).length;
+
+  const download = () => {
+    const rows = [['Metric','Value'],['MRR',mrr.toFixed(2)],['ARR',arr.toFixed(2)],['YTD Revenue',ytd.toFixed(2)],['Outstanding',outstanding.toFixed(2)],['Renewal Pipeline (60d)',renewalPipeline]];
+    downloadFile('sos-board-export.csv', '﻿'+rows.map(r=>r.join(',')).join('\r\n'), 'text/csv');
+    toast.push('Board export downloaded.', 'success');
+  };
+
+  return (
+    <div className="p-4 md:p-6">
+      <div className="font-display mb-6">Board Export</div>
+      <div className="bg-white rounded-xl border border-[var(--border)] p-6 max-w-lg">
+        <dl className="text-sm space-y-3 mb-6">
+          <div className="flex justify-between"><dt className="text-slate-500">MRR</dt><dd className="font-data">{fmtMoney(mrr,'EUR')}</dd></div>
+          <div className="flex justify-between"><dt className="text-slate-500">ARR</dt><dd className="font-data">{fmtMoney(arr,'EUR')}</dd></div>
+          <div className="flex justify-between"><dt className="text-slate-500">YTD Revenue</dt><dd className="font-data">{fmtMoney(ytd,'EUR')}</dd></div>
+          <div className="flex justify-between"><dt className="text-slate-500">Outstanding</dt><dd className="font-data">{fmtMoney(outstanding,'EUR')}</dd></div>
+          <div className="flex justify-between"><dt className="text-slate-500">Renewal Pipeline (60d)</dt><dd className="font-data">{renewalPipeline}</dd></div>
+        </dl>
+        <button onClick={download} className="w-full py-2.5 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">Download CSV</button>
+      </div>
+    </div>
+  );
+}
+
+/* =========================================================================
+   SETTINGS
+   ========================================================================= */
+function CompanyProfileSettings() {
+  const auth = useAuth();
+  const toast = useToast();
+  const [company, setCompany] = useState(null);
+  const [form, setForm] = useState(null);
+  const [showReset, setShowReset] = useState(false);
+  const [confirmText, setConfirmText] = useState('');
+  const [resetting, setResetting] = useState(false);
+
+  useEffect(() => { companyService.get().then(c => { setCompany(c); setForm(c); }); }, []);
+  if (!form) return <div className="p-6"><Skeleton className="h-96 w-full" /></div>;
+
+  const set = (k,v) => setForm(f=>({...f,[k]:v}));
+  const save = async () => {
+    await companyService.update(form);
+    toast.push('Company profile updated.', 'success');
+  };
+
+  const doReset = async () => {
+    setResetting(true);
+    try {
+      await companyService.clearClientsAndContracts();
+      toast.push('All clients and contracts cleared.', 'success');
+      setShowReset(false);
+      setConfirmText('');
+      location.reload();
+    } finally {
+      setResetting(false);
+    }
+  };
+
+  return (
+    <div className="p-4 md:p-6 max-w-2xl">
+      <div className="font-display mb-6">Company Profile</div>
+      <div className="bg-white rounded-xl border border-[var(--border)] p-6 mb-6">
+        <Field label="Company Name"><input disabled={!auth.isAdmin} value={form.name} onChange={e=>set('name',e.target.value)} className={inputCls(false)} /></Field>
+        <Field label="Registered Address"><input disabled={!auth.isAdmin} value={form.registeredAddress} onChange={e=>set('registeredAddress',e.target.value)} className={inputCls(false)} /></Field>
+        <div className="grid grid-cols-2 gap-4">
+          <Field label="VAT Number"><input disabled={!auth.isAdmin} value={form.vatNumber} onChange={e=>set('vatNumber',e.target.value)} className={inputCls(false)} /></Field>
+          <Field label="Registration Number"><input disabled={!auth.isAdmin} value={form.registrationNumber} onChange={e=>set('registrationNumber',e.target.value)} className={inputCls(false)} /></Field>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <Field label="Contact Email"><input disabled={!auth.isAdmin} value={form.contactEmail} onChange={e=>set('contactEmail',e.target.value)} className={inputCls(false)} /></Field>
+          <Field label="Website"><input disabled={!auth.isAdmin} value={form.website} onChange={e=>set('website',e.target.value)} className={inputCls(false)} /></Field>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <Field label="Bank Name"><input disabled={!auth.isAdmin} value={form.bankName} onChange={e=>set('bankName',e.target.value)} className={inputCls(false)} /></Field>
+          <Field label="IBAN"><input disabled={!auth.isAdmin} value={form.bankIBAN} onChange={e=>set('bankIBAN',e.target.value)} className={inputCls(false)} /></Field>
+          <Field label="SWIFT"><input disabled={!auth.isAdmin} value={form.bankSWIFT} onChange={e=>set('bankSWIFT',e.target.value)} className={inputCls(false)} /></Field>
+        </div>
+        {auth.isAdmin && <button onClick={save} className="px-4 py-2 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">Save Changes</button>}
+      </div>
+
+      {auth.isAdmin && (
+        <div className="bg-white rounded-xl border border-red-200 p-6">
+          <div className="font-heading text-base text-red-700 mb-1">Danger Zone</div>
+          <p className="text-sm text-slate-600 mb-4">Permanently delete every client and contract (including seeded demo data). Your company profile and user accounts are kept. This cannot be undone.</p>
+          <button onClick={()=>setShowReset(true)} className="px-4 py-2 border border-red-300 text-red-600 rounded-lg text-sm font-medium hover:bg-red-50 transition">Clear All Clients & Contracts</button>
+        </div>
+      )}
+
+      <Modal open={showReset} onClose={()=>{ setShowReset(false); setConfirmText(''); }} title="Clear All Clients & Contracts" footer={
+        <React.Fragment>
+          <button onClick={()=>{ setShowReset(false); setConfirmText(''); }} className="px-4 py-2 text-sm rounded-lg border border-[var(--border)] hover:bg-slate-50">Cancel</button>
+          <button disabled={confirmText !== 'DELETE' || resetting} onClick={doReset} className="px-4 py-2 text-sm rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed">{resetting ? 'Clearing…' : 'Permanently Clear'}</button>
+        </React.Fragment>
+      }>
+        <p className="text-sm text-slate-600 mb-4">This will permanently delete <strong>every client and contract</strong> in this system — including any signed, active, or paid ones. There is no undo. Type <strong>DELETE</strong> to confirm.</p>
+        <input value={confirmText} onChange={e=>setConfirmText(e.target.value)} className={inputCls(false)} placeholder="Type DELETE to confirm" />
+      </Modal>
+    </div>
+  );
+}
+
+function userSetupLink(user) {
+  return `${location.origin}${location.pathname}#/setup/${user.setupToken}`;
+}
+
+function UsersSettings() {
+  const auth = useAuth();
+  const toast = useToast();
+  const [users, setUsers] = useState(null);
+  const [showForm, setShowForm] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [linkUser, setLinkUser] = useState(null);
+  const [newUser, setNewUser] = useState(null);
+
+  const load = useCallback(() => userService.getAll().then(setUsers), []);
+  useEffect(() => { load(); }, [load]);
+
+  if (!users) return <div className="p-6"><Skeleton className="h-64 w-full" /></div>;
+
+  const confirmDelete = async () => {
+    if (deleteTarget.id === auth.user.id) {
+      toast.push('You cannot delete your own account while logged in.', 'error');
+      setDeleteTarget(null);
+      return;
+    }
+    await userService.delete(deleteTarget.id);
+    toast.push('User removed.', 'success');
+    setDeleteTarget(null);
+    load();
+  };
+
+  return (
+    <div className="p-4 md:p-6">
+      <div className="flex items-center justify-between mb-6 max-w-2xl">
+        <div className="font-display">Users & Roles</div>
+        {auth.isAdmin && <button onClick={()=>setShowForm(true)} className="px-4 py-2 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">+ New User</button>}
+      </div>
+      <div className="bg-white rounded-xl border border-[var(--border)] overflow-x-auto max-w-2xl">
+        <table className="w-full text-sm">
+          <thead><tr className="text-left text-xs text-slate-400 border-b border-[var(--border)]"><th className="py-3 px-4">Name</th><th className="py-3 px-4">Email</th><th className="py-3 px-4">Role</th><th className="py-3 px-4">Status</th><th className="py-3 px-4"></th></tr></thead>
+          <tbody>
+            {users.map(u => (
+              <tr key={u.id} className="border-b border-[var(--border)] last:border-0">
+                <td className="py-3 px-4">{u.name}</td>
+                <td className="py-3 px-4 text-xs">{u.email}</td>
+                <td className="py-3 px-4 capitalize"><Badge status={u.role === 'admin' ? 'active' : 'draft'} />&nbsp;{u.role}</td>
+                <td className="py-3 px-4">{u.password ? <Badge status="active" /> : <Badge status="sent" />}{!u.password && <span className="ml-1.5 text-xs text-slate-400">awaiting setup</span>}</td>
+                <td className="py-3 px-4 space-x-3 whitespace-nowrap">
+                  {auth.isAdmin && !u.password && <button onClick={()=>setLinkUser(u)} className="text-xs text-blue-600 hover:underline">Setup Link</button>}
+                  {auth.isAdmin && <button onClick={()=>setDeleteTarget(u)} className="text-xs text-red-500 hover:underline">Remove</button>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {!auth.isAdmin && <div className="text-xs text-slate-400 mt-3">Only admins can manage users in this prototype.</div>}
+      {showForm && <UserFormModal onClose={()=>setShowForm(false)} onDone={(u)=>{ setShowForm(false); setNewUser(u); load(); }} />}
+      {newUser && <SetupLinkModal user={newUser} onClose={()=>setNewUser(null)} title="User Created" />}
+      {linkUser && <SetupLinkModal user={linkUser} onClose={()=>setLinkUser(null)} title="Setup Link" />}
+      <ConfirmModal open={!!deleteTarget} onClose={()=>setDeleteTarget(null)} onConfirm={confirmDelete} title="Remove User" message={deleteTarget ? `Remove ${deleteTarget.name} (${deleteTarget.email})? They will no longer be able to log in.` : ''} confirmLabel="Remove" danger />
+    </div>
+  );
+}
+
+function SetupLinkModal({ user, onClose, title }) {
+  const toast = useToast();
+  const link = userSetupLink(user);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(link);
+      toast.push('Setup link copied to clipboard.', 'success');
+    } catch (e) {
+      toast.push('Could not copy automatically — select and copy the link manually.', 'error');
+    }
+  };
+  return (
+    <Modal open onClose={onClose} title={title} footer={
+      <React.Fragment>
+        <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-[var(--border)] hover:bg-slate-50">Close</button>
+        <button onClick={copy} className="px-4 py-2 text-sm rounded-lg bg-[var(--blue-primary)] text-white hover:bg-blue-700">Copy Link</button>
+      </React.Fragment>
+    }>
+      <p className="text-sm text-slate-600 mb-3">Send this link to <strong>{user.name}</strong> ({user.email}) via WhatsApp, Signal, or another channel you trust — there is no email sending in this prototype yet. It lets them set their own password and expires in 7 days.</p>
+      <div className="bg-slate-50 rounded-lg p-3 text-xs font-data break-all border border-[var(--border)]">{link}</div>
+    </Modal>
+  );
+}
+
+function UserFormModal({ onClose, onDone }) {
+  const toast = useToast();
+  const [form, setForm] = useState({ name:'', email:'', role:'viewer' });
+  const [errors, setErrors] = useState({});
+  const [busy, setBusy] = useState(false);
+  const set = (k,v) => setForm(f=>({...f,[k]:v}));
+
+  const submit = async () => {
+    const e = {};
+    if (!form.name.trim()) e.name = 'Name is required.';
+    if (!validateEmail(form.email)) e.email = 'Enter a valid email address.';
+    setErrors(e);
+    if (Object.keys(e).length) return;
+    setBusy(true);
+    try {
+      const user = await userService.create(form);
+      toast.push('User created.', 'success');
+      onDone(user);
+    } catch (err) {
+      toast.push(err.message, 'error');
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <Modal open onClose={onClose} title="New User" footer={
+      <React.Fragment>
+        <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-[var(--border)] hover:bg-slate-50">Cancel</button>
+        <button disabled={busy} onClick={submit} className="px-4 py-2 text-sm rounded-lg bg-[var(--blue-primary)] text-white hover:bg-blue-700">{busy ? 'Creating…' : 'Create User'}</button>
+      </React.Fragment>
+    }>
+      <p className="text-xs text-slate-500 mb-4">No password needed here — after creating the user, you'll get a one-time setup link to send them so they can choose their own password.</p>
+      <Field label="Full Name" required error={errors.name}>
+        <input value={form.name} onChange={e=>set('name',e.target.value)} className={inputCls(errors.name)} />
+      </Field>
+      <Field label="Email" required error={errors.email}>
+        <input type="email" value={form.email} onChange={e=>set('email',e.target.value)} className={inputCls(errors.email)} />
+      </Field>
+      <Field label="Role">
+        <select value={form.role} onChange={e=>set('role',e.target.value)} className={inputCls(false)}>
+          <option value="viewer">Viewer (read-only)</option>
+          <option value="admin">Admin (full access)</option>
+        </select>
+      </Field>
+    </Modal>
+  );
+}
+
+/* =========================================================================
+   CLIENT-FACING SIGNING FLOW  (#/sign/{contractId}/{token})
+   ========================================================================= */
+function SigningFlow({ contractId }) {
+  const toast = useToast();
+  const [screen, setScreen] = useState(1);
+  const [contract, setContract] = useState(null);
+  const [client, setClient] = useState(null);
+  const [company, setCompany] = useState(null);
+  const [emailInput, setEmailInput] = useState('');
+  const [emailError, setEmailError] = useState('');
+  const [scrolledToBottom, setScrolledToBottom] = useState(false);
+  const scrollRef = useRef(null);
+
+  const [sigName, setSigName] = useState('');
+  const [sigTitle, setSigTitle] = useState('');
+  const [sigCompany, setSigCompany] = useState('');
+  const [typedSig, setTypedSig] = useState('');
+  const [useTyped, setUseTyped] = useState(false);
+  const [consents, setConsents] = useState({ authorized:false, read:false, electronic:false });
+  const [canvasEmpty, setCanvasEmpty] = useState(true);
+  const canvasRef = useRef(null);
+  const drawing = useRef(false);
+  const [formErrors, setFormErrors] = useState({});
+  const [busy, setBusy] = useState(false);
+  const [signedResult, setSignedResult] = useState(null);
+
+  useEffect(() => {
+    (async () => {
+      const c = await contractService.getById(contractId);
+      setContract(c);
+      if (c) {
+        const cl = await clientService.getById(c.clientId);
+        setClient(cl);
+        setSigCompany(cl ? cl.companyName : '');
+      }
+      setCompany(await companyService.get());
+    })();
+  }, [contractId]);
+
+  if (!contract || !client || !company) {
+    return <div className="min-h-screen flex items-center justify-center bg-[var(--navy-deep)]"><div className="text-white text-sm">Loading document…</div></div>;
+  }
+
+  if (contract.status === 'active' || contract.status === 'signed') {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[var(--navy-deep)] px-4">
+        <div className="bg-white rounded-xl shadow-2xl p-8 max-w-md text-center">
+          <div className="text-4xl mb-4">✅</div>
+          <div className="font-heading mb-2">This document has already been signed</div>
+          <p className="text-sm text-slate-500">Contact {company.contactEmail} if you need another copy.</p>
+        </div>
+      </div>
+    );
+  }
+
+  const linkExpiry = new Date(contract.sentAt || nowISO());
+  linkExpiry.setDate(linkExpiry.getDate() + 7);
+  const expired = new Date() > linkExpiry;
+
+  const confirmIdentity = () => {
+    if (!validateEmail(emailInput)) { setEmailError('Enter a valid email address.'); return; }
+    if (emailInput.toLowerCase() !== client.contactEmail.toLowerCase()) { setEmailError('This email does not match our records for this contract.'); return; }
+    setEmailError('');
+    setScreen(2);
+  };
+
+  const onScroll = (e) => {
+    const el = e.target;
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 20) setScrolledToBottom(true);
+  };
+
+  const startDraw = (e) => {
+    drawing.current = true;
+    const ctx = canvasRef.current.getContext('2d');
+    const rect = canvasRef.current.getBoundingClientRect();
+    const x = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
+    const y = (e.touches ? e.touches[0].clientY : e.clientY) - rect.top;
+    ctx.beginPath(); ctx.moveTo(x,y);
+  };
+  const moveDraw = (e) => {
+    if (!drawing.current) return;
+    const ctx = canvasRef.current.getContext('2d');
+    const rect = canvasRef.current.getBoundingClientRect();
+    const x = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
+    const y = (e.touches ? e.touches[0].clientY : e.clientY) - rect.top;
+    ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.strokeStyle = '#0f172a';
+    ctx.lineTo(x,y); ctx.stroke();
+    setCanvasEmpty(false);
+  };
+  const endDraw = () => { drawing.current = false; };
+  const clearCanvas = () => {
+    const ctx = canvasRef.current.getContext('2d');
+    ctx.clearRect(0,0,canvasRef.current.width, canvasRef.current.height);
+    setCanvasEmpty(true);
+  };
+
+  const allConsentsChecked = consents.authorized && consents.read && consents.electronic;
+  const hasSignature = useTyped ? typedSig.trim().length > 0 : !canvasEmpty;
+
+  const submitSignature = async () => {
+    const e = {};
+    if (!sigName.trim()) e.sigName = 'Full name is required.';
+    if (!sigTitle.trim()) e.sigTitle = 'Job title is required.';
+    if (!hasSignature) e.signature = 'A signature is required.';
+    if (!allConsentsChecked) e.consents = 'All three confirmations are required.';
+    setFormErrors(e);
+    if (Object.keys(e).length) return;
+
+    setBusy(true);
+    try {
+      const hashAfter = await sha256(contract.title + contract.description + contract.value);
+      const signedAt = nowISO();
+      await contractService.update(contract.id, {
+        status: 'active',
+        signerName: sigName, signerTitle: sigTitle, signerCompany: sigCompany, signerEmail: emailInput,
+        signedAt, signerIP: '203.0.113.42',
+        documentHashAfter: hashAfter,
+        consentElectronic: consents.electronic, consentAuthorized: consents.authorized, consentRead: consents.read,
+      });
+      await contractService.addAuditEntry(contract.id, { type:'signed', message:`Contract signed by ${sigName} (${sigTitle})`, by: null });
+      setSignedResult({ signedAt });
+      setScreen(5);
+    } catch (err) {
+      toast.push(err.message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-[var(--navy-deep)] py-8 px-4">
+      <div className="max-w-2xl mx-auto">
+        <div className="text-center mb-6">
+          <div className="text-white font-display">SOS Contracts</div>
+          <div className="text-slate-400 text-xs mt-1">Secure Electronic Signature</div>
+        </div>
+
+        {expired ? (
+          <div className="bg-white rounded-xl shadow-2xl p-8 text-center">
+            <div className="text-4xl mb-4">⏰</div>
+            <div className="font-heading mb-2">This signing link has expired</div>
+            <p className="text-sm text-slate-500">Please contact {company.contactEmail} to request a new signing link.</p>
+          </div>
+        ) : (
+          <div className="bg-white rounded-xl shadow-2xl overflow-hidden">
+            {screen === 1 && (
+              <div className="p-8">
+                <div className="font-heading mb-1">You have been invited to sign a document</div>
+                <p className="text-sm text-slate-500 mb-6">{company.name} has sent you a contract for electronic signature.</p>
+                <div className="bg-slate-50 rounded-lg p-4 mb-6">
+                  <div className="text-sm font-medium">{contract.title}</div>
+                  <div className="text-xs text-slate-400 mt-1">From {company.name}</div>
+                </div>
+                <Field label="Confirm your email address to continue" required error={emailError}>
+                  <input type="email" value={emailInput} onChange={e=>setEmailInput(e.target.value)} className={inputCls(emailError)} placeholder="you@yourclub.com" />
+                </Field>
+                <p className="text-xs text-amber-600 mb-4">This link expires on {fmtDate(linkExpiry.toISOString())}.</p>
+                <button onClick={confirmIdentity} className="w-full py-2.5 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">Continue</button>
+                <p className="text-xs text-slate-400 mt-4 text-center">Questions? Contact {company.contactEmail}</p>
+              </div>
+            )}
+
+            {screen === 2 && (
+              <div className="p-8">
+                <div className="font-heading mb-4">Review Document</div>
+                <div ref={scrollRef} onScroll={onScroll} className="border border-[var(--border)] rounded-lg p-5 h-80 overflow-y-auto text-sm text-slate-600 mb-4 bg-slate-50">
+                  <h3 className="font-semibold text-slate-800 mb-2">{contract.title}</h3>
+                  <p className="mb-3"><strong>Between:</strong> {company.name} ("Service Provider") and {client.companyName} ("Client").</p>
+                  <p className="mb-3">{contract.description}</p>
+                  <p className="mb-3"><strong>Contract Value:</strong> {fmtMoney(contract.value, contract.currency)} ({contract.paymentType.replace('_',' ')}, net {contract.paymentTermsDays} days).</p>
+                  <p className="mb-3"><strong>Term:</strong> {fmtDate(contract.startDate)} to {fmtDate(contract.endDate)}.</p>
+                  <p className="mb-3"><strong>Late Payment:</strong> A penalty of {contract.latePaymentPenalty}% per month applies to overdue amounts.</p>
+                  <p className="mb-3"><strong>Governing Law:</strong> This agreement is governed by the laws of {contract.governingLaw}, with exclusive jurisdiction in {contract.jurisdiction}.</p>
+                  <p className="mb-3">Both parties agree to the confidentiality of data shared under this agreement and to use analytical outputs solely for internal performance purposes unless otherwise agreed in writing.</p>
+                  <p className="mb-3">This agreement may be terminated by either party with 30 days' written notice. Outstanding invoices remain payable regardless of termination.</p>
+                  <p className="text-xs text-slate-400 mt-6">— End of document —</p>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <a href={`data:text/plain;charset=utf-8,${encodeURIComponent(contract.title + '\n\n' + contract.description)}`} download={`${contract.contractNumber}.txt`} className="text-xs text-blue-600 hover:underline">Download document</a>
+                  <button disabled={!scrolledToBottom} onClick={()=>setScreen(3)} className="px-5 py-2.5 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition disabled:opacity-40 disabled:cursor-not-allowed">
+                    {scrolledToBottom ? 'Proceed to Sign' : 'Scroll to the bottom to continue'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {screen === 3 && (
+              <div className="p-8">
+                <div className="font-heading mb-4">Confirm Agreement Summary</div>
+                <div className="bg-slate-50 rounded-lg p-5 text-sm space-y-2">
+                  <div className="flex justify-between"><span className="text-slate-500">Contract</span><span className="font-medium">{contract.title}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-500">Parties</span><span className="font-medium text-right">{company.name} &amp; {client.companyName}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-500">Value</span><span className="font-data">{fmtMoney(contract.value, contract.currency)} / {contract.paymentType==='monthly'?'month':'year'}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-500">Start Date</span><span>{fmtDate(contract.startDate)}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-500">End Date</span><span>{fmtDate(contract.endDate)}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-500">Governed by</span><span>{contract.governingLaw}</span></div>
+                </div>
+                <div className="flex justify-between mt-6">
+                  <button onClick={()=>setScreen(2)} className="px-4 py-2 text-sm rounded-lg border border-[var(--border)] hover:bg-slate-50">Back</button>
+                  <button onClick={()=>setScreen(4)} className="px-5 py-2.5 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">Continue to Signature</button>
+                </div>
+              </div>
+            )}
+
+            {screen === 4 && (
+              <div className="p-8">
+                <div className="font-heading mb-4">Signature</div>
+                <Field label="Full Name" required error={formErrors.sigName}>
+                  <input value={sigName} onChange={e=>setSigName(e.target.value)} className={inputCls(formErrors.sigName)} />
+                </Field>
+                <Field label="Job Title" required error={formErrors.sigTitle}>
+                  <input value={sigTitle} onChange={e=>setSigTitle(e.target.value)} className={inputCls(formErrors.sigTitle)} />
+                </Field>
+                <Field label="Company Name">
+                  <input value={sigCompany} onChange={e=>setSigCompany(e.target.value)} className={inputCls(false)} />
+                </Field>
+
+                <Field label="Signature" required error={formErrors.signature}>
+                  {!useTyped ? (
+                    <div>
+                      <canvas
+                        ref={canvasRef} width={460} height={140}
+                        className="border border-[var(--border)] rounded-lg w-full touch-none bg-white"
+                        onMouseDown={startDraw} onMouseMove={moveDraw} onMouseUp={endDraw} onMouseLeave={endDraw}
+                        onTouchStart={startDraw} onTouchMove={moveDraw} onTouchEnd={endDraw}
+                      ></canvas>
+                      <div className="flex justify-between mt-2">
+                        <button type="button" onClick={clearCanvas} className="text-xs text-slate-500 hover:underline">Clear</button>
+                        <button type="button" onClick={()=>setUseTyped(true)} className="text-xs text-blue-600 hover:underline">Type instead</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <input value={typedSig} onChange={e=>setTypedSig(e.target.value)} placeholder="Type your full name as signature" className={`${inputCls(formErrors.signature)} font-serif italic text-lg`} />
+                      <button type="button" onClick={()=>setUseTyped(false)} className="text-xs text-blue-600 hover:underline mt-2">Draw instead</button>
+                    </div>
+                  )}
+                </Field>
+
+                <div className="space-y-2 mb-4 mt-2">
+                  <label className="flex items-start gap-2 text-sm">
+                    <input type="checkbox" checked={consents.authorized} onChange={e=>setConsents(c=>({...c,authorized:e.target.checked}))} className="mt-0.5" />
+                    <span>I confirm I am authorized to sign on behalf of {sigCompany || 'the Company'}</span>
+                  </label>
+                  <label className="flex items-start gap-2 text-sm">
+                    <input type="checkbox" checked={consents.read} onChange={e=>setConsents(c=>({...c,read:e.target.checked}))} className="mt-0.5" />
+                    <span>I have read and agree to all terms of this agreement</span>
+                  </label>
+                  <label className="flex items-start gap-2 text-sm">
+                    <input type="checkbox" checked={consents.electronic} onChange={e=>setConsents(c=>({...c,electronic:e.target.checked}))} className="mt-0.5" />
+                    <span>I consent to signing this document electronically, which is legally binding</span>
+                  </label>
+                  {formErrors.consents && <p className="text-xs text-red-500">{formErrors.consents}</p>}
+                </div>
+
+                <div className="flex justify-between">
+                  <button onClick={()=>setScreen(3)} className="px-4 py-2 text-sm rounded-lg border border-[var(--border)] hover:bg-slate-50">Back</button>
+                  <button disabled={!allConsentsChecked || !hasSignature || busy} onClick={submitSignature} className="px-5 py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition disabled:opacity-40 disabled:cursor-not-allowed">
+                    {busy ? 'Signing…' : 'Sign Agreement'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {screen === 5 && signedResult && (
+              <div className="p-8 text-center">
+                <div className="text-5xl mb-4">✅</div>
+                <div className="font-heading text-lg mb-1">Agreement Successfully Signed</div>
+                <p className="text-sm text-slate-500 mb-6">Thank you, {sigName}.</p>
+                <div className="bg-slate-50 rounded-lg p-5 text-sm text-left space-y-2 mb-6">
+                  <div className="flex justify-between"><span className="text-slate-500">Contract</span><span className="font-medium">{contract.title}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-500">Signed by</span><span>{sigName}, {sigTitle}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-500">Date &amp; Time</span><span>{fmtDateTime(signedResult.signedAt)}</span></div>
+                </div>
+                <p className="text-xs text-slate-400 mb-6">A signed copy has been sent to {emailInput} (simulated).</p>
+                <div className="flex flex-col sm:flex-row gap-3 justify-center mb-6">
+                  <a href={`data:text/plain;charset=utf-8,${encodeURIComponent(contract.title + '\n\nSigned by ' + sigName + ' on ' + fmtDateTime(signedResult.signedAt))}`} download={`${contract.contractNumber}-signed.txt`} className="px-4 py-2 border border-[var(--border)] rounded-lg text-sm hover:bg-slate-50">Download Signed Document</a>
+                  <a href={`data:text/plain;charset=utf-8,${encodeURIComponent('Certificate of Signature\n\nContract: ' + contract.title + '\nSigned by: ' + sigName + ' (' + sigTitle + ')\nDate: ' + fmtDateTime(signedResult.signedAt) + '\nIP: 203.0.113.42')}`} download={`${contract.contractNumber}-certificate.txt`} className="px-4 py-2 border border-[var(--border)] rounded-lg text-sm hover:bg-slate-50">Download Certificate</a>
+                </div>
+                <p className="text-xs text-slate-400">{company.name} · {company.contactEmail}</p>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* =========================================================================
+   APP SHELL / ROUTER
+   ========================================================================= */
+function useHashRoute() {
+  const [hash, setHash] = useState(location.hash);
+  useEffect(() => {
+    const onChange = () => setHash(location.hash);
+    window.addEventListener('hashchange', onChange);
+    return () => window.removeEventListener('hashchange', onChange);
+  }, []);
+  return hash;
+}
+
+function AuthedApp() {
+  const [route, setRoute] = useState('dashboard');
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const navigate = (r) => { setRoute(r); window.scrollTo(0,0); };
+
+  let page = null;
+  if (route === 'dashboard') page = <Dashboard navigate={navigate} />;
+  else if (route === 'contracts:all') page = <ContractsList navigate={navigate} />;
+  else if (route === 'contracts:new') page = <ContractForm navigate={navigate} />;
+  else if (route.startsWith('contract:')) page = <ContractDetail contractId={route.split(':')[1]} navigate={navigate} />;
+  else if (route === 'payments:receivables') page = <PaymentsReceivables navigate={navigate} />;
+  else if (route === 'payments:history') page = <PaymentsHistory />;
+  else if (route === 'clients') page = <ClientsPage navigate={navigate} />;
+  else if (route === 'reports:revenue') page = <RevenueReport />;
+  else if (route === 'reports:board') page = <BoardExport />;
+  else if (route === 'settings:company') page = <CompanyProfileSettings />;
+  else if (route === 'settings:users') page = <UsersSettings />;
+  else page = <Dashboard navigate={navigate} />;
+
+  return (
+    <div className="flex min-h-screen">
+      <Sidebar route={route} navigate={navigate} mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} />
+      <div className="flex-1 min-w-0">
+        <div className="md:hidden sticky top-0 z-20 bg-[var(--navy-deep)] px-4 py-3 flex items-center justify-between no-print">
+          <div className="text-white font-heading text-sm">SOS Contracts</div>
+          <button onClick={()=>setMobileOpen(true)} className="text-white text-xl leading-none">☰</button>
+        </div>
+        {page}
+      </div>
+    </div>
+  );
+}
+
+function AccountSetupFlow({ token }) {
+  const [user, setUser] = useState(undefined);
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+
+  useEffect(() => { userService.getBySetupToken(token).then(setUser); }, [token]);
+
+  if (user === undefined) {
+    return <div className="min-h-screen flex items-center justify-center bg-[var(--navy-deep)]"><div className="text-white text-sm">Loading…</div></div>;
+  }
+
+  if (!user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[var(--navy-deep)] px-4">
+        <div className="bg-white rounded-xl shadow-2xl p-8 max-w-md text-center">
+          <div className="text-4xl mb-4">⏰</div>
+          <div className="font-heading mb-2">This setup link is invalid or has expired</div>
+          <p className="text-sm text-slate-500">Ask your admin to send you a new setup link.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (done) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[var(--navy-deep)] px-4">
+        <div className="bg-white rounded-xl shadow-2xl p-8 max-w-md text-center">
+          <div className="text-4xl mb-4">✅</div>
+          <div className="font-heading mb-2">Password set</div>
+          <p className="text-sm text-slate-500 mb-5">You can now log in with your email and new password.</p>
+          <a href={location.pathname} className="inline-block px-4 py-2 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">Go to Login</a>
+        </div>
+      </div>
+    );
+  }
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setError('');
+    if (password.length < 8) { setError('Password must be at least 8 characters.'); return; }
+    if (password !== confirm) { setError('Passwords do not match.'); return; }
+    setBusy(true);
+    try {
+      await userService.completeSetup(token, password);
+      setDone(true);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-[var(--navy-deep)] px-4">
+      <div className="w-full max-w-md">
+        <div className="text-center mb-8">
+          <div className="text-white font-display">SOS Contracts</div>
+          <div className="text-slate-400 text-sm mt-1">Set up your account</div>
+        </div>
+        <form onSubmit={submit} className="bg-white rounded-xl shadow-2xl p-8">
+          <p className="text-sm text-slate-600 mb-5">Welcome, {user.name}. Choose a password for <strong>{user.email}</strong> to activate your account.</p>
+          <Field label="New Password" required>
+            <input type="password" value={password} onChange={e=>setPassword(e.target.value)} className={inputCls(false)} placeholder="Minimum 8 characters" autoFocus />
+          </Field>
+          <Field label="Confirm Password" required>
+            <input type="password" value={confirm} onChange={e=>setConfirm(e.target.value)} className={inputCls(false)} />
+          </Field>
+          {error && <p className="text-xs text-red-500 mb-4">{error}</p>}
+          <button disabled={busy} className="w-full py-2.5 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition disabled:opacity-50">
+            {busy ? 'Saving…' : 'Set Password & Activate'}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function App() {
+  const hash = useHashRoute();
+  const auth = useAuth();
+
+  const signMatch = hash.match(/^#\/sign\/([^/]+)\/([^/]+)/);
+  if (signMatch) {
+    return <SigningFlow contractId={signMatch[1]} />;
+  }
+
+  const setupMatch = hash.match(/^#\/setup\/([^/]+)/);
+  if (setupMatch) {
+    return <AccountSetupFlow token={setupMatch[1]} />;
+  }
+
+  if (auth.loading) {
+    return <div className="min-h-screen flex items-center justify-center bg-[var(--navy-deep)]"><div className="text-white text-sm">Loading…</div></div>;
+  }
+  if (!auth.user) return <LoginScreen />;
+  return <AuthedApp />;
+}
+
+function Root() {
+  useEffect(() => { seedIfEmpty(); }, []);
+  return (
+    <ToastProvider>
+      <AuthProvider>
+        <App />
+      </AuthProvider>
+    </ToastProvider>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<Root />);
+</script>
+</body>
+</html>
