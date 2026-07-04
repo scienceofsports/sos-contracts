@@ -2093,6 +2093,7 @@ function CompanyProfileSettings() {
   const [confirmText, setConfirmText] = useState('');
   const [resetting, setResetting] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   // Empty company shape used when the database has no company row yet (fresh
   // install) — so the form always renders and the profile can be filled in.
@@ -2112,7 +2113,6 @@ function CompanyProfileSettings() {
   if (!loaded || !form) return <div className="p-6"><Skeleton className="h-96 w-full" /></div>;
 
   const set = (k,v) => setForm(f=>({...f,[k]:v}));
-  const [saving, setSaving] = useState(false);
   const save = async () => {
     setSaving(true);
     try {
