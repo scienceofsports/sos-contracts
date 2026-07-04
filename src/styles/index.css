@@ -1,0 +1,39 @@
+@import "tailwindcss";
+
+/* Inter font is loaded via <link> in index.html (Google Fonts). */
+
+:root {
+  --navy-deep: #0A1628;
+  --navy-mid: #1E3A5F;
+  --blue-primary: #2563EB;
+  --green: #10B981;
+  --amber: #F59E0B;
+  --red: #EF4444;
+  --purple: #8B5CF6;
+  --slate: #94A3B8;
+  --bg: #F8FAFC;
+  --border: #E2E8F0;
+}
+
+html, body { font-family: 'Inter', sans-serif; background: var(--bg); }
+.font-display { font-weight: 700; font-size: 28px; }
+.font-heading { font-weight: 600; font-size: 18px; }
+.font-data { font-weight: 500; font-size: 14px; font-variant-numeric: tabular-nums; }
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 4px; }
+
+.skeleton {
+  background: linear-gradient(90deg, #e2e8f0 25%, #eef2f6 37%, #e2e8f0 63%);
+  background-size: 400% 100%;
+  animation: skeleton-loading 1.4s ease infinite;
+}
+@keyframes skeleton-loading {
+  0% { background-position: 100% 50%; }
+  100% { background-position: 0 50%; }
+}
+
+@media print {
+  .no-print { display: none !important; }
+  body { background: white !important; }
+}
