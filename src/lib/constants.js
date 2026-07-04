@@ -15,14 +15,6 @@ export const STATUS_BADGE = {
   disputed: { bg:'bg-purple-100', text:'text-purple-700' },
 };
 
-export const CONTRACT_TYPES = [
-  { value:'platform_subscription', label:'Platform Subscription' },
-  { value:'data_license', label:'Data License' },
-  { value:'consulting', label:'Consulting' },
-  { value:'partnership', label:'Partnership' },
-  { value:'custom', label:'Custom' },
-];
-
 export const PAYMENT_TYPES = [
   { value:'one_time', label:'One-time' },
   { value:'monthly', label:'Monthly' },

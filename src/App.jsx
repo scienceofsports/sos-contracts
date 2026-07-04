@@ -22,7 +22,7 @@ import {
   computeVAT,
   round2,
 } from './lib/format.js';
-import { encodePortablePayload, decodePortablePayload } from './lib/portable.js';
+import { decodePortablePayload } from './lib/portable.js';
 import { downloadContractPdf } from './lib/contractPdf.js';
 import {
   companyService,
@@ -966,8 +966,6 @@ function ContractDetail({ contractId, navigate }) {
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showMarkPaidPayment, setShowMarkPaidPayment] = useState(null);
-  const [showMarkSignedModal, setShowMarkSignedModal] = useState(false);
-  const [showImportModal, setShowImportModal] = useState(false);
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [certificate, setCertificate] = useState(null);
 
@@ -1064,8 +1062,6 @@ function ContractDetail({ contractId, navigate }) {
         <button onClick={()=>navigate('document:'+contract.id)} className="px-4 py-2 border border-[var(--border)] text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition">View Contract Document</button>
         {auth.isAdmin && contract.status === 'draft' && <button onClick={()=>navigate('contracts:edit:'+contract.id)} className="px-4 py-2 border border-[var(--border)] text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition">Edit</button>}
         {auth.isAdmin && contract.status === 'draft' && <button onClick={()=>setShowSendModal(true)} className="px-4 py-2 sos-btn-cyan rounded-lg text-sm font-medium transition">Send for Signature</button>}
-        {auth.isAdmin && (contract.status === 'draft' || contract.status === 'sent') && <button onClick={()=>setShowMarkSignedModal(true)} className="px-4 py-2 border border-[var(--border)] text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition">Record as Signed Manually</button>}
-        {auth.isAdmin && contract.status === 'sent' && <button onClick={()=>setShowImportModal(true)} className="px-4 py-2 border border-emerald-200 text-emerald-700 rounded-lg text-sm font-medium hover:bg-emerald-50 transition">Import Signed Confirmation</button>}
         {auth.isAdmin && (contract.status === 'sent' || contract.status === 'expired' || contract.status === 'declined') && <button onClick={resendContract} className="px-4 py-2 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">Resend / New link</button>}
         {auth.isAdmin && (contract.status === 'sent' || contract.status === 'expired' || contract.status === 'declined') && <button onClick={reviseContract} className="px-4 py-2 border border-[var(--border)] text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition">Revise (recall to draft)</button>}
         {auth.isAdmin && (contract.status === 'signed' || contract.status === 'active') && <button onClick={()=>setShowPaymentModal(true)} className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition">+ Add Payment Milestone</button>}
@@ -1079,7 +1075,7 @@ function ContractDetail({ contractId, navigate }) {
         <div className="bg-amber-50 rounded-xl border border-amber-200 p-5 mb-6 no-print">
           <div className="font-heading text-base mb-1 text-amber-800">📧 Sent for signature — awaiting the client</div>
           <p className="text-sm text-amber-700">A signing request has been emailed to <strong>{client?.contactEmail}</strong>. The client will verify their email with a one-time code, review the agreement, and sign. You'll be notified by email the moment they sign, and this contract will move to <strong>Active</strong> automatically.</p>
-          <p className="text-xs text-amber-600 mt-2">Sent to the wrong address, or need to resend? Update the client's email under Clients, then use “Record as Signed Manually” only if you have a signed copy by other means.</p>
+          <p className="text-xs text-amber-600 mt-2">Sent to the wrong address? Update the client's email under Clients, then use “Resend / New link” above.</p>
         </div>
       )}
 
@@ -1191,8 +1187,6 @@ function ContractDetail({ contractId, navigate }) {
         confirmLabel="Cancel contract" danger />
       {showPaymentModal && <AddPaymentModal contract={contract} client={client} onClose={()=>setShowPaymentModal(false)} onDone={()=>{ setShowPaymentModal(false); load(); }} />}
       {showMarkPaidPayment && <MarkPaidModal contract={contract} payment={showMarkPaidPayment} onClose={()=>setShowMarkPaidPayment(null)} onDone={()=>{ setShowMarkPaidPayment(null); load(); }} />}
-      {showMarkSignedModal && <MarkSignedManuallyModal contract={contract} client={client} onClose={()=>setShowMarkSignedModal(false)} onDone={()=>{ setShowMarkSignedModal(false); load(); }} />}
-      {showImportModal && <ImportSignedConfirmationModal contract={contract} client={client} onClose={()=>setShowImportModal(false)} onDone={()=>{ setShowImportModal(false); load(); }} />}
     </div>
   );
 }
@@ -1673,143 +1667,6 @@ function MarkPaidModal({ contract, payment, onClose, onDone }) {
       <Field label="Amount Received">
         <input type="number" step="0.01" value={amount} onChange={e=>setAmount(e.target.value)} className={inputCls(false)} />
       </Field>
-    </Modal>
-  );
-}
-
-function MarkSignedManuallyModal({ contract, client, onClose, onDone }) {
-  const auth = useAuth();
-  const toast = useToast();
-  const [signerName, setSignerName] = useState('');
-  const [signerTitle, setSignerTitle] = useState('');
-  const [signedDate, setSignedDate] = useState('');
-  const [errors, setErrors] = useState({});
-  const [busy, setBusy] = useState(false);
-
-  const submit = async () => {
-    const e = {};
-    if (!signerName.trim()) e.signerName = 'Signer name is required.';
-    if (!signedDate) e.signedDate = 'Signed date is required.';
-    setErrors(e);
-    if (Object.keys(e).length) return;
-    setBusy(true);
-    try {
-      const signedAt = new Date(signedDate).toISOString();
-      await contractService.update(contract.id, {
-        status: 'active',
-        signerName: signerName.trim(), signerTitle: signerTitle.trim() || null,
-        signerCompany: client ? client.companyName : null, signerEmail: client ? client.contactEmail : null,
-        signedAt, signerIP: null,
-        documentHashBefore: null, documentHashAfter: null,
-        consentElectronic: false, consentAuthorized: false, consentRead: false,
-      });
-      await contractService.addAuditEntry(contract.id, { type:'signed', message:`Recorded as signed manually (paper/offline signature) by ${signerName.trim()}${signerTitle.trim() ? ', ' + signerTitle.trim() : ''}`, by: auth.user.id });
-      toast.push('Contract recorded as signed.', 'success');
-      onDone();
-    } catch (err) {
-      toast.push(err.message, 'error');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <Modal open onClose={onClose} title="Record as Signed Manually" footer={
-      <React.Fragment>
-        <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-[var(--border)] hover:bg-slate-50">Cancel</button>
-        <button disabled={busy} onClick={submit} className="px-4 py-2 text-sm rounded-lg bg-[var(--blue-primary)] text-white hover:bg-blue-700">{busy ? 'Saving…' : 'Record as Signed'}</button>
-      </React.Fragment>
-    }>
-      <p className="text-xs text-slate-500 mb-4">Use this for contracts already signed on paper or outside this system — it marks the contract Active without the e-signature audit trail (no IP address or document hash, since it wasn't signed here).</p>
-      <Field label="Signer Name" required error={errors.signerName}>
-        <input value={signerName} onChange={e=>setSignerName(e.target.value)} className={inputCls(errors.signerName)} placeholder="e.g. Andreas Morias" />
-      </Field>
-      <Field label="Signer Title (optional)">
-        <input value={signerTitle} onChange={e=>setSignerTitle(e.target.value)} className={inputCls(false)} />
-      </Field>
-      <Field label="Date Signed" required error={errors.signedDate}>
-        <input type="date" value={signedDate} onChange={e=>setSignedDate(e.target.value)} className={inputCls(errors.signedDate)} />
-      </Field>
-    </Modal>
-  );
-}
-
-function ImportSignedConfirmationModal({ contract, client, onClose, onDone }) {
-  const auth = useAuth();
-  const toast = useToast();
-  const [file, setFile] = useState(null);
-  const [error, setError] = useState('');
-  const [preview, setPreview] = useState(null);
-  const [busy, setBusy] = useState(false);
-  const fileInputRef = useRef(null);
-
-  const onFilePicked = async (e) => {
-    const f = e.target.files[0];
-    e.target.value = '';
-    setError(''); setPreview(null); setFile(null);
-    if (!f) return;
-    try {
-      const text = await f.text();
-      const data = JSON.parse(text);
-      if (data.type !== 'sos-signed-confirmation') throw new Error('This is not a valid signed confirmation file.');
-      if (data.contractId !== contract.id) throw new Error('This confirmation is for a different contract (' + (data.contractNumber || 'unknown') + '), not this one.');
-      setFile(f);
-      setPreview(data);
-    } catch (err) {
-      setError(err.message.includes('JSON') ? 'This file could not be read as a valid confirmation file.' : err.message);
-    }
-  };
-
-  const submit = async () => {
-    if (!preview) return;
-    setBusy(true);
-    try {
-      const hashMismatch = contract.documentHashBefore && preview.originalDocumentHash && contract.documentHashBefore !== preview.originalDocumentHash;
-      await contractService.update(contract.id, {
-        status: 'active',
-        signerName: preview.signerName, signerTitle: preview.signerTitle, signerCompany: preview.signerCompany, signerEmail: preview.signerEmail,
-        signedAt: preview.signedAt, signerIP: null,
-        documentHashAfter: preview.documentHashAfter,
-        consentElectronic: !!preview.consentElectronic, consentAuthorized: !!preview.consentAuthorized, consentRead: !!preview.consentRead,
-      });
-      if (preview.client && client) {
-        await clientService.update(client.id, {
-          companyName: preview.client.companyName || client.companyName,
-          address: preview.client.address || client.address,
-          vatNumber: preview.client.vatNumber || client.vatNumber,
-          registrationNumber: preview.client.registrationNumber || client.registrationNumber,
-        });
-      }
-      await contractService.addAuditEntry(contract.id, { type:'signed', message:`Signed confirmation imported for ${preview.signerName} (${preview.signerTitle})${hashMismatch ? ' — WARNING: document hash mismatch, verify terms were not altered' : ''}`, by: auth.user.id });
-      toast.push(hashMismatch ? 'Imported, but the document hash did not match — please double-check the terms.' : 'Signed confirmation imported.', hashMismatch ? 'error' : 'success');
-      onDone();
-    } catch (err) {
-      toast.push(err.message, 'error');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <Modal open onClose={onClose} title="Import Signed Confirmation" footer={
-      <React.Fragment>
-        <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-[var(--border)] hover:bg-slate-50">Cancel</button>
-        <button disabled={!preview || busy} onClick={submit} className="px-4 py-2 text-sm rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed">{busy ? 'Importing…' : 'Confirm & Mark Signed'}</button>
-      </React.Fragment>
-    }>
-      <p className="text-sm text-slate-600 mb-4">Upload the <strong>signed-confirmation.json</strong> file the client downloaded after signing via a portable signing link.</p>
-      <input ref={fileInputRef} type="file" accept="application/json" onChange={onFilePicked} className="text-sm mb-3" />
-      {error && <p className="text-xs text-red-500 mb-3">{error}</p>}
-      {preview && (
-        <div className="bg-slate-50 rounded-lg p-4 text-sm space-y-1.5">
-          <div className="flex justify-between"><span className="text-slate-500">Signed by</span><span className="font-medium">{preview.signerName}, {preview.signerTitle}</span></div>
-          <div className="flex justify-between"><span className="text-slate-500">Company</span><span>{preview.signerCompany}</span></div>
-          <div className="flex justify-between"><span className="text-slate-500">Signed at</span><span>{fmtDateTime(preview.signedAt)}</span></div>
-          {contract.documentHashBefore && preview.originalDocumentHash && contract.documentHashBefore !== preview.originalDocumentHash && (
-            <p className="text-xs text-red-600 pt-2">⚠ This confirmation's document hash doesn't match your current contract — the terms may have changed since it was sent. Review carefully before confirming.</p>
-          )}
-        </div>
-      )}
     </Modal>
   );
 }
@@ -2394,9 +2251,6 @@ function CompanyProfileSettings() {
   );
 }
 
-function userSetupLink(user) {
-  return `${location.origin}${location.pathname}#/setup/${user.setupToken}`;
-}
 
 function UsersSettings() {
   const auth = useAuth();

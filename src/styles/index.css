@@ -44,29 +44,12 @@ html, body { font-family: 'Inter', sans-serif; background: var(--bg); }
 }
 .sos-pill .num { color: var(--cyan); }
 
-/* Small circular lettered clause badge (A, B, Γ…). */
-.sos-badge {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 22px; height: 22px; border-radius: 999px;
-  background: var(--cyan); color: var(--navy-deep);
-  font-size: 11px; font-weight: 700; flex: 0 0 auto;
-}
-
-/* Navy stat card with a big cyan number. */
-.sos-stat {
-  background: var(--navy-deep); border-radius: 12px; padding: 18px 16px; text-align: center;
-}
-.sos-stat .n { color: var(--cyan); font-weight: 800; font-size: 30px; line-height: 1; }
-.sos-stat .l { color: #A9B6CC; font-size: 10px; text-transform: uppercase; letter-spacing: .04em; margin-top: 6px; }
-
 /* Inline chip / tag. */
 .sos-chip {
   display: inline-flex; align-items: center; gap: 4px;
   padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600;
 }
-.sos-chip-navy { background: var(--navy-deep); color: #fff; }
 .sos-chip-cyan { background: rgba(34,199,230,.15); color: var(--cyan-deep); }
-.sos-chip-green { background: rgba(16,185,129,.15); color: #0f9d6e; }
 
 /* Primary cyan/navy button accents used across the app. */
 .sos-btn-cyan { background: var(--cyan); color: var(--navy-deep); }
