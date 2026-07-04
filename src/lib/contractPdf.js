@@ -146,27 +146,49 @@ export function generateContractPdf({ contract, client, company }) {
 
   rule();
 
-  // Signature block
-  text('SIGNATURES', { size: 11, style: 'bold', color: NAVY, gap: 6 });
-  ensure(60);
+  // Signature block — international standard: labelled Signature / Name / Title
+  // / Date lines for each party, side by side.
+  ensure(200);
+  text('SIGNATURES', { size: 11, style: 'bold', color: NAVY, gap: 2 });
+  text('Executed by the duly authorised representatives of the Parties as of the dates set out below.', { size: 8, color: [120, 130, 140], gap: 8 });
   const colW = (maxW - 30) / 2;
-  const sigY = y;
-  // Service Provider column
-  text(`For ${company?.name || '—'}`, { size: 9, color: [100, 110, 120], x: M, width: colW });
-  // Client column
-  y = sigY;
-  text(`For ${client?.companyName || '—'}`, { size: 9, color: [100, 110, 120], x: M + colW + 30, width: colW });
-  y = sigY + 40;
-  doc.setDrawColor(180, 188, 196);
-  doc.line(M, y, M + colW, y);
-  doc.line(M + colW + 30, y, M + colW + 30 + colW, y);
-  y += 12;
-  const clientSigLine = contract.signedAt
-    ? `${contract.signerName || ''}${contract.signerTitle ? ' · ' + contract.signerTitle : ''} · ${fmtDate(contract.signedAt)}`
-    : 'Name / Title / Date';
-  text('Name / Title / Date', { size: 8, color: [140, 148, 156], x: M, width: colW });
-  y -= 12;
-  text(clientSigLine, { size: 8, color: [140, 148, 156], x: M + colW + 30, width: colW, gap: 6 });
+  const colX = [M, M + colW + 30];
+  const startY = y;
+  const heads = [`For and on behalf of ${company?.name || '—'}`, `For and on behalf of ${client?.companyName || '—'}`];
+  // Values for the client column when signed; provider column always blank.
+  const signed = !!contract.signedAt;
+  const vals = [
+    { sig: '', name: '', title: '', date: '' },
+    signed
+      ? { sig: contract.signerName || '', name: contract.signerName || '', title: contract.signerTitle || '', date: fmtDate(contract.signedAt) }
+      : { sig: '', name: '', title: '', date: '' },
+  ];
+  doc.setDrawColor(150, 160, 170);
+  [0, 1].forEach((col) => {
+    const x = colX[col];
+    let yy = startY;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(8.5); doc.setTextColor(...NAVY);
+    doc.text(heads[col].toUpperCase(), x, yy); yy += 22;
+    const field = (label, value, tall) => {
+      if (value) {
+        doc.setFont('helvetica', label === 'Signature' ? 'italic' : 'normal');
+        doc.setFontSize(label === 'Signature' ? 12 : 9);
+        doc.setTextColor(30, 34, 45);
+        doc.text(String(value), x + 2, yy - 3);
+      }
+      doc.setDrawColor(150, 160, 170);
+      doc.line(x, yy + 2, x + colW, yy + 2);
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(140, 148, 156);
+      doc.text(label.toUpperCase(), x, yy + 12);
+      yy += (tall ? 34 : 26);
+    };
+    field('Signature', vals[col].sig, true);
+    field('Name', vals[col].name, false);
+    field('Title', vals[col].title, false);
+    field('Date', vals[col].date, false);
+    if (col === 1) y = yy;
+  });
+  y += 6;
   rule();
 
   // Signature note

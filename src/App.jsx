@@ -1214,6 +1214,28 @@ function ContractAttachment({ contract, onChange }) {
   );
 }
 
+// International-standard signature block: separate labelled lines for
+// Signature, Name, Title, and Date. When signed, the captured values are shown
+// above each line; when blank, empty lines are provided for wet-ink signing.
+function SignatureLines({ signature, name, title, date }) {
+  const Row = ({ label, value, tall }) => (
+    <div className="mb-4">
+      <div className={`${tall ? 'h-10' : 'h-6'} border-b border-slate-400 flex items-end pb-1`}>
+        {value ? <span className={label === 'Signature' ? 'italic text-slate-800 text-base' : 'text-slate-800'}>{value}</span> : null}
+      </div>
+      <div className="text-[11px] text-slate-500 mt-1 uppercase tracking-wide">{label}</div>
+    </div>
+  );
+  return (
+    <div>
+      <Row label="Signature" value={signature} tall />
+      <Row label="Name" value={name} />
+      <Row label="Title" value={title} />
+      <Row label="Date" value={date} />
+    </div>
+  );
+}
+
 // Shared, presentational rendering of the full contract document body.
 // Used by the admin ContractDocument view AND the client SigningFlow review
 // screen so both parties review EXACTLY the same legal document.
@@ -1348,25 +1370,26 @@ function ContractDocumentBody({ contract, client, company }) {
           );
         })()}
 
-        <div className="sos-pill mb-6" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}>Signatures</div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 text-sm">
+        <div className="sos-pill mb-2" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}>Signatures</div>
+        <p className="text-xs text-slate-500 mb-6">Executed by the duly authorised representatives of the Parties as of the dates set out below.</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-10 text-sm">
+          {/* Service Provider */}
           <div>
-            <div className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color:'var(--navy-deep)' }}>For {company.name}</div>
-            <div className="border-b border-slate-300 h-10 mb-2"></div>
-            <div className="text-xs text-slate-400">Name / Title / Date</div>
+            <div className="text-xs font-semibold uppercase tracking-wide mb-4" style={{ color:'var(--navy-deep)' }}>For and on behalf of {company.name}</div>
+            <SignatureLines />
           </div>
+          {/* Client */}
           <div>
-            <div className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color:'var(--navy-deep)' }}>For {client.companyName}</div>
+            <div className="text-xs font-semibold uppercase tracking-wide mb-4" style={{ color:'var(--navy-deep)' }}>For and on behalf of {client.companyName}</div>
             {contract.signedAt ? (
-              <React.Fragment>
-                <div className="italic text-slate-700 border-b border-slate-300 pb-2 mb-2">{contract.signerName}</div>
-                <div className="text-xs text-slate-400">{contract.signerTitle ? contract.signerTitle + ' · ' : ''}{fmtDate(contract.signedAt)}</div>
-              </React.Fragment>
+              <SignatureLines
+                signature={contract.signerName}
+                name={contract.signerName}
+                title={contract.signerTitle}
+                date={fmtDate(contract.signedAt)}
+              />
             ) : (
-              <React.Fragment>
-                <div className="border-b border-slate-300 h-10 mb-2"></div>
-                <div className="text-xs text-slate-400">Name / Title / Date</div>
-              </React.Fragment>
+              <SignatureLines />
             )}
           </div>
         </div>
