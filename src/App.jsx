@@ -1209,39 +1209,15 @@ function ContractAttachment({ contract, onChange }) {
   );
 }
 
-function ContractDocument({ contractId, navigate }) {
-  const [contract, setContract] = useState(null);
-  const [client, setClient] = useState(null);
-  const [company, setCompany] = useState(null);
-
-  useEffect(() => {
-    (async () => {
-      const c = await contractService.getById(contractId);
-      setContract(c);
-      if (c) setClient(await clientService.getById(c.clientId));
-      setCompany(await companyService.get());
-    })();
-  }, [contractId]);
-
-  if (!contract || !client || !company) return <div className="p-6"><Skeleton className="h-96 w-full" /></div>;
-
+// Shared, presentational rendering of the full contract document body.
+// Used by the admin ContractDocument view AND the client SigningFlow review
+// screen so both parties review EXACTLY the same legal document.
+function ContractDocumentBody({ contract, client, company }) {
   const lineItems = contract.services ? computeServiceLineItems(contract.services) : [];
   const termYears = contract.startDate && contract.endDate ? Math.max(1, Math.round(daysBetween(contract.startDate, contract.endDate)/365)) : null;
 
   return (
-    <div className="p-4 md:p-6 max-w-4xl">
-      <div className="flex items-center justify-between mb-4 no-print">
-        <button onClick={()=>navigate('contract:'+contract.id)} className="text-sm text-slate-500 hover:text-slate-700">← Back to Contract</button>
-        <button onClick={()=>window.print()} className="px-4 py-2 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">Print / Save as PDF</button>
-      </div>
-
-      {contract.status !== 'active' && contract.status !== 'signed' && (
-        <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm text-amber-700 mb-4 no-print">
-          This is a template-generated draft. Review all clauses, values and dates carefully — and have it checked by a Cyprus lawyer — before sending it to a client for signature.
-        </div>
-      )}
-
-      <div className="bg-white rounded-xl border border-[var(--border)] p-10">
+    <React.Fragment>
         <div className="flex items-center justify-center gap-6 mb-10 pb-6 border-b border-[var(--border)]">
           <div className="flex items-center justify-center">
             {company.logo ? <img src={company.logo} alt={company.name} className="h-14 w-auto object-contain" /> : <div className="font-display text-blue-700">{company.name}</div>}
@@ -1379,6 +1355,41 @@ function ContractDocument({ contractId, navigate }) {
             )}
           </div>
         </div>
+    </React.Fragment>
+  );
+}
+
+function ContractDocument({ contractId, navigate }) {
+  const [contract, setContract] = useState(null);
+  const [client, setClient] = useState(null);
+  const [company, setCompany] = useState(null);
+
+  useEffect(() => {
+    (async () => {
+      const c = await contractService.getById(contractId);
+      setContract(c);
+      if (c) setClient(await clientService.getById(c.clientId));
+      setCompany(await companyService.get());
+    })();
+  }, [contractId]);
+
+  if (!contract || !client || !company) return <div className="p-6"><Skeleton className="h-96 w-full" /></div>;
+
+  return (
+    <div className="p-4 md:p-6 max-w-4xl">
+      <div className="flex items-center justify-between mb-4 no-print">
+        <button onClick={()=>navigate('contract:'+contract.id)} className="text-sm text-slate-500 hover:text-slate-700">← Back to Contract</button>
+        <button onClick={()=>window.print()} className="px-4 py-2 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">Print / Save as PDF</button>
+      </div>
+
+      {contract.status !== 'active' && contract.status !== 'signed' && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm text-amber-700 mb-4 no-print">
+          This is a template-generated draft. Review all clauses, values and dates carefully — and have it checked by a Cyprus lawyer — before sending it to a client for signature.
+        </div>
+      )}
+
+      <div className="bg-white rounded-xl border border-[var(--border)] p-10">
+        <ContractDocumentBody contract={contract} client={client} company={company} />
       </div>
     </div>
   );
@@ -2352,7 +2363,13 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
   const [sigTitle, setSigTitle] = useState('');
   const [sigCompany, setSigCompany] = useState('');
   const [typedSig, setTypedSig] = useState('');
-  const [useTyped, setUseTyped] = useState(false);
+  // Signature capture mode: 'type' | 'draw' | 'upload' (three mutually-exclusive choices).
+  const [sigMode, setSigMode] = useState('draw');
+  const useTyped = sigMode === 'type';
+  // Uploaded signature image (base64 data URL) when sigMode === 'upload'.
+  const [uploadedSigDataUrl, setUploadedSigDataUrl] = useState(null);
+  const [uploadedSigName, setUploadedSigName] = useState('');
+  const sigFileInputRef = useRef(null);
   const [consents, setConsents] = useState({ authorized:false, read:false, electronic:false });
   const [canvasEmpty, setCanvasEmpty] = useState(true);
   const canvasRef = useRef(null);
@@ -2576,8 +2593,38 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
     setCanvasEmpty(true);
   };
 
+  // UPLOAD MODE: read a picked image file as a base64 data URL for the signature.
+  // Images only (JPG/PNG) so it stays compatible with the PNG-embedding certificate.
+  const onSigFilePicked = (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      toast.push('Please upload an image (JPG or PNG) of your signature or signed page.', 'error');
+      if (sigFileInputRef.current) sigFileInputRef.current.value = '';
+      return;
+    }
+    if (file.size > 3 * 1024 * 1024) {
+      toast.push('That image is too large (max 3MB). Please upload a smaller JPG or PNG.', 'error');
+      if (sigFileInputRef.current) sigFileInputRef.current.value = '';
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      setUploadedSigDataUrl(reader.result);
+      setUploadedSigName(file.name);
+    };
+    reader.onerror = () => {
+      toast.push('Could not read that file. Please try another image.', 'error');
+    };
+    reader.readAsDataURL(file);
+  };
+
   const allConsentsChecked = consents.authorized && consents.read && consents.electronic;
-  const hasSignature = useTyped ? typedSig.trim().length > 0 : !canvasEmpty;
+  const hasSignature = sigMode === 'type'
+    ? typedSig.trim().length > 0
+    : sigMode === 'upload'
+      ? !!uploadedSigDataUrl
+      : !canvasEmpty;
 
   const submitSignature = async () => {
     const e = {};
@@ -2593,9 +2640,12 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
       const hashAfter = await sha256(contract.title + contract.description + contract.value);
       const signedAt = nowISO();
 
-      // CAPTURE THE SIGNATURE as a PNG data URL (drawn canvas or typed name).
+      // CAPTURE THE SIGNATURE as a data URL (typed name, drawn canvas, or uploaded image).
       let signatureImageBase64 = null;
-      if (useTyped) {
+      if (sigMode === 'upload') {
+        // Use the uploaded image (JPG/PNG data URL) directly.
+        signatureImageBase64 = uploadedSigDataUrl;
+      } else if (useTyped) {
         // Render the typed name onto an offscreen canvas in a cursive-ish font.
         const tmp = document.createElement('canvas');
         tmp.width = 460; tmp.height = 140;
@@ -2714,16 +2764,8 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
             {screen === 2 && (
               <div className="p-8">
                 <div className="font-heading mb-4">Review Document</div>
-                <div ref={scrollRef} onScroll={onScroll} className="border border-[var(--border)] rounded-lg p-5 h-80 overflow-y-auto text-sm text-slate-600 mb-4 bg-slate-50">
-                  <h3 className="font-semibold text-slate-800 mb-2">{contract.title}</h3>
-                  <p className="mb-3"><strong>Between:</strong> {company.name} ("Service Provider") and {client.companyName} ("Client").</p>
-                  <p className="mb-3">{contract.description}</p>
-                  <p className="mb-3"><strong>Contract Value:</strong> {fmtMoney(contract.value, contract.currency)} ({contract.paymentType.replace('_',' ')}, net {contract.paymentTermsDays} days).</p>
-                  <p className="mb-3"><strong>Term:</strong> {fmtDate(contract.startDate)} to {fmtDate(contract.endDate)}.</p>
-                  <p className="mb-3"><strong>Late Payment:</strong> A penalty of {contract.latePaymentPenalty}% per month applies to overdue amounts.</p>
-                  <p className="mb-3"><strong>Governing Law:</strong> This agreement is governed by the laws of {contract.governingLaw}, with exclusive jurisdiction in {contract.jurisdiction}.</p>
-                  <p className="mb-3">Both parties agree to the confidentiality of data shared under this agreement and to use analytical outputs solely for internal performance purposes unless otherwise agreed in writing.</p>
-                  <p className="mb-3">This agreement may be terminated by either party with 30 days' written notice. Outstanding invoices remain payable regardless of termination.</p>
+                <div ref={scrollRef} onScroll={onScroll} className="border border-[var(--border)] rounded-lg p-5 h-80 overflow-y-auto text-sm text-slate-600 mb-4 bg-white">
+                  <ContractDocumentBody contract={contract} client={client} company={company} />
                   <p className="text-xs text-slate-400 mt-6">— End of document —</p>
                 </div>
                 <div className="flex items-center justify-between gap-3">
@@ -2806,7 +2848,18 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
                 </Field>
 
                 <Field label="Signature" required error={formErrors.signature}>
-                  {!useTyped ? (
+                  <div className="grid grid-cols-3 gap-2 mb-3">
+                    {[['type','Type'],['draw','Draw'],['upload','Upload']].map(([mode,label]) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        onClick={()=>setSigMode(mode)}
+                        className={`py-2 text-sm rounded-lg border transition ${sigMode===mode ? 'bg-[var(--blue-primary)] text-white border-[var(--blue-primary)]' : 'border-[var(--border)] text-slate-600 hover:bg-slate-50'}`}
+                      >{label}</button>
+                    ))}
+                  </div>
+
+                  {sigMode === 'draw' && (
                     <div>
                       <canvas
                         ref={canvasRef} width={460} height={140}
@@ -2814,15 +2867,37 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
                         onMouseDown={startDraw} onMouseMove={moveDraw} onMouseUp={endDraw} onMouseLeave={endDraw}
                         onTouchStart={startDraw} onTouchMove={moveDraw} onTouchEnd={endDraw}
                       ></canvas>
-                      <div className="flex justify-between mt-2">
+                      <div className="mt-2">
                         <button type="button" onClick={clearCanvas} className="text-xs text-slate-500 hover:underline">Clear</button>
-                        <button type="button" onClick={()=>setUseTyped(true)} className="text-xs text-blue-600 hover:underline">Type instead</button>
                       </div>
                     </div>
-                  ) : (
+                  )}
+
+                  {sigMode === 'type' && (
                     <div>
                       <input value={typedSig} onChange={e=>setTypedSig(e.target.value)} placeholder="Type your full name as signature" className={`${inputCls(formErrors.signature)} font-serif italic text-lg`} />
-                      <button type="button" onClick={()=>setUseTyped(false)} className="text-xs text-blue-600 hover:underline mt-2">Draw instead</button>
+                    </div>
+                  )}
+
+                  {sigMode === 'upload' && (
+                    <div>
+                      <input ref={sigFileInputRef} type="file" accept="image/*" onChange={onSigFilePicked} className="hidden" />
+                      {!uploadedSigDataUrl ? (
+                        <button type="button" onClick={()=>sigFileInputRef.current && sigFileInputRef.current.click()} className="w-full border border-dashed border-[var(--border)] rounded-lg py-6 text-sm text-slate-500 hover:bg-slate-50">
+                          Click to upload an image (JPG or PNG) of your signature or signed page
+                        </button>
+                      ) : (
+                        <div>
+                          <div className="border border-[var(--border)] rounded-lg p-3 bg-white flex items-center justify-center">
+                            <img src={uploadedSigDataUrl} alt="Uploaded signature" className="max-h-32 w-auto object-contain" />
+                          </div>
+                          <div className="flex justify-between mt-2">
+                            <span className="text-xs text-slate-400 truncate max-w-[60%]">{uploadedSigName}</span>
+                            <button type="button" onClick={()=>{ setUploadedSigDataUrl(null); setUploadedSigName(''); if (sigFileInputRef.current) sigFileInputRef.current.value=''; }} className="text-xs text-slate-500 hover:underline">Remove</button>
+                          </div>
+                        </div>
+                      )}
+                      <p className="text-xs text-slate-400 mt-2">Images only (JPG or PNG), max 3MB.</p>
                     </div>
                   )}
                 </Field>
