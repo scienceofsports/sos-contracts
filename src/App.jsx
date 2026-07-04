@@ -1286,9 +1286,9 @@ function ContractAttachment({ contract, onChange }) {
 function SignatureLines({ signature, signatureImage, name, title, date }) {
   const Row = ({ label, value, tall, image }) => (
     <div className="mb-4">
-      <div className={`${tall ? 'h-12' : 'h-6'} border-b border-slate-400 flex items-end pb-1`}>
-        {image ? <img src={image} alt="signature" className="max-h-11 w-auto object-contain" />
-          : value ? <span className={label === 'Signature' ? 'italic text-slate-800 text-base' : 'text-slate-800'}>{value}</span> : null}
+      <div className={`${tall ? 'h-20' : 'h-6'} border-b border-slate-400 flex items-end pb-1`}>
+        {image ? <img src={image} alt="signature" className="max-h-[72px] max-w-full w-auto object-contain" />
+          : value ? <span className={label === 'Signature' ? 'italic text-slate-800 text-lg' : 'text-slate-800'}>{value}</span> : null}
       </div>
       <div className="text-[11px] text-slate-500 mt-1 uppercase tracking-wide">{label}</div>
     </div>
