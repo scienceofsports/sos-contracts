@@ -77,7 +77,7 @@ export function generateContractPdf({ contract, client, company }) {
   rule();
 
   // Preamble — both parties, full details (mirrors ContractDocumentBody).
-  text(`This Agreement is made on ${fmtDate(contract.createdAt)} between:`, { size: 10, gap: 4 });
+  text(`This Agreement is made on ${fmtDate(contract.createdAt || contract.sentAt || new Date().toISOString())} between:`, { size: 10, gap: 4 });
   text(`${company?.name || '—'}, a company registered under the laws of the Republic of Cyprus with registration number ${company?.registrationNumber || '—'}, VAT number ${company?.vatNumber || '—'}, having its registered office at ${company?.registeredAddress || '—'} (the "Service Provider"),`, { size: 10, gap: 2 });
   text('and', { size: 10, gap: 2 });
   text(`${client?.companyName || '—'}, ${client?.registrationNumber ? `a company registered with registration number ${client.registrationNumber}, ` : ''}having its registered office at ${client?.address || '[address]'} (the "Client").`, { size: 10, gap: 2 });

@@ -1347,7 +1347,7 @@ function ContractDocumentBody({ contract, client, company }) {
         })()}
 
         <p className="text-sm text-slate-700 mb-6">
-          This Agreement is made on <strong>{fmtDate(contract.createdAt)}</strong> between:
+          This Agreement is made on <strong>{fmtDate(contract.createdAt || contract.sentAt || new Date().toISOString())}</strong> between:
         </p>
         <p className="text-sm text-slate-700 mb-4">
           <strong>{company.name}</strong>, a company registered under the laws of the Republic of Cyprus with registration number {company.registrationNumber}, VAT number {company.vatNumber}, having its registered office at {company.registeredAddress} (the "Service Provider"),
@@ -2434,6 +2434,8 @@ function normalizeSnapshot(snapshot) {
     specialTerms: pick(c, 'specialTerms', 'special_terms'),
     services: pick(c, 'services'),
     documentHashBefore: pick(c, 'documentHashBefore', 'document_hash_before'),
+    createdAt: pick(c, 'createdAt', 'created_at'),
+    sentAt: pick(c, 'sentAt', 'sent_at'),
     // status intentionally read from the request row, not the snapshot
     status: pick(c, 'status'),
   };
