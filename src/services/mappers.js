@@ -164,6 +164,9 @@ export function contractFromRow(row, payments = []) {
 // Map an app-side contract patch to a contracts-table row, INCLUDING ONLY
 // columns that exist on the table. Fields with no column (signer_*, payments,
 // auditLog, consent_*, documentHashAfter, signedAt, signerIP, etc.) are ignored.
+// Postgres date columns reject '' — coerce empty strings to null.
+const nd = (v) => (v === '' || v === undefined ? null : v);
+
 export function contractToRow(obj) {
   if (!obj) return {};
   const row = {};
@@ -174,8 +177,8 @@ export function contractToRow(obj) {
   if ('status' in obj) row.status = obj.status;
   if ('value' in obj) row.value = obj.value;
   if ('currency' in obj) row.currency = obj.currency;
-  if ('startDate' in obj) row.start_date = obj.startDate;
-  if ('endDate' in obj) row.end_date = obj.endDate;
+  if ('startDate' in obj) row.start_date = nd(obj.startDate);
+  if ('endDate' in obj) row.end_date = nd(obj.endDate);
   if ('paymentType' in obj) row.payment_type = obj.paymentType;
   if ('paymentTermsDays' in obj) row.payment_terms_days = obj.paymentTermsDays;
   if ('latePaymentPenalty' in obj) row.late_payment_penalty = obj.latePaymentPenalty;
@@ -226,14 +229,14 @@ export function paymentToRow(obj) {
   if ('contractId' in obj) row.contract_id = obj.contractId;
   if ('accountingRef' in obj) row.accounting_ref = obj.accountingRef;
   if ('description' in obj) row.description = obj.description;
-  if ('dueDate' in obj) row.due_date = obj.dueDate;
+  if ('dueDate' in obj) row.due_date = nd(obj.dueDate);
   if ('amount' in obj) row.amount = obj.amount;
   if ('vatRate' in obj) row.vat_rate = obj.vatRate;
   if ('vatAmount' in obj) row.vat_amount = obj.vatAmount;
   if ('totalAmount' in obj) row.total_amount = obj.totalAmount;
   if ('currency' in obj) row.currency = obj.currency;
   if ('status' in obj) row.status = obj.status;
-  if ('paidAt' in obj) row.paid_at = obj.paidAt;
+  if ('paidAt' in obj) row.paid_at = nd(obj.paidAt);
   if ('paidAmount' in obj) row.paid_amount = obj.paidAmount;
   if ('markedPaidBy' in obj) row.marked_paid_by = obj.markedPaidBy;
   if ('remindersSent' in obj) row.reminders_sent = obj.remindersSent;

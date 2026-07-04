@@ -962,8 +962,6 @@ function ContractDetail({ contractId, navigate }) {
   const [showMarkPaidPayment, setShowMarkPaidPayment] = useState(null);
   const [showMarkSignedModal, setShowMarkSignedModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
-  const [portableLink, setPortableLink] = useState(null);
-  const [portableLinkError, setPortableLinkError] = useState('');
 
   const load = useCallback(async () => {
     const c = await contractService.getById(contractId);
@@ -972,24 +970,6 @@ function ContractDetail({ contractId, navigate }) {
   }, [contractId]);
 
   useEffect(() => { load(); }, [load]);
-
-  useEffect(() => {
-    if (!contract || !client || contract.status !== 'sent') { setPortableLink(null); return; }
-    (async () => {
-      try {
-        setPortableLinkError('');
-        const company = await companyService.get();
-        const payload = await encodePortablePayload({ contract, client, company });
-        const link = `${location.origin}${location.pathname}?sign=${payload}`;
-        if (link.length > 7500) {
-          setPortableLinkError(`This link is very long (${link.length.toLocaleString()} characters) — some email clients or messaging apps may truncate it. Consider trimming the description or special terms, or send it as a plain text file instead of pasting inline.`);
-        }
-        setPortableLink(link);
-      } catch (err) {
-        setPortableLinkError('Could not generate a portable signing link: ' + err.message);
-      }
-    })();
-  }, [contract, client]);
 
   if (!contract) return <div className="p-6"><Skeleton className="h-96 w-full" /></div>;
 
@@ -1039,18 +1019,10 @@ function ContractDetail({ contractId, navigate }) {
       </div>
 
       {auth.isAdmin && contract.status === 'sent' && (
-        <div className="bg-white rounded-xl border border-[var(--border)] p-5 mb-6 no-print">
-          <div className="font-heading text-base mb-1">Signing Link</div>
-          <p className="text-xs text-slate-500 mb-3">This link carries the contract data with it, so it works for the client on their own device — not just this browser. Send it via email or WhatsApp. After they sign, they'll download a confirmation file to send back to you — use "Import Signed Confirmation" above once you have it.</p>
-          {portableLink ? (
-            <div className="flex items-start gap-2">
-              <code className="flex-1 text-xs text-blue-600 break-all bg-slate-50 rounded-lg p-2 border border-[var(--border)]">{portableLink}</code>
-              <button onClick={async ()=>{ try { await navigator.clipboard.writeText(portableLink); toast.push('Signing link copied.', 'success'); } catch (e) { toast.push('Could not copy — select and copy manually.', 'error'); } }} className="px-3 py-2 text-xs border border-[var(--border)] rounded-lg hover:bg-slate-50 shrink-0">Copy</button>
-            </div>
-          ) : (
-            <div className="text-xs text-slate-400">Generating link…</div>
-          )}
-          {portableLinkError && <p className="text-xs text-amber-600 mt-2">{portableLinkError}</p>}
+        <div className="bg-amber-50 rounded-xl border border-amber-200 p-5 mb-6 no-print">
+          <div className="font-heading text-base mb-1 text-amber-800">📧 Sent for signature — awaiting the client</div>
+          <p className="text-sm text-amber-700">A signing request has been emailed to <strong>{client?.contactEmail}</strong>. The client will verify their email with a one-time code, review the agreement, and sign. You'll be notified by email the moment they sign, and this contract will move to <strong>Active</strong> automatically.</p>
+          <p className="text-xs text-amber-600 mt-2">Sent to the wrong address, or need to resend? Update the client's email under Clients, then use “Record as Signed Manually” only if you have a signed copy by other means.</p>
         </div>
       )}
 
