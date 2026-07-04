@@ -30,6 +30,7 @@ import {
   paymentService,
 } from './services/supabaseServices.js';
 import { userService } from './services/authService.js';
+import { signingService } from './services/signingService.js';
 import { ToastProvider, useToast } from './context/ToastContext.jsx';
 import { AuthProvider, useAuth } from './context/AuthContext.jsx';
 import {
@@ -993,14 +994,19 @@ function ContractDetail({ contractId, navigate }) {
   if (!contract) return <div className="p-6"><Skeleton className="h-96 w-full" /></div>;
 
   const sendContract = async () => {
-    const hash = await sha256(contract.title + contract.description + contract.value);
-    await contractService.updateStatus(contract.id, 'sent', {
-      sentAt: nowISO(), sentBy: auth.user.id, documentHashBefore: hash,
-    });
-    await contractService.addAuditEntry(contract.id, { type:'sent', message:`Contract sent to ${client.contactName}`, by: auth.user.id });
+    // PRIMARY send path: create a server-backed signing request. The Edge
+    // Function freezes a document snapshot, sets the contract status to 'sent',
+    // and emails the client a real ?req= signing link. The portable ?sign= link
+    // (rendered below once status is 'sent') remains as a secondary fallback.
     setShowSendModal(false);
-    toast.push('Contract sent for signature.', 'success');
-    load();
+    try {
+      const origin = window.location.origin;
+      await signingService.createSigningRequest(contract.id, origin);
+      toast.push(`Signing request sent to ${client.contactEmail}.`, 'success');
+      load(); // contract is now status 'sent'
+    } catch (err) {
+      toast.push(err.message || 'Could not send the signing request.', 'error');
+    }
   };
 
   const deleteContract = async () => {
@@ -2277,10 +2283,71 @@ function UserFormModal({ onClose, onDone }) {
 /* =========================================================================
    CLIENT-FACING SIGNING FLOW  (#/sign/{contractId}/{token})
    ========================================================================= */
-function SigningFlow({ contractId, portablePayload }) {
+// Map a frozen document snapshot (stored from DB rows, so keys may be snake_case)
+// onto the camelCase shape the SigningFlow screens already expect. Tolerant of
+// both cases so it works whether the Edge Function stored snake_case or camelCase.
+function normalizeSnapshot(snapshot) {
+  const pick = (obj, ...keys) => {
+    for (const k of keys) {
+      if (obj && obj[k] !== undefined && obj[k] !== null) return obj[k];
+    }
+    return undefined;
+  };
+  const c = (snapshot && snapshot.contract) || {};
+  const cl = (snapshot && snapshot.client) || {};
+  const co = (snapshot && snapshot.company) || {};
+
+  const contract = {
+    id: pick(c, 'id'),
+    contractNumber: pick(c, 'contractNumber', 'contract_number'),
+    version: pick(c, 'version'),
+    title: pick(c, 'title'),
+    description: pick(c, 'description'),
+    value: pick(c, 'value'),
+    currency: pick(c, 'currency'),
+    startDate: pick(c, 'startDate', 'start_date'),
+    endDate: pick(c, 'endDate', 'end_date'),
+    governingLaw: pick(c, 'governingLaw', 'governing_law'),
+    jurisdiction: pick(c, 'jurisdiction'),
+    paymentType: pick(c, 'paymentType', 'payment_type'),
+    paymentTermsDays: pick(c, 'paymentTermsDays', 'payment_terms_days'),
+    latePaymentPenalty: pick(c, 'latePaymentPenalty', 'late_payment_penalty'),
+    specialTerms: pick(c, 'specialTerms', 'special_terms'),
+    services: pick(c, 'services'),
+    documentHashBefore: pick(c, 'documentHashBefore', 'document_hash_before'),
+    // status intentionally read from the request row, not the snapshot
+    status: pick(c, 'status'),
+  };
+  const client = {
+    id: pick(cl, 'id'),
+    companyName: pick(cl, 'companyName', 'company_name'),
+    contactName: pick(cl, 'contactName', 'contact_name'),
+    contactEmail: pick(cl, 'contactEmail', 'contact_email'),
+    address: pick(cl, 'address'),
+    vatNumber: pick(cl, 'vatNumber', 'vat_number'),
+    registrationNumber: pick(cl, 'registrationNumber', 'registration_number'),
+  };
+  const company = {
+    name: pick(co, 'name'),
+    logo: pick(co, 'logo'),
+    registeredAddress: pick(co, 'registeredAddress', 'registered_address'),
+    contactEmail: pick(co, 'contactEmail', 'contact_email'),
+    vatNumber: pick(co, 'vatNumber', 'vat_number'),
+    registrationNumber: pick(co, 'registrationNumber', 'registration_number'),
+  };
+  return { contract, client, company };
+}
+
+function SigningFlow({ contractId, portablePayload, reqToken }) {
   const toast = useToast();
   const isPortable = !!portablePayload;
+  const isServer = !!reqToken; // server-backed mode via ?req=<token>
   const [screen, setScreen] = useState(1);
+  // OTP state (server mode only)
+  const [otpCode, setOtpCode] = useState('');
+  const [otpError, setOtpError] = useState('');
+  const [otpBusy, setOtpBusy] = useState(false);
+  const [alreadySigned, setAlreadySigned] = useState(false);
   const [contract, setContract] = useState(null);
   const [client, setClient] = useState(null);
   const [company, setCompany] = useState(null);
@@ -2310,6 +2377,27 @@ function SigningFlow({ contractId, portablePayload }) {
 
   useEffect(() => {
     (async () => {
+      // SERVER MODE: fetch the frozen snapshot for this signing token.
+      if (isServer) {
+        try {
+          const res = await signingService.getSigningRequest(reqToken);
+          const request = res.request;
+          const { contract, client, company } = normalizeSnapshot(request.document_snapshot);
+          setContract(contract);
+          setClient(client);
+          setCompany(company);
+          setSigCompany(client ? client.companyName || '' : '');
+          if (client) setClientDetailsForm({ companyName: client.companyName || '', address: client.address || '', vatNumber: client.vatNumber || '', registrationNumber: client.registrationNumber || '' });
+          // Pre-fill the confirm-email step from the request's signer email.
+          if (request.signer_email && !client?.contactEmail) {
+            setClient(cl => ({ ...(cl || {}), contactEmail: request.signer_email }));
+          }
+          if (request.status === 'signed') setAlreadySigned(true);
+        } catch (err) {
+          setLoadError(err.message || 'This signing link could not be opened. Ask the sender for a fresh link.');
+        }
+        return;
+      }
       if (isPortable) {
         try {
           const data = await decodePortablePayload(portablePayload);
@@ -2333,7 +2421,7 @@ function SigningFlow({ contractId, portablePayload }) {
       }
       setCompany(await companyService.get());
     })();
-  }, [contractId, isPortable, portablePayload]);
+  }, [contractId, isPortable, portablePayload, isServer, reqToken]);
 
   const saveClientDetails = async () => {
     const e = {};
@@ -2342,12 +2430,14 @@ function SigningFlow({ contractId, portablePayload }) {
     if (Object.keys(e).length) return;
     setSavingClientDetails(true);
     try {
-      if (isPortable) {
+      // Portable AND server mode: the signer has no DB auth, so edits are
+      // session-only — they display on screen but don't write the client record.
+      if (isPortable || isServer) {
         const updated = { ...client, companyName: clientDetailsForm.companyName.trim(), address: clientDetailsForm.address.trim(), vatNumber: clientDetailsForm.vatNumber.trim() || null, registrationNumber: clientDetailsForm.registrationNumber.trim() || null };
         setClient(updated);
         setSigCompany(updated.companyName);
         setEditingClientDetails(false);
-        toast.push('Details updated for this session — they will be included in your signed confirmation file.', 'success');
+        toast.push('Details updated for this session — they will be included on your signed contract.', 'success');
         return;
       }
       const updated = await clientService.update(client.id, {
@@ -2380,6 +2470,19 @@ function SigningFlow({ contractId, portablePayload }) {
     );
   }
 
+  // Server mode: the request row already reports this contract as signed.
+  if (alreadySigned) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[var(--navy-deep)] px-4">
+        <div className="bg-white rounded-xl shadow-2xl p-8 max-w-md text-center">
+          <div className="text-4xl mb-4">✅</div>
+          <div className="font-heading mb-2">This contract has already been signed.</div>
+          <p className="text-sm text-slate-500">{company ? `Contact ${company.contactEmail} if you need another copy.` : 'Contact the sender if you need another copy.'}</p>
+        </div>
+      </div>
+    );
+  }
+
   if (!contract || !client || !company) {
     return <div className="min-h-screen flex items-center justify-center bg-[var(--navy-deep)]"><div className="text-white text-sm">Loading document…</div></div>;
   }
@@ -2398,13 +2501,58 @@ function SigningFlow({ contractId, portablePayload }) {
 
   const linkExpiry = new Date(contract.sentAt || nowISO());
   linkExpiry.setDate(linkExpiry.getDate() + 7);
-  const expired = new Date() > linkExpiry;
+  // In server mode the Edge Functions enforce expiry authoritatively on every
+  // call (and surface it as loadError), so we don't gate the UI on the snapshot.
+  const expired = !isServer && new Date() > linkExpiry;
 
-  const confirmIdentity = () => {
+  const confirmIdentity = async () => {
     if (!validateEmail(emailInput)) { setEmailError('Enter a valid email address.'); return; }
     if (emailInput.toLowerCase() !== client.contactEmail.toLowerCase()) { setEmailError('This email does not match our records for this contract.'); return; }
     setEmailError('');
+    // SERVER MODE: email confirmed -> send a 6-digit OTP and go to the OTP screen.
+    if (isServer) {
+      setOtpBusy(true);
+      try {
+        await signingService.sendOtp(reqToken);
+        setOtpError('');
+        setScreen(6); // OTP screen (server mode only)
+      } catch (err) {
+        setEmailError(err.message || 'Could not send a verification code. Please try again.');
+      } finally {
+        setOtpBusy(false);
+      }
+      return;
+    }
     setScreen(2);
+  };
+
+  // SERVER MODE: verify the emailed 6-digit code, then advance to the document review.
+  const verifyOtp = async () => {
+    const code = otpCode.trim();
+    if (code.length < 4) { setOtpError('Enter the code from your email.'); return; }
+    setOtpBusy(true);
+    try {
+      await signingService.verifyOtp(reqToken, code);
+      setOtpError('');
+      setScreen(2);
+    } catch (err) {
+      setOtpError(err.message || 'Incorrect code.');
+    } finally {
+      setOtpBusy(false);
+    }
+  };
+
+  const resendOtp = async () => {
+    setOtpBusy(true);
+    try {
+      await signingService.sendOtp(reqToken);
+      setOtpError('');
+      toast.push('A new code has been sent to your email.', 'success');
+    } catch (err) {
+      setOtpError(err.message || 'Could not resend the code.');
+    } finally {
+      setOtpBusy(false);
+    }
   };
 
   const onScroll = (e) => {
@@ -2453,6 +2601,36 @@ function SigningFlow({ contractId, portablePayload }) {
     try {
       const hashAfter = await sha256(contract.title + contract.description + contract.value);
       const signedAt = nowISO();
+
+      // CAPTURE THE SIGNATURE as a PNG data URL (drawn canvas or typed name).
+      let signatureImageBase64 = null;
+      if (useTyped) {
+        // Render the typed name onto an offscreen canvas in a cursive-ish font.
+        const tmp = document.createElement('canvas');
+        tmp.width = 460; tmp.height = 140;
+        const tctx = tmp.getContext('2d');
+        tctx.fillStyle = '#ffffff';
+        tctx.fillRect(0, 0, tmp.width, tmp.height);
+        tctx.fillStyle = '#0f172a';
+        tctx.font = '40px "Segoe Script", "Brush Script MT", cursive';
+        tctx.textBaseline = 'middle';
+        tctx.fillText(typedSig.trim(), 20, tmp.height / 2);
+        signatureImageBase64 = tmp.toDataURL('image/png');
+      } else if (canvasRef.current) {
+        signatureImageBase64 = canvasRef.current.toDataURL('image/png');
+      }
+
+      // SERVER MODE: record the signature via the Edge Function (the evidence write).
+      if (isServer) {
+        const res = await signingService.recordSignature(reqToken, {
+          signerName: sigName, signerTitle: sigTitle, signerCompany: sigCompany,
+          consents: { electronic: consents.electronic, authorized: consents.authorized, read: consents.read },
+          signatureImageBase64,
+        });
+        setSignedResult({ signedAt: res.signedAt });
+        setScreen(5);
+        return;
+      }
 
       if (isPortable) {
         const confirmation = {
@@ -2514,8 +2692,31 @@ function SigningFlow({ contractId, portablePayload }) {
                   <input type="email" value={emailInput} onChange={e=>setEmailInput(e.target.value)} className={inputCls(emailError)} placeholder="you@yourclub.com" />
                 </Field>
                 <p className="text-xs text-amber-600 mb-4">This link expires on {fmtDate(linkExpiry.toISOString())}.</p>
-                <button onClick={confirmIdentity} className="w-full py-2.5 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">Continue</button>
+                <button onClick={confirmIdentity} disabled={otpBusy} className="w-full py-2.5 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition disabled:opacity-50">{otpBusy ? 'Sending code…' : 'Continue'}</button>
                 <p className="text-xs text-slate-400 mt-4 text-center">Questions? Contact {company.contactEmail}</p>
+              </div>
+            )}
+
+            {/* OTP screen — server mode only (inserted between email and review) */}
+            {screen === 6 && (
+              <div className="p-8">
+                <div className="font-heading mb-1">Verify it's you</div>
+                <p className="text-sm text-slate-500 mb-6">We've emailed a 6-digit code to <strong>{emailInput}</strong>. Enter it below to continue.</p>
+                <Field label="Verification code" required error={otpError}>
+                  <input
+                    value={otpCode}
+                    onChange={e=>setOtpCode(e.target.value.replace(/[^0-9]/g,'').slice(0,6))}
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    placeholder="000000"
+                    className={`${inputCls(otpError)} tracking-[0.4em] text-center text-lg font-data`}
+                  />
+                </Field>
+                <button onClick={verifyOtp} disabled={otpBusy} className="w-full py-2.5 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition disabled:opacity-50 mb-4">{otpBusy ? 'Verifying…' : 'Verify'}</button>
+                <div className="flex items-center justify-between text-xs">
+                  <button type="button" onClick={()=>{ setOtpCode(''); setOtpError(''); setScreen(1); }} className="text-slate-500 hover:underline">Change email</button>
+                  <button type="button" onClick={resendOtp} disabled={otpBusy} className="text-blue-600 hover:underline disabled:opacity-50">Resend code</button>
+                </div>
               </div>
             )}
 
@@ -2671,7 +2872,10 @@ function SigningFlow({ contractId, portablePayload }) {
                   <div className="flex justify-between"><span className="text-slate-500">Date &amp; Time</span><span>{fmtDateTime(signedResult.signedAt)}</span></div>
                 </div>
 
-                {isPortable ? (
+                {isServer ? (
+                  /* SERVER MODE: signature recorded server-side; email confirmation is automatic. */
+                  <p className="text-sm text-slate-600 mb-6">Thank you — this contract is now signed. A copy and confirmation have been sent by email. You can close this page.</p>
+                ) : isPortable ? (
                   <React.Fragment>
                     <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-800 text-left mb-6">
                       <strong>One more step:</strong> download the confirmation file below and send it back to {company.contactEmail} (email/WhatsApp) so {company.name} can record your signature on their side. This link doesn't connect to their system directly.
@@ -2834,6 +3038,14 @@ function AccountSetupFlow({ token }) {
 function App() {
   const hash = useHashRoute();
   const auth = useAuth();
+
+  // Server-backed signing mode: ?req=<token> points at a real signing request
+  // stored in Supabase (with OTP + evidence-grade signature capture). This is
+  // the primary flow now; ?sign= (portable) and #/sign/ (local) remain fallbacks.
+  const reqParam = new URLSearchParams(location.search).get('req');
+  if (reqParam) {
+    return <SigningFlow reqToken={reqParam} />;
+  }
 
   const signParam = new URLSearchParams(location.search).get('sign');
   if (signParam) {
