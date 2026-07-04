@@ -1228,13 +1228,14 @@ function ContractDocumentBody({ contract, client, company }) {
           className="rounded-t-lg -mx-10 -mt-10 px-10 py-8"
           style={{ background: 'var(--navy-deep)', WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}
         >
-          <div className="flex items-center justify-center gap-6">
+          <div className="flex items-center justify-center gap-8">
             <div className="flex items-center justify-center">
-              {company.logo ? <img src={company.logo} alt={company.name} className="h-14 w-auto object-contain" /> : <div className="font-display text-white">{company.name}</div>}
+              {/* Always use the official SCIOS logo (bright/colourful — reads on navy) */}
+              <img src="Logo-scios-dark.png" alt="Science of Sports" className="h-16 w-auto object-contain" />
             </div>
-            <div className="text-[var(--cyan)] text-xl font-light">×</div>
-            <div className="flex items-center justify-center bg-white/95 rounded-lg px-4 py-2">
-              {client.logoBase64 ? <img src={client.logoBase64} alt={client.companyName} className="h-12 w-auto object-contain" /> : <div className="font-heading text-[var(--navy-deep)]">{client.companyName}</div>}
+            <div className="text-[var(--cyan)] text-2xl font-light">×</div>
+            <div className="flex items-center justify-center">
+              {client.logoBase64 ? <img src={client.logoBase64} alt={client.companyName} className="h-16 w-auto object-contain" /> : <div className="font-heading text-white">{client.companyName}</div>}
             </div>
           </div>
           <p className="text-center text-sm font-semibold tracking-wide mt-6" style={{ color:'var(--cyan)' }}>{contract.contractNumber}</p>
