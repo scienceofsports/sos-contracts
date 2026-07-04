@@ -67,6 +67,102 @@ const PAYMENT_TYPES = [
 const CURRENCIES = ['EUR','AED','USD'];
 const CURRENCY_SYMBOL = { EUR:'€', AED:'AED ', USD:'$' };
 
+/* Service catalog — the services SCIOS offers to clubs/academies, per
+   "Science of Sports Services 2026-2027" pricing sheet. unit determines how
+   quantity is interpreted: 'flat' (fixed fee, qty locked to 1), 'per_match'
+   (rate x number of matches), 'per_unit' (rate x count), 'included' (bundled,
+   no separate charge). */
+const SERVICE_CATALOG = [
+  { key:'platform_access', label:'Access to Football Platform', group:'Core Services', unit:'flat', defaultRate:11500, defaultQty:1,
+    detail:'Video + data combined, match events & clips, player comparisons, team & player rankings — everything accessible in one place.' },
+  { key:'camera_installation', label:'Installation of Fixed Camera', group:'Recording Services', unit:'per_unit', defaultRate:500, defaultQty:1,
+    detail:'One-off installation of fixed/robotic camera(s) at the club\'s venue, priced per camera.' },
+  { key:'physical_data', label:'Match Physical Performance Data', group:'Recording Services', unit:'per_match', defaultRate:100, defaultQty:0,
+    detail:'Match physical data, player load tracking and performance benchmarks to protect players and reduce injury risk.' },
+  { key:'live_broadcasting', label:'Live Match Broadcasting', group:'Recording Services', unit:'per_match', defaultRate:100, defaultQty:0,
+    detail:'Matches streamed live for parents, coaches and club management — increasing visibility for the academy.' },
+  { key:'match_recording', label:'Match Recording (Robotic camera)', group:'Recording Services', unit:'per_match', defaultRate:100, defaultQty:0,
+    detail:'Fixed/robotic camera recording for home and away matches — professional, high-quality coverage with no club equipment or staff needed.' },
+  { key:'own_team_analysis', label:'Own Team Tactical Analysis', group:'Analysis Services', unit:'per_match', defaultRate:120, defaultQty:0,
+    detail:'Team structure analysis, phases of play, and key moments with video clips, prepared by professional performance analysts.' },
+  { key:'opponent_analysis', label:'Opponent Tactical Analysis', group:'Analysis Services', unit:'per_match', defaultRate:120, defaultQty:0,
+    detail:'Opponent playing style, key players, and strengths & weaknesses ahead of each fixture.' },
+  { key:'match_reports', label:'Match Team & Player Reports', group:'Reporting Services', unit:'included', defaultRate:0, defaultQty:130,
+    detail:'Possession, passes, xG, player performance metrics and visual dashboards, delivered within 24 hours of each match.' },
+  { key:'academy_reports', label:'Academy Performance Reports', group:'Reporting Services', unit:'per_unit', defaultRate:100, defaultQty:3,
+    detail:'Quarterly and full-season academy performance overviews — team progress, tactical evolution, physical trends and recommendations (1st Quarter, 2nd Quarter, Full Season).' },
+  { key:'player_reports', label:'Individual Player Reports', group:'Reporting Services', unit:'per_unit', defaultRate:100, defaultQty:10,
+    detail:'Detailed player analysis, strengths and improvement areas, with video-supported feedback.' },
+  { key:'adhoc_reports', label:'Ad-Hoc Reports', group:'Reporting Services', unit:'included', defaultRate:0, defaultQty:0,
+    detail:'On-demand reports tailored to specific needs, for fast support on key decisions whenever required.' },
+  { key:'coach_support', label:'One-on-One Coach Support', group:'Coaching Support', unit:'included', defaultRate:0, defaultQty:3,
+    detail:'Platform guidance, analysis-driven solutions, educational support and custom plans tailored to the academy, delivered across the season.' },
+];
+
+const SERVICE_UNIT_LABELS = {
+  flat: 'Flat fee',
+  per_match: 'Per match',
+  per_unit: 'Per unit',
+  included: 'Included',
+};
+
+const SERVICE_GROUPS = ['Core Services', 'Recording Services', 'Analysis Services', 'Reporting Services', 'Coaching Support'];
+
+function computeServiceLineItems(services) {
+  return SERVICE_CATALOG
+    .filter(s => services[s.key] && services[s.key].selected)
+    .map(s => {
+      const qty = Number(services[s.key].qty) || 0;
+      const complimentary = !!services[s.key].complimentary;
+      const bundledIncluded = !!services[s.key].bundledIncluded;
+      const rate = (complimentary || bundledIncluded) ? 0 : Number(services[s.key].rate != null ? services[s.key].rate : s.defaultRate);
+      const amount = s.unit === 'flat' ? rate : (s.unit === 'included' ? 0 : rate * qty);
+      return { ...s, qty, rate, complimentary, bundledIncluded, amount };
+    });
+}
+
+const UNLIMITED_SEATS = -1;
+
+function seatLabel(count, singular, plural) {
+  if (count === UNLIMITED_SEATS) return `Unlimited ${plural}`;
+  if (count > 0) return `${count} ${count > 1 ? plural : singular}`;
+  return '';
+}
+
+function platformSeatsSummary(svc) {
+  if (!svc) return '';
+  const parts = [
+    seatLabel(svc.directorSeats, 'Director', 'Directors'),
+    seatLabel(svc.coachSeats, 'Coach', 'Coaches'),
+    seatLabel(svc.playerSeats, 'Player', 'Players'),
+  ].filter(Boolean);
+  return parts.join(', ');
+}
+
+function generateDescriptionFromServices(services, slaHours) {
+  const items = computeServiceLineItems(services);
+  if (!items.length) return '';
+  const groups = SERVICE_GROUPS;
+  const lines = ['Science of Sports will provide the following services:', ''];
+  groups.forEach(group => {
+    const groupItems = items.filter(i => i.group === group);
+    if (!groupItems.length) return;
+    lines.push(group);
+    groupItems.forEach(i => {
+      const qtyNote = i.unit === 'per_match' ? ` (${i.qty} matches)` : i.unit === 'per_unit' ? ` (${i.qty})` : '';
+      const statusNote = i.unit === 'included' ? '' : i.bundledIncluded ? ' (included in the core platform price)' : i.complimentary ? ' (complimentary)' : '';
+      lines.push(`- ${i.label}${qtyNote}${statusNote} — ${i.detail}`);
+      if (i.key === 'platform_access') {
+        const seats = platformSeatsSummary(services.platform_access);
+        if (seats) lines.push(`  Access: ${seats} (exact users to be confirmed with the client).`);
+      }
+    });
+    lines.push('');
+  });
+  lines.push(`${slaHours || 24}-hour SLA on delivery of key analytical outputs after each match.`);
+  return lines.join('\n');
+}
+
 /* =========================================================================
    UTILITIES
    ========================================================================= */
@@ -117,6 +213,28 @@ function validateEmail(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email || '');
 }
 
+/* Portable signing link payload — compresses {contract, client, company} into
+   a URL-safe string so a contract can be reviewed/signed on a machine that
+   has never seen this app's localStorage (e.g. the client's own computer). */
+async function encodePortablePayload(obj) {
+  const json = JSON.stringify(obj);
+  const bytes = new TextEncoder().encode(json);
+  const cs = new CompressionStream('gzip');
+  const compressed = await new Response(new Blob([bytes]).stream().pipeThrough(cs)).arrayBuffer();
+  const bin = String.fromCharCode(...new Uint8Array(compressed));
+  const b64 = btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return b64;
+}
+
+async function decodePortablePayload(b64) {
+  const bin = atob(b64.replace(/-/g, '+').replace(/_/g, '/'));
+  const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
+  const ds = new DecompressionStream('gzip');
+  const decompressed = await new Response(new Blob([bytes]).stream().pipeThrough(ds)).arrayBuffer();
+  const json = new TextDecoder().decode(decompressed);
+  return JSON.parse(json);
+}
+
 /* =========================================================================
    LOCAL STORAGE LAYER (raw persistence — services below abstract this away)
    ========================================================================= */
@@ -145,15 +263,15 @@ function seedIfEmpty() {
   if (dbGet(DB_KEYS.seeded, false)) return;
 
   const company = {
-    name: 'C.C. Science of Sports Ltd',
-    registeredAddress: 'Michalaki Karaoli 8, 1022 Nicosia, Cyprus',
-    vatNumber: 'CY60030297Y',
-    registrationNumber: 'HE449875',
-    contactEmail: 'contracts@scienceofsports.com',
-    website: 'www.scienceofsports.com',
-    bankName: 'Hellenic Bank',
-    bankIBAN: 'CY61 0050 0109 0001 0901 H183 8501',
-    bankSWIFT: 'HEBACY2N',
+    name: 'Your Company Ltd',
+    registeredAddress: 'Enter your registered address in Settings',
+    vatNumber: '',
+    registrationNumber: '',
+    contactEmail: 'contracts@example.com',
+    website: 'www.example.com',
+    bankName: '',
+    bankIBAN: '',
+    bankSWIFT: '',
     logo: null,
   };
 
@@ -394,6 +512,28 @@ const contractService = {
     dbSet(DB_KEYS.contracts, contracts);
     return contracts[idx];
   },
+  setAttachment: async (id, attachmentBase64, attachmentName) => {
+    const contracts = dbGet(DB_KEYS.contracts, []);
+    const idx = contracts.findIndex(c => c.id === id);
+    if (idx === -1) throw new Error('Contract not found');
+    const previous = { ...contracts[idx] };
+    contracts[idx] = { ...contracts[idx], attachmentBase64, attachmentName };
+    try {
+      dbSet(DB_KEYS.contracts, contracts);
+    } catch (err) {
+      dbSet(DB_KEYS.contracts, [...contracts.slice(0, idx), previous, ...contracts.slice(idx + 1)]);
+      throw new Error('Could not save the file — your browser\'s local storage is full. Try a smaller file or remove an attachment from another contract first.');
+    }
+    return contracts[idx];
+  },
+  removeAttachment: async (id) => {
+    const contracts = dbGet(DB_KEYS.contracts, []);
+    const idx = contracts.findIndex(c => c.id === id);
+    if (idx === -1) throw new Error('Contract not found');
+    contracts[idx] = { ...contracts[idx], attachmentBase64: null, attachmentName: null };
+    dbSet(DB_KEYS.contracts, contracts);
+    return contracts[idx];
+  },
   updateStatus: async (id, status, extra) => {
     const contracts = dbGet(DB_KEYS.contracts, []);
     const idx = contracts.findIndex(c => c.id === id);
@@ -448,6 +588,19 @@ const paymentService = {
     contracts[idx].payments.push(payment);
     dbSet(DB_KEYS.contracts, contracts);
     return payment;
+  },
+  replaceAllForContract: async (contractId, paymentDataList) => {
+    const contracts = dbGet(DB_KEYS.contracts, []);
+    const idx = contracts.findIndex(c => c.id === contractId);
+    if (idx === -1) throw new Error('Contract not found');
+    if (contracts[idx].payments.some(p => p.status !== 'pending' && p.status !== 'overdue')) {
+      throw new Error('Cannot replace payment milestones once one has been paid or disputed.');
+    }
+    contracts[idx].payments = paymentDataList.map(data => ({
+      id: uuid(), contractId, status: 'pending', paidAt: null, paidAmount: null, markedPaidBy: null, remindersSent: [], notes: '', createdAt: nowISO(), ...data,
+    }));
+    dbSet(DB_KEYS.contracts, contracts);
+    return contracts[idx].payments;
   },
   markPaid: async (contractId, paymentId, paidAmount, userId, paidAt) => {
     const contracts = dbGet(DB_KEYS.contracts, []);
@@ -666,6 +819,7 @@ function LoginScreen() {
     <div className="min-h-screen flex items-center justify-center bg-[var(--navy-deep)] px-4">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
+          <img src="Logo-scios-dark.png" alt="SCIOS" className="h-14 w-auto object-contain mx-auto mb-4" />
           <div className="text-white font-display">SOS Contracts</div>
           <div className="text-slate-400 text-sm mt-1">Science of Sports — Internal Contract Management</div>
         </div>
@@ -680,10 +834,6 @@ function LoginScreen() {
           <button disabled={busy} className="w-full py-2.5 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition disabled:opacity-50">
             {busy ? 'Signing in…' : 'Sign In'}
           </button>
-          <div className="mt-5 pt-5 border-t border-[var(--border)] text-xs text-slate-400 space-y-1">
-            <div>Demo admin: admin@scienceofsports.com / Admin2026!</div>
-            <div>Demo viewer: viewer@scienceofsports.com / Viewer2026!</div>
-          </div>
         </form>
       </div>
     </div>
@@ -727,9 +877,9 @@ function Sidebar({ route, navigate, mobileOpen, setMobileOpen }) {
     <React.Fragment>
       {mobileOpen && <div className="fixed inset-0 bg-black/40 z-30 md:hidden no-print" onClick={()=>setMobileOpen(false)}></div>}
       <div className={`fixed md:static z-40 top-0 left-0 h-full w-64 bg-[var(--navy-deep)] flex flex-col transition-transform no-print ${mobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
-        <div className="px-5 py-6 border-b border-white/10">
+        <div className="px-5 py-6 border-b border-white/10 flex flex-col items-start gap-2">
+          <img src="Logo-scios-dark.png" alt="SCIOS" className="h-12 w-auto object-contain" />
           <div className="text-white font-heading">SOS Contracts</div>
-          <div className="text-slate-400 text-xs mt-0.5">Science of Sports</div>
         </div>
         <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-1">
           {NAV.map(item => (
@@ -1141,21 +1291,137 @@ function ContractsList({ navigate, filterStatus }) {
   );
 }
 
-function ContractForm({ navigate }) {
+function defaultServicesState() {
+  return Object.fromEntries(SERVICE_CATALOG.map(s => [s.key, { selected:false, qty:s.defaultQty, rate:s.defaultRate, complimentary:false, bundledIncluded:false, ...(s.key === 'platform_access' ? { directorSeats:0, coachSeats:0, playerSeats:0 } : {}) }]));
+}
+
+function ContractForm({ navigate, editContractId }) {
   const auth = useAuth();
   const toast = useToast();
+  const isEdit = !!editContractId;
   const [clients, setClients] = useState(null);
+  const [loadingExisting, setLoadingExisting] = useState(isEdit);
+  const [services, setServices] = useState(defaultServicesState);
   const [form, setForm] = useState({
     title:'', clientId:'', type:'platform_subscription', value:'', currency:'EUR',
     startDate:'', endDate:'', paymentType:'one_time', paymentTermsDays:30, latePaymentPenalty:1.5,
-    governingLaw:'Republic of Cyprus', jurisdiction:'Nicosia, Cyprus', description:'',
+    governingLaw:'Republic of Cyprus', jurisdiction:'Nicosia, Cyprus', description:'', slaHours:24, specialTerms:'',
   });
+  const [titleEdited, setTitleEdited] = useState(isEdit);
+  const [installments, setInstallments] = useState([]);
+  const [oneTimeDate, setOneTimeDate] = useState('');
+  const [firstDueDate, setFirstDueDate] = useState('');
   const [errors, setErrors] = useState({});
   const [busy, setBusy] = useState(false);
 
   useEffect(() => { clientService.getAll().then(setClients); }, []);
 
-  const set = (k,v) => setForm(f => ({ ...f, [k]: v }));
+  useEffect(() => {
+    if (!isEdit) return;
+    (async () => {
+      const existing = await contractService.getById(editContractId);
+      if (!existing) { toast.push('Contract not found.', 'error'); navigate('contracts:all'); return; }
+      if (existing.status !== 'draft') { toast.push('Only draft contracts can be edited.', 'error'); navigate('contract:'+existing.id); return; }
+      setForm({
+        title: existing.title, clientId: existing.clientId, type: existing.type,
+        value: String(existing.value), currency: existing.currency,
+        startDate: existing.startDate ? existing.startDate.slice(0,10) : '',
+        endDate: existing.endDate ? existing.endDate.slice(0,10) : '',
+        paymentType: existing.paymentType, paymentTermsDays: existing.paymentTermsDays,
+        latePaymentPenalty: existing.latePaymentPenalty, governingLaw: existing.governingLaw,
+        jurisdiction: existing.jurisdiction, description: existing.description, slaHours: existing.slaHours || 24,
+        specialTerms: existing.specialTerms || '',
+      });
+      setServices(existing.services ? { ...defaultServicesState(), ...existing.services } : defaultServicesState());
+      if (existing.payments && existing.payments.length) {
+        if (existing.paymentType === 'one_time') {
+          setOneTimeDate(existing.payments[0].dueDate.slice(0,10));
+        } else if (existing.paymentType === 'milestone') {
+          setInstallments(existing.payments.map(p => ({ date: p.dueDate.slice(0,10), amount: String(p.amount) })));
+        } else {
+          setFirstDueDate(existing.payments[0].dueDate.slice(0,10));
+        }
+      }
+      setLoadingExisting(false);
+    })();
+  }, [isEdit, editContractId]);
+
+  const RECURRING_MONTHS = { monthly: 1, quarterly: 3, annually: 12 };
+
+  const recurringCount = () => {
+    if (!RECURRING_MONTHS[form.paymentType] || !form.startDate || !form.endDate) return 0;
+    const months = Math.max(1, Math.round(daysBetween(form.startDate, form.endDate) / 30.44));
+    return Math.max(1, Math.round(months / RECURRING_MONTHS[form.paymentType]));
+  };
+
+  const recurringInstallments = () => {
+    const count = recurringCount();
+    if (!count || !firstDueDate) return [];
+    const total = Number(form.value) || 0;
+    const each = round2(total / count);
+    return Array.from({ length: count }, (_, i) => {
+      const d = new Date(firstDueDate);
+      d.setMonth(d.getMonth() + i * RECURRING_MONTHS[form.paymentType]);
+      const amount = i === count - 1 ? round2(total - each * (count - 1)) : each;
+      return { date: d.toISOString().slice(0,10), amount };
+    });
+  };
+
+  const addInstallmentRow = () => {
+    setInstallments(rows => [...rows, { date: '', amount: '' }]);
+  };
+  const updateInstallmentRow = (i, patch) => {
+    setInstallments(rows => rows.map((r, idx) => idx === i ? { ...r, ...patch } : r));
+  };
+  const removeInstallmentRow = (i) => {
+    setInstallments(rows => rows.filter((_, idx) => idx !== i));
+  };
+  const milestoneTotal = installments.reduce((s,r) => s + (Number(r.amount) || 0), 0);
+
+  const generateTitle = (clientId, services) => {
+    const clientName = clients?.find(c => c.id === clientId)?.companyName;
+    if (!clientName) return '';
+    const items = computeServiceLineItems(services);
+    if (!items.length) return `${clientName} — Service Agreement`;
+    const groups = SERVICE_GROUPS;
+    const groupsUsed = groups.filter(g => items.some(i => i.group === g));
+    if (items.some(i => i.key === 'platform_access')) return `${clientName} — Performance Analysis Agreement`;
+    if (groupsUsed.length === 1 && items.length === 1) return `${clientName} — ${items[0].label}`;
+    return `${clientName} — Service Agreement`;
+  };
+
+  const set = (k,v) => {
+    if (k === 'title') setTitleEdited(true);
+    setForm(f => ({ ...f, [k]: v }));
+  };
+
+  const setClient = (clientId) => {
+    setForm(f => ({
+      ...f,
+      clientId,
+      title: titleEdited ? f.title : generateTitle(clientId, services),
+    }));
+  };
+
+  const toggleService = (key, patch) => {
+    setServices(s => {
+      const next = { ...s, [key]: { ...s[key], ...patch } };
+      setForm(f => ({
+        ...f,
+        value: String(computeServiceLineItems(next).reduce((sum,i)=>sum+i.amount,0)),
+        description: generateDescriptionFromServices(next, f.slaHours),
+        title: titleEdited ? f.title : generateTitle(f.clientId, next),
+      }));
+      return next;
+    });
+  };
+
+  const setSlaHours = (hours) => {
+    setForm(f => ({ ...f, slaHours: hours, description: generateDescriptionFromServices(services, hours) }));
+  };
+
+  const lineItems = computeServiceLineItems(services);
+  const lineItemsTotal = lineItems.reduce((s,i)=>s+i.amount,0);
 
   const validate = () => {
     const e = {};
@@ -1164,6 +1430,13 @@ function ContractForm({ navigate }) {
     if (!form.value || Number(form.value) <= 0) e.value = 'Enter a positive value.';
     if (!/^\d+(\.\d{1,2})?$/.test(String(form.value))) e.value = 'Max 2 decimal places.';
     if (form.startDate && form.endDate && new Date(form.endDate) <= new Date(form.startDate)) e.endDate = 'End date must be after start date.';
+    if (form.paymentType === 'one_time' && !oneTimeDate) e.oneTimeDate = 'Payment date is required.';
+    if (RECURRING_MONTHS[form.paymentType] && !firstDueDate) e.firstDueDate = 'First due date is required.';
+    if (form.paymentType === 'milestone') {
+      if (!installments.length) e.installments = 'Add at least one installment.';
+      else if (installments.some(r => !r.date || !r.amount || Number(r.amount) <= 0)) e.installments = 'Every installment needs a date and a positive amount.';
+      else if (Math.abs(milestoneTotal - Number(form.value)) > 0.01) e.installments = `Installments must add up to the contract value (${fmtMoney(form.value, form.currency)}).`;
+    }
     setErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -1172,15 +1445,53 @@ function ContractForm({ navigate }) {
     if (!validate()) return;
     setBusy(true);
     try {
-      const contract = await contractService.create({
-        ...form,
-        value: Number(form.value),
-        status: 'draft',
-        startDate: form.startDate ? new Date(form.startDate).toISOString() : '',
-        endDate: form.endDate ? new Date(form.endDate).toISOString() : '',
-        createdBy: auth.user.id,
-      });
-      toast.push('Contract created.', 'success');
+      const client = clients.find(c => c.id === form.clientId);
+      const schedule = form.paymentType === 'one_time'
+        ? [{ date: oneTimeDate, amount: Number(form.value) }]
+        : form.paymentType === 'milestone'
+        ? installments.map(r => ({ date: r.date, amount: Number(r.amount) }))
+        : recurringInstallments();
+
+      let contract;
+      if (isEdit) {
+        contract = await contractService.update(editContractId, {
+          ...form,
+          value: Number(form.value),
+          startDate: form.startDate ? new Date(form.startDate).toISOString() : '',
+          endDate: form.endDate ? new Date(form.endDate).toISOString() : '',
+          services,
+        });
+        await paymentService.replaceAllForContract(editContractId, schedule.map(inst => {
+          const vat = computeVAT(client, inst.amount);
+          return {
+            description: `${contract.title} — payment due ${fmtDate(inst.date)}`,
+            dueDate: new Date(inst.date).toISOString(),
+            amount: inst.amount, vatRate: vat.vatRate, vatAmount: vat.vatAmount,
+            totalAmount: round2(inst.amount + vat.vatAmount), currency: form.currency,
+          };
+        }));
+        toast.push('Contract updated.', 'success');
+      } else {
+        contract = await contractService.create({
+          ...form,
+          value: Number(form.value),
+          status: 'draft',
+          startDate: form.startDate ? new Date(form.startDate).toISOString() : '',
+          endDate: form.endDate ? new Date(form.endDate).toISOString() : '',
+          services,
+          createdBy: auth.user.id,
+        });
+        for (const inst of schedule) {
+          const vat = computeVAT(client, inst.amount);
+          await paymentService.create(contract.id, {
+            description: `${contract.title} — payment due ${fmtDate(inst.date)}`,
+            dueDate: new Date(inst.date).toISOString(),
+            amount: inst.amount, vatRate: vat.vatRate, vatAmount: vat.vatAmount,
+            totalAmount: round2(inst.amount + vat.vatAmount), currency: form.currency,
+          });
+        }
+        toast.push('Contract created.', 'success');
+      }
       navigate('contract:'+contract.id);
     } catch (err) {
       toast.push(err.message, 'error');
@@ -1189,31 +1500,120 @@ function ContractForm({ navigate }) {
     }
   };
 
-  if (!clients) return <div className="p-6"><Skeleton className="h-96 w-full" /></div>;
+  if (!clients || loadingExisting) return <div className="p-6"><Skeleton className="h-96 w-full" /></div>;
 
   return (
     <div className="p-4 md:p-6 max-w-3xl">
-      <div className="font-display mb-6">New Contract</div>
+      <div className="font-display mb-6">{isEdit ? 'Edit Contract' : 'New Contract'}</div>
+
       <div className="bg-white rounded-xl border border-[var(--border)] p-6">
         <Field label="Title" required error={errors.title}>
           <input value={form.title} onChange={e=>set('title',e.target.value)} className={inputCls(errors.title)} placeholder="e.g. Platform Access — Client Name" />
         </Field>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Field label="Client" required error={errors.clientId}>
-            <select value={form.clientId} onChange={e=>set('clientId',e.target.value)} className={inputCls(errors.clientId)}>
-              <option value="">Select client…</option>
-              {clients.map(c => <option key={c.id} value={c.id}>{c.companyName}</option>)}
-            </select>
-          </Field>
-          <Field label="Type">
-            <select value={form.type} onChange={e=>set('type',e.target.value)} className={inputCls(false)}>
-              {CONTRACT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-            </select>
-          </Field>
+        <Field label="Client" required error={errors.clientId}>
+          <select value={form.clientId} onChange={e=>setClient(e.target.value)} className={inputCls(errors.clientId)}>
+            <option value="">Select client…</option>
+            {clients.map(c => <option key={c.id} value={c.id}>{c.companyName}</option>)}
+          </select>
+        </Field>
+
+        <div className="font-heading text-base mt-6 mb-1 pt-6 border-t border-[var(--border)]">Services Included</div>
+        <p className="text-xs text-slate-500 mb-4">Tick each service this client is getting, set quantity and price. Mark a service "Included" to bundle it into the core platform price (shown to the client as part of the value they're getting), or "Comp" to waive it as a one-off free favor. Prices here are for your reference only — the contract sent to the client lists services and the total, not per-line prices. The description and value below update automatically — review both before saving.</p>
+        {SERVICE_GROUPS.map(group => (
+          <div key={group} className="mb-4 last:mb-0">
+            <div className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-2">{group}</div>
+            <div className="space-y-2">
+              {SERVICE_CATALOG.filter(s => s.group === group).map(s => {
+                const svc = services[s.key];
+                return (
+                  <div key={s.key} className="py-1.5 border-b border-[var(--border)] last:border-0">
+                    <div className="flex items-center gap-3">
+                      <input type="checkbox" checked={svc.selected} onChange={e=>toggleService(s.key, { selected: e.target.checked })} className="shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm">{s.label}</div>
+                        <div className="text-xs text-slate-400">{SERVICE_UNIT_LABELS[s.unit]}</div>
+                      </div>
+                      {(s.unit === 'per_match' || s.unit === 'per_unit') && svc.selected && (
+                        <input type="number" min="0" value={svc.qty} onChange={e=>toggleService(s.key, { qty: Number(e.target.value) })} className="w-20 px-2 py-1 text-sm border border-[var(--border)] rounded-lg" placeholder="Qty" />
+                      )}
+                      {svc.selected && s.unit !== 'included' && (
+                        <label className="flex items-center gap-1 text-xs text-slate-500 shrink-0 cursor-pointer">
+                          <input type="checkbox" checked={svc.bundledIncluded} onChange={e=>toggleService(s.key, { bundledIncluded: e.target.checked, complimentary: e.target.checked ? false : svc.complimentary })} />
+                          Included
+                        </label>
+                      )}
+                      {svc.selected && s.unit !== 'included' && (
+                        <label className="flex items-center gap-1 text-xs text-slate-500 shrink-0 cursor-pointer">
+                          <input type="checkbox" checked={svc.complimentary} onChange={e=>toggleService(s.key, { complimentary: e.target.checked, bundledIncluded: e.target.checked ? false : svc.bundledIncluded })} />
+                          Comp
+                        </label>
+                      )}
+                      {svc.selected && s.unit !== 'included' && (
+                        <div className="flex items-center gap-1 shrink-0">
+                          <span className="text-xs text-slate-400">{CURRENCY_SYMBOL[form.currency]}</span>
+                          <input disabled={svc.complimentary || svc.bundledIncluded} type="number" min="0" step="0.01" value={svc.rate} onChange={e=>toggleService(s.key, { rate: Number(e.target.value) })} className="w-20 px-2 py-1 text-sm border border-[var(--border)] rounded-lg text-right disabled:bg-slate-100 disabled:text-slate-400" placeholder="Rate" />
+                        </div>
+                      )}
+                      {svc.selected && s.unit !== 'included' && (
+                        <div className="w-24 text-right text-sm font-data">{(svc.complimentary || svc.bundledIncluded) ? 'Included' : fmtMoney(s.unit==='flat'?svc.rate:svc.rate*svc.qty, form.currency)}</div>
+                      )}
+                    </div>
+                    {s.key === 'platform_access' && svc.selected && (
+                      <div className="flex flex-wrap items-center gap-5 mt-2 ml-7 pl-2 border-l-2 border-slate-100">
+                        {[
+                          { field:'directorSeats', label:'Directors' },
+                          { field:'coachSeats', label:'Coaches' },
+                          { field:'playerSeats', label:'Players' },
+                        ].map(({ field, label }) => {
+                          const isUnlimited = svc[field] === UNLIMITED_SEATS;
+                          return (
+                            <div key={field} className="flex items-center gap-2">
+                              <label className="flex items-center gap-2 text-xs text-slate-500">
+                                {label}
+                                <input
+                                  type="number" min="0" disabled={isUnlimited}
+                                  value={isUnlimited ? '' : svc[field]}
+                                  onChange={e=>toggleService(s.key, { [field]: Number(e.target.value) })}
+                                  className="w-16 px-2 py-1 text-sm border border-[var(--border)] rounded-lg disabled:bg-slate-100 disabled:text-slate-400"
+                                  placeholder={isUnlimited ? '∞' : ''}
+                                />
+                              </label>
+                              <label className="flex items-center gap-1 text-xs text-slate-500 cursor-pointer">
+                                <input
+                                  type="checkbox" checked={isUnlimited}
+                                  onChange={e=>toggleService(s.key, { [field]: e.target.checked ? UNLIMITED_SEATS : 0 })}
+                                />
+                                Unlimited
+                              </label>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            {group === 'Core Services' && (
+              <div className="mt-3">
+                <Field label="Match Analysis SLA">
+                  <select value={form.slaHours} onChange={e=>setSlaHours(Number(e.target.value))} className={inputCls(false)}>
+                    {[24,48,72].map(h => <option key={h} value={h}>{h} hours</option>)}
+                  </select>
+                </Field>
+              </div>
+            )}
+          </div>
+        ))}
+        <div className="flex justify-between pt-3 border-t border-[var(--border)] font-heading text-base">
+          <span>Total</span>
+          <span className="font-data">{fmtMoney(lineItemsTotal, form.currency)}</span>
         </div>
+
+        <div className="font-heading text-base mt-6 mb-4 pt-6 border-t border-[var(--border)]">Contract Details</div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Field label="Value" required error={errors.value}>
-            <input type="number" step="0.01" value={form.value} onChange={e=>set('value',e.target.value)} className={inputCls(errors.value)} placeholder="12000.00" />
+            <input disabled type="number" step="0.01" value={form.value} onChange={e=>set('value',e.target.value)} className={inputCls(errors.value)} placeholder="12000.00" />
           </Field>
           <Field label="Currency">
             <select value={form.currency} onChange={e=>set('currency',e.target.value)} className={inputCls(false)}>
@@ -1221,6 +1621,7 @@ function ContractForm({ navigate }) {
             </select>
           </Field>
         </div>
+        <p className="text-xs text-slate-400 -mt-3 mb-4">Value is computed automatically from the services above.</p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Field label="Start Date">
             <input type="date" value={form.startDate} onChange={e=>set('startDate',e.target.value)} className={inputCls(false)} />
@@ -1241,12 +1642,56 @@ function ContractForm({ navigate }) {
             </select>
           </Field>
         </div>
+
+        <div className="font-heading text-sm mb-2">Payment Schedule</div>
+        {form.paymentType === 'one_time' && (
+          <Field label="Payment Date" required error={errors.oneTimeDate}>
+            <input type="date" value={oneTimeDate} onChange={e=>setOneTimeDate(e.target.value)} className={inputCls(errors.oneTimeDate)} />
+          </Field>
+        )}
+        {RECURRING_MONTHS[form.paymentType] && (
+          <React.Fragment>
+            <Field label="First Due Date" required error={errors.firstDueDate}>
+              <input type="date" value={firstDueDate} onChange={e=>setFirstDueDate(e.target.value)} className={inputCls(errors.firstDueDate)} />
+            </Field>
+            <p className="text-xs text-slate-500 mb-4">
+              {firstDueDate && recurringCount() > 0
+                ? `${recurringCount()} ${form.paymentType} payment${recurringCount()>1?'s':''} of ${fmtMoney(Number(form.value)/recurringCount(), form.currency)} each, starting ${fmtDate(firstDueDate)}.`
+                : 'Set the Start/End Date above and a first due date to generate the payment dates.'}
+            </p>
+          </React.Fragment>
+        )}
+        {form.paymentType === 'milestone' && (
+          <div className="mb-4">
+            {errors.installments && <p className="text-xs text-red-500 mb-2">{errors.installments}</p>}
+            <div className="space-y-2 mb-2">
+              {installments.map((row, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <input type="date" value={row.date} onChange={e=>updateInstallmentRow(i, { date: e.target.value })} className="px-2 py-1.5 text-sm border border-[var(--border)] rounded-lg flex-1" />
+                  <div className="flex items-center gap-1">
+                    <span className="text-xs text-slate-400">{CURRENCY_SYMBOL[form.currency]}</span>
+                    <input type="number" min="0" step="0.01" value={row.amount} onChange={e=>updateInstallmentRow(i, { amount: e.target.value })} className="w-28 px-2 py-1.5 text-sm border border-[var(--border)] rounded-lg text-right" placeholder="Amount" />
+                  </div>
+                  <button onClick={()=>removeInstallmentRow(i)} className="text-slate-400 hover:text-red-500 px-2">✕</button>
+                </div>
+              ))}
+            </div>
+            <button onClick={addInstallmentRow} className="text-sm text-[var(--blue-primary)] hover:underline">+ Add Installment</button>
+            <p className="text-xs text-slate-500 mt-2">Total: {fmtMoney(milestoneTotal, form.currency)} of {fmtMoney(form.value, form.currency)}</p>
+          </div>
+        )}
+
         <Field label="Description">
-          <textarea value={form.description} onChange={e=>set('description',e.target.value)} rows={4} className={inputCls(false)} placeholder="Scope of work, deliverables, terms…" />
+          <textarea value={form.description} onChange={e=>set('description',e.target.value)} rows={18} className={inputCls(false) + ' font-data text-xs'} placeholder="Scope of work, deliverables, terms…" />
         </Field>
+
+        <Field label="Special Terms / Additional Agreements (optional)">
+          <textarea value={form.specialTerms} onChange={e=>set('specialTerms',e.target.value)} rows={4} className={inputCls(false)} placeholder="Any one-off terms specific to this club — e.g. a complimentary extra, an early-renewal discount, a custom condition. Appears as its own clause in the signed contract." />
+        </Field>
+
         <div className="flex justify-end gap-3 pt-2">
           <button onClick={()=>navigate('contracts:all')} className="px-4 py-2 text-sm rounded-lg border border-[var(--border)] hover:bg-slate-50">Cancel</button>
-          <button disabled={busy} onClick={()=>submit(true)} className="px-4 py-2 text-sm rounded-lg bg-[var(--blue-primary)] text-white hover:bg-blue-700 transition disabled:opacity-50">{busy ? 'Saving…' : 'Save as Draft'}</button>
+          <button disabled={busy} onClick={()=>submit(true)} className="px-4 py-2 text-sm rounded-lg bg-[var(--blue-primary)] text-white hover:bg-blue-700 transition disabled:opacity-50">{busy ? 'Saving…' : (isEdit ? 'Save Changes' : 'Save as Draft')}</button>
         </div>
       </div>
     </div>
@@ -1263,6 +1708,9 @@ function ContractDetail({ contractId, navigate }) {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showMarkPaidPayment, setShowMarkPaidPayment] = useState(null);
   const [showMarkSignedModal, setShowMarkSignedModal] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [portableLink, setPortableLink] = useState(null);
+  const [portableLinkError, setPortableLinkError] = useState('');
 
   const load = useCallback(async () => {
     const c = await contractService.getById(contractId);
@@ -1271,6 +1719,24 @@ function ContractDetail({ contractId, navigate }) {
   }, [contractId]);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    if (!contract || !client || contract.status !== 'sent') { setPortableLink(null); return; }
+    (async () => {
+      try {
+        setPortableLinkError('');
+        const company = await companyService.get();
+        const payload = await encodePortablePayload({ contract, client, company });
+        const link = `${location.origin}${location.pathname}#/sign-data/${payload}`;
+        if (link.length > 7500) {
+          setPortableLinkError(`This link is very long (${link.length.toLocaleString()} characters) — some email clients or messaging apps may truncate it. Consider trimming the description or special terms, or send it as a plain text file instead of pasting inline.`);
+        }
+        setPortableLink(link);
+      } catch (err) {
+        setPortableLinkError('Could not generate a portable signing link: ' + err.message);
+      }
+    })();
+  }, [contract, client]);
 
   if (!contract) return <div className="p-6"><Skeleton className="h-96 w-full" /></div>;
 
@@ -1291,8 +1757,6 @@ function ContractDetail({ contractId, navigate }) {
     navigate('contracts:all');
   };
 
-  const signingLink = `${location.origin}${location.pathname}#/sign/${contract.id}/demo-token`;
-
   return (
     <div className="p-4 md:p-6 max-w-5xl">
       <button onClick={()=>navigate('contracts:all')} className="text-sm text-slate-500 hover:text-slate-700 mb-4">← All Contracts</button>
@@ -1306,13 +1770,29 @@ function ContractDetail({ contractId, navigate }) {
         </div>
       </div>
 
-      {auth.isAdmin && (
-        <div className="flex flex-wrap gap-2 mb-6 no-print">
-          {contract.status === 'draft' && <button onClick={()=>setShowSendModal(true)} className="px-4 py-2 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">Send for Signature</button>}
-          {(contract.status === 'draft' || contract.status === 'sent') && <button onClick={()=>setShowMarkSignedModal(true)} className="px-4 py-2 border border-[var(--border)] text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition">Record as Signed Manually</button>}
-          {contract.status === 'sent' && <div className="px-3 py-2 bg-slate-100 rounded-lg text-xs text-slate-500 flex items-center">Signing link: <code className="ml-2 text-blue-600">{signingLink}</code></div>}
-          {(contract.status === 'signed' || contract.status === 'active') && <button onClick={()=>setShowPaymentModal(true)} className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition">+ Add Payment Milestone</button>}
-          {(contract.status === 'draft' || contract.status === 'sent') && <button onClick={()=>setShowDeleteModal(true)} className="px-4 py-2 border border-red-200 text-red-600 rounded-lg text-sm font-medium hover:bg-red-50 transition">Delete</button>}
+      <div className="flex flex-wrap gap-2 mb-6 no-print">
+        <button onClick={()=>navigate('document:'+contract.id)} className="px-4 py-2 border border-[var(--border)] text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition">View Contract Document</button>
+        {auth.isAdmin && contract.status === 'draft' && <button onClick={()=>navigate('contracts:edit:'+contract.id)} className="px-4 py-2 border border-[var(--border)] text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition">Edit</button>}
+        {auth.isAdmin && contract.status === 'draft' && <button onClick={()=>setShowSendModal(true)} className="px-4 py-2 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">Send for Signature</button>}
+        {auth.isAdmin && (contract.status === 'draft' || contract.status === 'sent') && <button onClick={()=>setShowMarkSignedModal(true)} className="px-4 py-2 border border-[var(--border)] text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition">Record as Signed Manually</button>}
+        {auth.isAdmin && contract.status === 'sent' && <button onClick={()=>setShowImportModal(true)} className="px-4 py-2 border border-emerald-200 text-emerald-700 rounded-lg text-sm font-medium hover:bg-emerald-50 transition">Import Signed Confirmation</button>}
+        {auth.isAdmin && (contract.status === 'signed' || contract.status === 'active') && <button onClick={()=>setShowPaymentModal(true)} className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition">+ Add Payment Milestone</button>}
+        {auth.isAdmin && (contract.status === 'draft' || contract.status === 'sent') && <button onClick={()=>setShowDeleteModal(true)} className="px-4 py-2 border border-red-200 text-red-600 rounded-lg text-sm font-medium hover:bg-red-50 transition">Delete</button>}
+      </div>
+
+      {auth.isAdmin && contract.status === 'sent' && (
+        <div className="bg-white rounded-xl border border-[var(--border)] p-5 mb-6 no-print">
+          <div className="font-heading text-base mb-1">Signing Link</div>
+          <p className="text-xs text-slate-500 mb-3">This link carries the contract data with it, so it works for the client on their own device — not just this browser. Send it via email or WhatsApp. After they sign, they'll download a confirmation file to send back to you — use "Import Signed Confirmation" above once you have it.</p>
+          {portableLink ? (
+            <div className="flex items-start gap-2">
+              <code className="flex-1 text-xs text-blue-600 break-all bg-slate-50 rounded-lg p-2 border border-[var(--border)]">{portableLink}</code>
+              <button onClick={async ()=>{ try { await navigator.clipboard.writeText(portableLink); toast.push('Signing link copied.', 'success'); } catch (e) { toast.push('Could not copy — select and copy manually.', 'error'); } }} className="px-3 py-2 text-xs border border-[var(--border)] rounded-lg hover:bg-slate-50 shrink-0">Copy</button>
+            </div>
+          ) : (
+            <div className="text-xs text-slate-400">Generating link…</div>
+          )}
+          {portableLinkError && <p className="text-xs text-amber-600 mt-2">{portableLinkError}</p>}
         </div>
       )}
 
@@ -1351,6 +1831,11 @@ function ContractDetail({ contractId, navigate }) {
             <EmptyState title={contract.status==='sent' ? 'Awaiting signature' : 'Not yet sent'} subtitle={contract.status==='sent' ? 'The client has not signed this contract yet.' : 'Send this contract to collect a signature.'} icon="✍️" />
           )}
         </div>
+      </div>
+
+      <div className="bg-white rounded-xl border border-[var(--border)] p-5 mb-6">
+        <div className="font-heading text-base mb-3">Signed Document</div>
+        <ContractAttachment contract={contract} onChange={load} />
       </div>
 
       <div className="bg-white rounded-xl border border-[var(--border)] p-5 mb-6">
@@ -1395,6 +1880,271 @@ function ContractDetail({ contractId, navigate }) {
       {showPaymentModal && <AddPaymentModal contract={contract} client={client} onClose={()=>setShowPaymentModal(false)} onDone={()=>{ setShowPaymentModal(false); load(); }} />}
       {showMarkPaidPayment && <MarkPaidModal contract={contract} payment={showMarkPaidPayment} onClose={()=>setShowMarkPaidPayment(null)} onDone={()=>{ setShowMarkPaidPayment(null); load(); }} />}
       {showMarkSignedModal && <MarkSignedManuallyModal contract={contract} client={client} onClose={()=>setShowMarkSignedModal(false)} onDone={()=>{ setShowMarkSignedModal(false); load(); }} />}
+      {showImportModal && <ImportSignedConfirmationModal contract={contract} client={client} onClose={()=>setShowImportModal(false)} onDone={()=>{ setShowImportModal(false); load(); }} />}
+    </div>
+  );
+}
+
+const MAX_ATTACHMENT_BYTES = 3 * 1024 * 1024;
+const MAX_LOGO_BYTES = 1 * 1024 * 1024;
+
+function ContractAttachment({ contract, onChange }) {
+  const auth = useAuth();
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const [showRemoveModal, setShowRemoveModal] = useState(false);
+  const fileInputRef = useRef(null);
+
+  const onFilePicked = async (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    if (file.type !== 'application/pdf') {
+      toast.push('Only PDF files are supported.', 'error');
+      return;
+    }
+    if (file.size > MAX_ATTACHMENT_BYTES) {
+      toast.push(`File is too large (${(file.size/1024/1024).toFixed(1)}MB). Maximum is 3MB.`, 'error');
+      return;
+    }
+    setBusy(true);
+    try {
+      const base64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error('Could not read the file.'));
+        reader.readAsDataURL(file);
+      });
+      await contractService.setAttachment(contract.id, base64, file.name);
+      await contractService.addAuditEntry(contract.id, { type:'document', message:`Signed document uploaded (${file.name})`, by: auth.user.id });
+      toast.push('Document uploaded.', 'success');
+      onChange();
+    } catch (err) {
+      toast.push(err.message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const removeAttachment = async () => {
+    setBusy(true);
+    try {
+      await contractService.removeAttachment(contract.id);
+      await contractService.addAuditEntry(contract.id, { type:'document', message:`Signed document removed (${contract.attachmentName})`, by: auth.user.id });
+      toast.push('Document removed.', 'success');
+      setShowRemoveModal(false);
+      onChange();
+    } catch (err) {
+      toast.push(err.message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (contract.attachmentBase64) {
+    return (
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-lg bg-red-50 text-red-500 flex items-center justify-center text-lg">📄</div>
+          <div>
+            <div className="text-sm font-medium">{contract.attachmentName}</div>
+            <div className="text-xs text-slate-400">Uploaded signed contract</div>
+          </div>
+        </div>
+        <div className="flex items-center gap-3 no-print">
+          <a href={contract.attachmentBase64} download={contract.attachmentName} className="px-3 py-1.5 text-sm border border-[var(--border)] rounded-lg hover:bg-slate-50 transition">Download</a>
+          <a href={contract.attachmentBase64} target="_blank" rel="noopener noreferrer" className="px-3 py-1.5 text-sm border border-[var(--border)] rounded-lg hover:bg-slate-50 transition">View</a>
+          {auth.isAdmin && <button disabled={busy} onClick={()=>setShowRemoveModal(true)} className="px-3 py-1.5 text-sm border border-red-200 text-red-600 rounded-lg hover:bg-red-50 transition">Remove</button>}
+        </div>
+        <ConfirmModal open={showRemoveModal} onClose={()=>setShowRemoveModal(false)} onConfirm={removeAttachment} title="Remove Document" message={`Remove "${contract.attachmentName}" from this contract? This cannot be undone.`} confirmLabel="Remove" danger />
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <EmptyState title="No document uploaded" subtitle="Attach the signed contract PDF (max 3MB) so it's kept alongside this record." icon="📎" />
+      {auth.isAdmin && (
+        <div className="text-center -mt-2">
+          <input ref={fileInputRef} type="file" accept="application/pdf" onChange={onFilePicked} className="hidden" />
+          <button disabled={busy} onClick={()=>fileInputRef.current.click()} className="px-4 py-2 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition disabled:opacity-50">{busy ? 'Uploading…' : 'Upload Signed PDF'}</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ContractDocument({ contractId, navigate }) {
+  const [contract, setContract] = useState(null);
+  const [client, setClient] = useState(null);
+  const [company, setCompany] = useState(null);
+
+  useEffect(() => {
+    (async () => {
+      const c = await contractService.getById(contractId);
+      setContract(c);
+      if (c) setClient(await clientService.getById(c.clientId));
+      setCompany(await companyService.get());
+    })();
+  }, [contractId]);
+
+  if (!contract || !client || !company) return <div className="p-6"><Skeleton className="h-96 w-full" /></div>;
+
+  const lineItems = contract.services ? computeServiceLineItems(contract.services) : [];
+  const termYears = contract.startDate && contract.endDate ? Math.max(1, Math.round(daysBetween(contract.startDate, contract.endDate)/365)) : null;
+
+  return (
+    <div className="p-4 md:p-6 max-w-4xl">
+      <div className="flex items-center justify-between mb-4 no-print">
+        <button onClick={()=>navigate('contract:'+contract.id)} className="text-sm text-slate-500 hover:text-slate-700">← Back to Contract</button>
+        <button onClick={()=>window.print()} className="px-4 py-2 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">Print / Save as PDF</button>
+      </div>
+
+      {contract.status !== 'active' && contract.status !== 'signed' && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm text-amber-700 mb-4 no-print">
+          This is a template-generated draft. Review all clauses, values and dates carefully — and have it checked by a Cyprus lawyer — before sending it to a client for signature.
+        </div>
+      )}
+
+      <div className="bg-white rounded-xl border border-[var(--border)] p-10">
+        <div className="flex items-center justify-center gap-6 mb-10 pb-6 border-b border-[var(--border)]">
+          <div className="flex items-center justify-center">
+            {company.logo ? <img src={company.logo} alt={company.name} className="h-14 w-auto object-contain" /> : <div className="font-display text-blue-700">{company.name}</div>}
+          </div>
+          <div className="text-slate-300 text-xl">×</div>
+          <div className="flex items-center justify-center">
+            {client.logoBase64 ? <img src={client.logoBase64} alt={client.companyName} className="h-14 w-auto object-contain" /> : <div className="font-heading text-slate-700">{client.companyName}</div>}
+          </div>
+        </div>
+
+        <h1 className="font-display text-center mb-1">{contract.title.toUpperCase()}</h1>
+        <p className="text-center text-sm text-slate-500 mb-8">{contract.contractNumber}</p>
+
+        <p className="text-sm text-slate-700 mb-6">
+          This Agreement is made on <strong>{fmtDate(contract.createdAt)}</strong> between:
+        </p>
+        <p className="text-sm text-slate-700 mb-4">
+          <strong>{company.name}</strong>, a company registered under the laws of the Republic of Cyprus with registration number {company.registrationNumber}, VAT number {company.vatNumber}, having its registered office at {company.registeredAddress} (the "Service Provider"),
+        </p>
+        <p className="text-sm text-slate-700 mb-6">and</p>
+        <p className="text-sm text-slate-700 mb-8">
+          <strong>{client.companyName}</strong>, {client.registrationNumber ? `a company registered with registration number ${client.registrationNumber}, ` : ''}having its registered office at {client.address || '[address]'} (the "Client").
+        </p>
+        <p className="text-sm text-slate-700 mb-8">The above are hereinafter jointly referred to as the "Parties".</p>
+
+        {(() => {
+          let n = 1;
+          const purposeNum = n++;
+          const scopeNum = lineItems.length > 0 ? n++ : null;
+          const feesNum = n++;
+          const confidentialityNum = n++;
+          const ipNum = n++;
+          const durationNum = n++;
+          const terminationNum = n++;
+          const liabilityNum = n++;
+          const forceMajeureNum = n++;
+          const governingLawNum = n++;
+          const specialTermsNum = contract.specialTerms && contract.specialTerms.trim() ? n++ : null;
+          const entireAgreementNum = n++;
+          return (
+            <React.Fragment>
+              <h2 className="font-heading text-base mb-2">{purposeNum}. Purpose</h2>
+              <p className="text-sm text-slate-700 mb-8 whitespace-pre-line">{contract.description || 'The purpose of this Agreement is to define the terms of cooperation between the Parties for the provision of performance analysis and related services by the Service Provider to the Client.'}</p>
+
+              {scopeNum && (
+                <React.Fragment>
+                  <h2 className="font-heading text-base mb-3">{scopeNum}. Scope of Services</h2>
+                  <table className="w-full text-sm mb-8 border-collapse">
+                    <thead>
+                      <tr className="text-left text-xs text-slate-400 border-b border-[var(--border)]">
+                        <th className="py-2 pr-2">Service</th>
+                        <th className="py-2 text-right">Qty</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {lineItems.map(i => (
+                        <tr key={i.key} className="border-b border-[var(--border)]">
+                          <td className="py-2 pr-2">
+                            {i.label}
+                            {i.key === 'platform_access' && platformSeatsSummary(contract.services.platform_access) && (
+                              <div className="text-xs text-slate-400">Access: {platformSeatsSummary(contract.services.platform_access)} (exact users to be confirmed with the client)</div>
+                            )}
+                          </td>
+                          <td className="py-2 text-right font-data">{i.unit === 'flat' ? '—' : (i.unit === 'included' || i.complimentary || i.bundledIncluded) ? 'Included' : i.qty}</td>
+                        </tr>
+                      ))}
+                      <tr>
+                        <td className="py-2 font-medium">Total Contract Value</td>
+                        <td className="py-2 text-right font-data font-medium">{fmtMoney(contract.value, contract.currency)}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </React.Fragment>
+              )}
+
+              <h2 className="font-heading text-base mb-2">{feesNum}. Fees & Payment</h2>
+              <p className="text-sm text-slate-700 mb-2">In consideration of the services provided under this Agreement, the Client shall pay the Service Provider a total of <strong>{fmtMoney(contract.value, contract.currency)}</strong>, payable <strong>{contract.paymentType.replace('_',' ')}</strong>, net {contract.paymentTermsDays} days from the date of a valid invoice.</p>
+              <p className="text-sm text-slate-700 mb-8">All payments shall be made by bank transfer following the issuance of a valid invoice by the Service Provider, in accordance with applicable VAT regulations. A late payment penalty of {contract.latePaymentPenalty}% per month applies to overdue amounts.</p>
+
+              <h2 className="font-heading text-base mb-2">{confidentialityNum}. Confidentiality & Data Protection</h2>
+              <p className="text-sm text-slate-700 mb-2">The Service Provider shall process personal data strictly in accordance with the GDPR, the applicable Cyprus data protection legislation (Law 125(I)/2018), and Regulation (EU) 2016/679, and solely on documented instructions from the Client and exclusively for the purposes of this Agreement.</p>
+              <p className="text-sm text-slate-700 mb-8">All match analysis, reports, video clips, data outputs, and technical insights produced under this Agreement shall be treated as strictly confidential and used solely for the Client's internal purposes.</p>
+
+              <h2 className="font-heading text-base mb-2">{ipNum}. Intellectual Property Rights</h2>
+              <p className="text-sm text-slate-700 mb-8">All match footage, training footage, video recordings, reports, analytics outputs, player data, databases, clips and any other materials produced, collected or generated by the Service Provider under this Agreement (collectively, the "Deliverables") shall be the exclusive property of the Client. The Client shall have unrestricted, irrevocable and royalty-free rights to use, reproduce, store, modify, distribute and archive the Deliverables for any internal purpose. The Service Provider shall not use, reproduce, disclose, commercialize or share any Deliverables with any third party without the Client's prior written consent.</p>
+
+              <h2 className="font-heading text-base mb-2">{durationNum}. Duration</h2>
+              <p className="text-sm text-slate-700 mb-8">This Agreement shall commence on <strong>{fmtDate(contract.startDate)}</strong> and shall remain in force until <strong>{fmtDate(contract.endDate)}</strong>{termYears ? ` (approximately ${termYears} year${termYears>1?'s':''})` : ''}, unless terminated earlier in accordance with Section {terminationNum}.</p>
+
+              <h2 className="font-heading text-base mb-2">{terminationNum}. Termination</h2>
+              <p className="text-sm text-slate-700 mb-2">Either Party may terminate this Agreement with three (3) months' written notice, or immediately in the event of a material breach not remedied within thirty (30) days.</p>
+              <p className="text-sm text-slate-700 mb-8">Upon termination or expiration of this Agreement for any reason, the Service Provider shall promptly deliver to the Client all Deliverables produced under this Agreement.</p>
+
+              <h2 className="font-heading text-base mb-2">{liabilityNum}. Limitation of Liability</h2>
+              <p className="text-sm text-slate-700 mb-8">The Service Provider shall not be responsible for sporting results, team selection decisions, or competition outcomes. Total liability under this Agreement shall not exceed the fees paid during the preceding twelve (12) months. This limitation shall not apply to breaches of confidentiality, data protection obligations, or unauthorized use of the Client's data or intellectual property.</p>
+
+              <h2 className="font-heading text-base mb-2">{forceMajeureNum}. Force Majeure</h2>
+              <p className="text-sm text-slate-700 mb-8">Neither Party shall be liable for failure to perform due to events beyond reasonable control.</p>
+
+              <h2 className="font-heading text-base mb-2">{governingLawNum}. Governing Law & Jurisdiction</h2>
+              <p className="text-sm text-slate-700 mb-8">This Agreement shall be governed by the laws of {contract.governingLaw}, with exclusive jurisdiction in {contract.jurisdiction}.</p>
+
+              {specialTermsNum && (
+                <React.Fragment>
+                  <h2 className="font-heading text-base mb-2">{specialTermsNum}. Special Terms</h2>
+                  <p className="text-sm text-slate-700 mb-8 whitespace-pre-line">{contract.specialTerms}</p>
+                </React.Fragment>
+              )}
+
+              <h2 className="font-heading text-base mb-2">{entireAgreementNum}. Entire Agreement & Amendments</h2>
+              <p className="text-sm text-slate-700 mb-12">This Agreement constitutes the entire agreement between the Parties. Any amendment must be made in writing and signed by both Parties.</p>
+            </React.Fragment>
+          );
+        })()}
+
+        <h2 className="font-heading text-base mb-6">Signatures</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 text-sm">
+          <div>
+            <div className="text-slate-500 mb-1">For {company.name}</div>
+            <div className="border-b border-slate-300 h-10 mb-2"></div>
+            <div className="text-xs text-slate-400">Name / Title / Date</div>
+          </div>
+          <div>
+            <div className="text-slate-500 mb-1">For {client.companyName}</div>
+            {contract.signedAt ? (
+              <React.Fragment>
+                <div className="italic text-slate-700 border-b border-slate-300 pb-2 mb-2">{contract.signerName}</div>
+                <div className="text-xs text-slate-400">{contract.signerTitle ? contract.signerTitle + ' · ' : ''}{fmtDate(contract.signedAt)}</div>
+              </React.Fragment>
+            ) : (
+              <React.Fragment>
+                <div className="border-b border-slate-300 h-10 mb-2"></div>
+                <div className="text-xs text-slate-400">Name / Title / Date</div>
+              </React.Fragment>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1558,6 +2308,86 @@ function MarkSignedManuallyModal({ contract, client, onClose, onDone }) {
   );
 }
 
+function ImportSignedConfirmationModal({ contract, client, onClose, onDone }) {
+  const auth = useAuth();
+  const toast = useToast();
+  const [file, setFile] = useState(null);
+  const [error, setError] = useState('');
+  const [preview, setPreview] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const fileInputRef = useRef(null);
+
+  const onFilePicked = async (e) => {
+    const f = e.target.files[0];
+    e.target.value = '';
+    setError(''); setPreview(null); setFile(null);
+    if (!f) return;
+    try {
+      const text = await f.text();
+      const data = JSON.parse(text);
+      if (data.type !== 'sos-signed-confirmation') throw new Error('This is not a valid signed confirmation file.');
+      if (data.contractId !== contract.id) throw new Error('This confirmation is for a different contract (' + (data.contractNumber || 'unknown') + '), not this one.');
+      setFile(f);
+      setPreview(data);
+    } catch (err) {
+      setError(err.message.includes('JSON') ? 'This file could not be read as a valid confirmation file.' : err.message);
+    }
+  };
+
+  const submit = async () => {
+    if (!preview) return;
+    setBusy(true);
+    try {
+      const hashMismatch = contract.documentHashBefore && preview.originalDocumentHash && contract.documentHashBefore !== preview.originalDocumentHash;
+      await contractService.update(contract.id, {
+        status: 'active',
+        signerName: preview.signerName, signerTitle: preview.signerTitle, signerCompany: preview.signerCompany, signerEmail: preview.signerEmail,
+        signedAt: preview.signedAt, signerIP: null,
+        documentHashAfter: preview.documentHashAfter,
+        consentElectronic: !!preview.consentElectronic, consentAuthorized: !!preview.consentAuthorized, consentRead: !!preview.consentRead,
+      });
+      if (preview.client && client) {
+        await clientService.update(client.id, {
+          companyName: preview.client.companyName || client.companyName,
+          address: preview.client.address || client.address,
+          vatNumber: preview.client.vatNumber || client.vatNumber,
+          registrationNumber: preview.client.registrationNumber || client.registrationNumber,
+        });
+      }
+      await contractService.addAuditEntry(contract.id, { type:'signed', message:`Signed confirmation imported for ${preview.signerName} (${preview.signerTitle})${hashMismatch ? ' — WARNING: document hash mismatch, verify terms were not altered' : ''}`, by: auth.user.id });
+      toast.push(hashMismatch ? 'Imported, but the document hash did not match — please double-check the terms.' : 'Signed confirmation imported.', hashMismatch ? 'error' : 'success');
+      onDone();
+    } catch (err) {
+      toast.push(err.message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal open onClose={onClose} title="Import Signed Confirmation" footer={
+      <React.Fragment>
+        <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-[var(--border)] hover:bg-slate-50">Cancel</button>
+        <button disabled={!preview || busy} onClick={submit} className="px-4 py-2 text-sm rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed">{busy ? 'Importing…' : 'Confirm & Mark Signed'}</button>
+      </React.Fragment>
+    }>
+      <p className="text-sm text-slate-600 mb-4">Upload the <strong>signed-confirmation.json</strong> file the client downloaded after signing via a portable signing link.</p>
+      <input ref={fileInputRef} type="file" accept="application/json" onChange={onFilePicked} className="text-sm mb-3" />
+      {error && <p className="text-xs text-red-500 mb-3">{error}</p>}
+      {preview && (
+        <div className="bg-slate-50 rounded-lg p-4 text-sm space-y-1.5">
+          <div className="flex justify-between"><span className="text-slate-500">Signed by</span><span className="font-medium">{preview.signerName}, {preview.signerTitle}</span></div>
+          <div className="flex justify-between"><span className="text-slate-500">Company</span><span>{preview.signerCompany}</span></div>
+          <div className="flex justify-between"><span className="text-slate-500">Signed at</span><span>{fmtDateTime(preview.signedAt)}</span></div>
+          {contract.documentHashBefore && preview.originalDocumentHash && contract.documentHashBefore !== preview.originalDocumentHash && (
+            <p className="text-xs text-red-600 pt-2">⚠ This confirmation's document hash doesn't match your current contract — the terms may have changed since it was sent. Review carefully before confirming.</p>
+          )}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 /* =========================================================================
    PAYMENTS (Receivables + History)
    ========================================================================= */
@@ -1685,6 +2515,19 @@ function PaymentsHistory() {
 /* =========================================================================
    CLIENTS
    ========================================================================= */
+function ClientLogo({ client, size }) {
+  const s = size || 40;
+  if (client && client.logoBase64) {
+    return <img src={client.logoBase64} alt={client.companyName} className="rounded-lg object-contain bg-white border border-[var(--border)]" style={{ width: s, height: s }} />;
+  }
+  const initial = (client && client.companyName ? client.companyName.trim()[0] : '?').toUpperCase();
+  return (
+    <div className="rounded-lg bg-slate-100 text-slate-400 flex items-center justify-center font-heading" style={{ width: s, height: s, fontSize: s * 0.4 }}>
+      {initial}
+    </div>
+  );
+}
+
 function ClientsPage({ navigate }) {
   const auth = useAuth();
   const toast = useToast();
@@ -1707,8 +2550,13 @@ function ClientsPage({ navigate }) {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {clients.map(c => (
             <button key={c.id} onClick={()=>setEditClient(c)} className="text-left bg-white rounded-xl border border-[var(--border)] p-5 hover:border-blue-300 hover:shadow-sm transition cursor-pointer">
-              <div className="font-heading text-base">{c.companyName}</div>
-              <div className="text-xs text-slate-400 mb-3">{c.country} · {c.currency}</div>
+              <div className="flex items-center gap-3 mb-3">
+                <ClientLogo client={c} size={44} />
+                <div>
+                  <div className="font-heading text-base">{c.companyName}</div>
+                  <div className="text-xs text-slate-400">{c.country} · {c.currency}</div>
+                </div>
+              </div>
               <div className="text-sm text-slate-600 space-y-1">
                 <div>{c.contactName}</div>
                 <div className="text-xs">{c.contactEmail}</div>
@@ -1738,9 +2586,38 @@ function ClientFormModal({ client, readOnly, onClose, onDone }) {
     contactPhone: client.contactPhone || '', address: client.address || '', country: client.country || 'CY',
     vatNumber: client.vatNumber || '', registrationNumber: client.registrationNumber || '', currency: client.currency || 'EUR',
   } : { companyName:'', contactName:'', contactEmail:'', contactPhone:'', address:'', country:'CY', vatNumber:'', registrationNumber:'', currency:'EUR' });
+  const [logoBase64, setLogoBase64] = useState(client && client.logoBase64 ? client.logoBase64 : null);
   const [errors, setErrors] = useState({});
   const [busy, setBusy] = useState(false);
+  const [logoBusy, setLogoBusy] = useState(false);
+  const logoInputRef = useRef(null);
   const set = (k,v) => setForm(f=>({...f,[k]:v}));
+
+  const onLogoPicked = async (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      toast.push('Please choose an image file.', 'error');
+      return;
+    }
+    if (file.size > MAX_LOGO_BYTES) {
+      toast.push(`Image is too large (${(file.size/1024/1024).toFixed(1)}MB). Maximum is 1MB.`, 'error');
+      return;
+    }
+    setLogoBusy(true);
+    try {
+      const base64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error('Could not read the image.'));
+        reader.readAsDataURL(file);
+      });
+      setLogoBase64(base64);
+    } catch (err) {
+      toast.push(err.message, 'error');
+    } finally { setLogoBusy(false); }
+  };
 
   const submit = async () => {
     const e = {};
@@ -1751,7 +2628,7 @@ function ClientFormModal({ client, readOnly, onClose, onDone }) {
     if (Object.keys(e).length) return;
     setBusy(true);
     try {
-      const payload = { ...form, vatNumber: form.vatNumber || null, registrationNumber: form.registrationNumber || null };
+      const payload = { ...form, vatNumber: form.vatNumber || null, registrationNumber: form.registrationNumber || null, logoBase64: logoBase64 || null };
       if (isEdit) {
         await clientService.update(client.id, payload);
         toast.push('Client updated.', 'success');
@@ -1772,6 +2649,18 @@ function ClientFormModal({ client, readOnly, onClose, onDone }) {
         {!readOnly && <button disabled={busy} onClick={submit} className="px-4 py-2 text-sm rounded-lg bg-[var(--blue-primary)] text-white hover:bg-blue-700">{busy ? 'Saving…' : (isEdit ? 'Save Changes' : 'Create')}</button>}
       </React.Fragment>
     }>
+      <Field label="Club Logo">
+        <div className="flex items-center gap-3">
+          <ClientLogo client={{ companyName: form.companyName, logoBase64 }} size={56} />
+          {!readOnly && (
+            <div className="flex items-center gap-2">
+              <input ref={logoInputRef} type="file" accept="image/*" className="hidden" onChange={onLogoPicked} />
+              <button type="button" disabled={logoBusy} onClick={()=>logoInputRef.current.click()} className="px-3 py-1.5 text-sm border border-[var(--border)] rounded-lg hover:bg-slate-50 transition">{logoBusy ? 'Uploading…' : (logoBase64 ? 'Change' : 'Upload')}</button>
+              {logoBase64 && <button type="button" onClick={()=>setLogoBase64(null)} className="px-3 py-1.5 text-sm border border-red-200 text-red-600 rounded-lg hover:bg-red-50 transition">Remove</button>}
+            </div>
+          )}
+        </div>
+      </Field>
       <Field label="Company Name" required error={errors.companyName}><input disabled={readOnly} value={form.companyName} onChange={e=>set('companyName',e.target.value)} className={inputCls(errors.companyName)} /></Field>
       <Field label="Contact Name" required error={errors.contactName}><input disabled={readOnly} value={form.contactName} onChange={e=>set('contactName',e.target.value)} className={inputCls(errors.contactName)} /></Field>
       <Field label="Contact Email" required error={errors.contactEmail}><input disabled={readOnly} value={form.contactEmail} onChange={e=>set('contactEmail',e.target.value)} className={inputCls(errors.contactEmail)} /></Field>
@@ -1901,6 +2790,29 @@ function CompanyProfileSettings() {
     toast.push('Company profile updated.', 'success');
   };
 
+  const onLogoPicked = async (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('image/')) { toast.push('Logo must be an image file.', 'error'); return; }
+    if (file.size > 1024 * 1024) { toast.push('Logo must be under 1MB.', 'error'); return; }
+    const base64 = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(new Error('Could not read the file.'));
+      reader.readAsDataURL(file);
+    });
+    const updated = await companyService.update({ logo: base64 });
+    setForm(updated);
+    toast.push('Logo updated.', 'success');
+  };
+
+  const removeLogo = async () => {
+    const updated = await companyService.update({ logo: null });
+    setForm(updated);
+    toast.push('Logo removed.', 'success');
+  };
+
   const doReset = async () => {
     setResetting(true);
     try {
@@ -1918,6 +2830,24 @@ function CompanyProfileSettings() {
     <div className="p-4 md:p-6 max-w-2xl">
       <div className="font-display mb-6">Company Profile</div>
       <div className="bg-white rounded-xl border border-[var(--border)] p-6 mb-6">
+        <Field label="Logo">
+          <div className="flex items-center gap-4">
+            {form.logo ? (
+              <img src={form.logo} alt="Company logo" className="h-14 w-auto object-contain border border-[var(--border)] rounded-lg p-1.5" />
+            ) : (
+              <div className="h-14 w-24 rounded-lg border border-dashed border-[var(--border)] flex items-center justify-center text-xs text-slate-400">No logo</div>
+            )}
+            {auth.isAdmin && (
+              <div className="flex gap-2">
+                <label className="px-3 py-1.5 text-sm border border-[var(--border)] rounded-lg hover:bg-slate-50 transition cursor-pointer">
+                  Upload
+                  <input type="file" accept="image/*" onChange={onLogoPicked} className="hidden" />
+                </label>
+                {form.logo && <button onClick={removeLogo} className="px-3 py-1.5 text-sm border border-red-200 text-red-600 rounded-lg hover:bg-red-50 transition">Remove</button>}
+              </div>
+            )}
+          </div>
+        </Field>
         <Field label="Company Name"><input disabled={!auth.isAdmin} value={form.name} onChange={e=>set('name',e.target.value)} className={inputCls(false)} /></Field>
         <Field label="Registered Address"><input disabled={!auth.isAdmin} value={form.registeredAddress} onChange={e=>set('registeredAddress',e.target.value)} className={inputCls(false)} /></Field>
         <div className="grid grid-cols-2 gap-4">
@@ -2095,12 +3025,14 @@ function UserFormModal({ onClose, onDone }) {
 /* =========================================================================
    CLIENT-FACING SIGNING FLOW  (#/sign/{contractId}/{token})
    ========================================================================= */
-function SigningFlow({ contractId }) {
+function SigningFlow({ contractId, portablePayload }) {
   const toast = useToast();
+  const isPortable = !!portablePayload;
   const [screen, setScreen] = useState(1);
   const [contract, setContract] = useState(null);
   const [client, setClient] = useState(null);
   const [company, setCompany] = useState(null);
+  const [loadError, setLoadError] = useState('');
   const [emailInput, setEmailInput] = useState('');
   const [emailError, setEmailError] = useState('');
   const [scrolledToBottom, setScrolledToBottom] = useState(false);
@@ -2119,18 +3051,82 @@ function SigningFlow({ contractId }) {
   const [busy, setBusy] = useState(false);
   const [signedResult, setSignedResult] = useState(null);
 
+  const [editingClientDetails, setEditingClientDetails] = useState(false);
+  const [clientDetailsForm, setClientDetailsForm] = useState(null);
+  const [clientDetailsErrors, setClientDetailsErrors] = useState({});
+  const [savingClientDetails, setSavingClientDetails] = useState(false);
+
   useEffect(() => {
     (async () => {
+      if (isPortable) {
+        try {
+          const data = await decodePortablePayload(portablePayload);
+          setContract(data.contract);
+          setClient(data.client);
+          setCompany(data.company);
+          setSigCompany(data.client ? data.client.companyName : '');
+          if (data.client) setClientDetailsForm({ companyName: data.client.companyName || '', address: data.client.address || '', vatNumber: data.client.vatNumber || '', registrationNumber: data.client.registrationNumber || '' });
+        } catch (err) {
+          setLoadError('This signing link could not be read — it may be incomplete or corrupted. Ask the sender for a fresh link.');
+        }
+        return;
+      }
       const c = await contractService.getById(contractId);
       setContract(c);
       if (c) {
         const cl = await clientService.getById(c.clientId);
         setClient(cl);
         setSigCompany(cl ? cl.companyName : '');
+        if (cl) setClientDetailsForm({ companyName: cl.companyName || '', address: cl.address || '', vatNumber: cl.vatNumber || '', registrationNumber: cl.registrationNumber || '' });
       }
       setCompany(await companyService.get());
     })();
-  }, [contractId]);
+  }, [contractId, isPortable, portablePayload]);
+
+  const saveClientDetails = async () => {
+    const e = {};
+    if (!clientDetailsForm.companyName.trim()) e.companyName = 'Company name is required.';
+    setClientDetailsErrors(e);
+    if (Object.keys(e).length) return;
+    setSavingClientDetails(true);
+    try {
+      if (isPortable) {
+        const updated = { ...client, companyName: clientDetailsForm.companyName.trim(), address: clientDetailsForm.address.trim(), vatNumber: clientDetailsForm.vatNumber.trim() || null, registrationNumber: clientDetailsForm.registrationNumber.trim() || null };
+        setClient(updated);
+        setSigCompany(updated.companyName);
+        setEditingClientDetails(false);
+        toast.push('Details updated for this session — they will be included in your signed confirmation file.', 'success');
+        return;
+      }
+      const updated = await clientService.update(client.id, {
+        companyName: clientDetailsForm.companyName.trim(),
+        address: clientDetailsForm.address.trim(),
+        vatNumber: clientDetailsForm.vatNumber.trim() || null,
+        registrationNumber: clientDetailsForm.registrationNumber.trim() || null,
+      });
+      setClient(updated);
+      setSigCompany(updated.companyName);
+      await contractService.addAuditEntry(contract.id, { type:'client_update', message:`Client updated their company details via the signing link (${updated.companyName})`, by: null });
+      setEditingClientDetails(false);
+      toast.push('Company details updated.', 'success');
+    } catch (err) {
+      toast.push(err.message, 'error');
+    } finally {
+      setSavingClientDetails(false);
+    }
+  };
+
+  if (loadError) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[var(--navy-deep)] px-4">
+        <div className="bg-white rounded-xl shadow-2xl p-8 max-w-md text-center">
+          <div className="text-4xl mb-4">⚠️</div>
+          <div className="font-heading mb-2">Couldn't open this document</div>
+          <p className="text-sm text-slate-500">{loadError}</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!contract || !client || !company) {
     return <div className="min-h-screen flex items-center justify-center bg-[var(--navy-deep)]"><div className="text-white text-sm">Loading document…</div></div>;
@@ -2205,6 +3201,22 @@ function SigningFlow({ contractId }) {
     try {
       const hashAfter = await sha256(contract.title + contract.description + contract.value);
       const signedAt = nowISO();
+
+      if (isPortable) {
+        const confirmation = {
+          type: 'sos-signed-confirmation', version: 1,
+          contractId: contract.id, contractNumber: contract.contractNumber, contractTitle: contract.title,
+          originalDocumentHash: contract.documentHashBefore || null, documentHashAfter: hashAfter,
+          client: { companyName: client.companyName, address: client.address, vatNumber: client.vatNumber, registrationNumber: client.registrationNumber },
+          signerName: sigName, signerTitle: sigTitle, signerCompany: sigCompany, signerEmail: emailInput,
+          signedAt,
+          consentElectronic: consents.electronic, consentAuthorized: consents.authorized, consentRead: consents.read,
+        };
+        setSignedResult({ signedAt, confirmation });
+        setScreen(5);
+        return;
+      }
+
       await contractService.update(contract.id, {
         status: 'active',
         signerName: sigName, signerTitle: sigTitle, signerCompany: sigCompany, signerEmail: emailInput,
@@ -2290,6 +3302,45 @@ function SigningFlow({ contractId }) {
                   <div className="flex justify-between"><span className="text-slate-500">End Date</span><span>{fmtDate(contract.endDate)}</span></div>
                   <div className="flex justify-between"><span className="text-slate-500">Governed by</span><span>{contract.governingLaw}</span></div>
                 </div>
+
+                <div className="mt-4 border border-[var(--border)] rounded-lg p-4">
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="text-sm font-medium">Your Company Details</div>
+                    {!editingClientDetails && <button onClick={()=>setEditingClientDetails(true)} className="text-xs text-blue-600 hover:underline">Edit</button>}
+                  </div>
+                  {!editingClientDetails ? (
+                    <div className="text-sm text-slate-600 space-y-1">
+                      <div>{client.companyName}</div>
+                      {client.address && <div className="text-xs text-slate-400">{client.address}</div>}
+                      <div className="text-xs text-slate-400">
+                        {client.vatNumber ? `VAT: ${client.vatNumber}` : 'VAT: —'} · {client.registrationNumber ? `Reg. No: ${client.registrationNumber}` : 'Reg. No: —'}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mt-2">
+                      <p className="text-xs text-slate-500 mb-3">Correct your company details below if anything is wrong — these are saved to your record and reflected on the contract document. This does not change the deal terms above.</p>
+                      <Field label="Company Name" required error={clientDetailsErrors.companyName}>
+                        <input value={clientDetailsForm.companyName} onChange={e=>setClientDetailsForm(f=>({...f,companyName:e.target.value}))} className={inputCls(clientDetailsErrors.companyName)} />
+                      </Field>
+                      <Field label="Registered Address">
+                        <input value={clientDetailsForm.address} onChange={e=>setClientDetailsForm(f=>({...f,address:e.target.value}))} className={inputCls(false)} />
+                      </Field>
+                      <div className="grid grid-cols-2 gap-3">
+                        <Field label="VAT Number">
+                          <input value={clientDetailsForm.vatNumber} onChange={e=>setClientDetailsForm(f=>({...f,vatNumber:e.target.value}))} className={inputCls(false)} />
+                        </Field>
+                        <Field label="Registration Number">
+                          <input value={clientDetailsForm.registrationNumber} onChange={e=>setClientDetailsForm(f=>({...f,registrationNumber:e.target.value}))} className={inputCls(false)} />
+                        </Field>
+                      </div>
+                      <div className="flex justify-end gap-2">
+                        <button onClick={()=>{ setEditingClientDetails(false); setClientDetailsForm({ companyName: client.companyName || '', address: client.address || '', vatNumber: client.vatNumber || '', registrationNumber: client.registrationNumber || '' }); }} className="px-3 py-1.5 text-xs rounded-lg border border-[var(--border)] hover:bg-slate-50">Cancel</button>
+                        <button disabled={savingClientDetails} onClick={saveClientDetails} className="px-3 py-1.5 text-xs rounded-lg bg-[var(--blue-primary)] text-white hover:bg-blue-700">{savingClientDetails ? 'Saving…' : 'Save Details'}</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 <div className="flex justify-between mt-6">
                   <button onClick={()=>setScreen(2)} className="px-4 py-2 text-sm rounded-lg border border-[var(--border)] hover:bg-slate-50">Back</button>
                   <button onClick={()=>setScreen(4)} className="px-5 py-2.5 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">Continue to Signature</button>
@@ -2367,11 +3418,25 @@ function SigningFlow({ contractId }) {
                   <div className="flex justify-between"><span className="text-slate-500">Signed by</span><span>{sigName}, {sigTitle}</span></div>
                   <div className="flex justify-between"><span className="text-slate-500">Date &amp; Time</span><span>{fmtDateTime(signedResult.signedAt)}</span></div>
                 </div>
-                <p className="text-xs text-slate-400 mb-6">A signed copy has been sent to {emailInput} (simulated).</p>
-                <div className="flex flex-col sm:flex-row gap-3 justify-center mb-6">
-                  <a href={`data:text/plain;charset=utf-8,${encodeURIComponent(contract.title + '\n\nSigned by ' + sigName + ' on ' + fmtDateTime(signedResult.signedAt))}`} download={`${contract.contractNumber}-signed.txt`} className="px-4 py-2 border border-[var(--border)] rounded-lg text-sm hover:bg-slate-50">Download Signed Document</a>
-                  <a href={`data:text/plain;charset=utf-8,${encodeURIComponent('Certificate of Signature\n\nContract: ' + contract.title + '\nSigned by: ' + sigName + ' (' + sigTitle + ')\nDate: ' + fmtDateTime(signedResult.signedAt) + '\nIP: 203.0.113.42')}`} download={`${contract.contractNumber}-certificate.txt`} className="px-4 py-2 border border-[var(--border)] rounded-lg text-sm hover:bg-slate-50">Download Certificate</a>
-                </div>
+
+                {isPortable ? (
+                  <React.Fragment>
+                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-800 text-left mb-6">
+                      <strong>One more step:</strong> download the confirmation file below and send it back to {company.contactEmail} (email/WhatsApp) so {company.name} can record your signature on their side. This link doesn't connect to their system directly.
+                    </div>
+                    <div className="flex flex-col sm:flex-row gap-3 justify-center mb-6">
+                      <a href={`data:application/json;charset=utf-8,${encodeURIComponent(JSON.stringify(signedResult.confirmation, null, 2))}`} download={`${contract.contractNumber}-signed-confirmation.json`} className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700">Download Signed Confirmation</a>
+                    </div>
+                  </React.Fragment>
+                ) : (
+                  <React.Fragment>
+                    <p className="text-xs text-slate-400 mb-6">A signed copy has been sent to {emailInput} (simulated).</p>
+                    <div className="flex flex-col sm:flex-row gap-3 justify-center mb-6">
+                      <a href={`data:text/plain;charset=utf-8,${encodeURIComponent(contract.title + '\n\nSigned by ' + sigName + ' on ' + fmtDateTime(signedResult.signedAt))}`} download={`${contract.contractNumber}-signed.txt`} className="px-4 py-2 border border-[var(--border)] rounded-lg text-sm hover:bg-slate-50">Download Signed Document</a>
+                      <a href={`data:text/plain;charset=utf-8,${encodeURIComponent('Certificate of Signature\n\nContract: ' + contract.title + '\nSigned by: ' + sigName + ' (' + sigTitle + ')\nDate: ' + fmtDateTime(signedResult.signedAt) + '\nIP: 203.0.113.42')}`} download={`${contract.contractNumber}-certificate.txt`} className="px-4 py-2 border border-[var(--border)] rounded-lg text-sm hover:bg-slate-50">Download Certificate</a>
+                    </div>
+                  </React.Fragment>
+                )}
                 <p className="text-xs text-slate-400">{company.name} · {company.contactEmail}</p>
               </div>
             )}
@@ -2404,7 +3469,9 @@ function AuthedApp() {
   if (route === 'dashboard') page = <Dashboard navigate={navigate} />;
   else if (route === 'contracts:all') page = <ContractsList navigate={navigate} />;
   else if (route === 'contracts:new') page = <ContractForm navigate={navigate} />;
+  else if (route.startsWith('contracts:edit:')) page = <ContractForm navigate={navigate} editContractId={route.slice('contracts:edit:'.length)} />;
   else if (route.startsWith('contract:')) page = <ContractDetail contractId={route.split(':')[1]} navigate={navigate} />;
+  else if (route.startsWith('document:')) page = <ContractDocument contractId={route.split(':')[1]} navigate={navigate} />;
   else if (route === 'payments:receivables') page = <PaymentsReceivables navigate={navigate} />;
   else if (route === 'payments:history') page = <PaymentsHistory />;
   else if (route === 'clients') page = <ClientsPage navigate={navigate} />;
@@ -2419,7 +3486,10 @@ function AuthedApp() {
       <Sidebar route={route} navigate={navigate} mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} />
       <div className="flex-1 min-w-0">
         <div className="md:hidden sticky top-0 z-20 bg-[var(--navy-deep)] px-4 py-3 flex items-center justify-between no-print">
-          <div className="text-white font-heading text-sm">SOS Contracts</div>
+          <div className="flex items-center gap-2">
+            <img src="Logo-scios-dark.png" alt="SCIOS" className="h-6 w-auto object-contain" />
+            <div className="text-white font-heading text-sm">SOS Contracts</div>
+          </div>
           <button onClick={()=>setMobileOpen(true)} className="text-white text-xl leading-none">☰</button>
         </div>
         {page}
@@ -2487,6 +3557,7 @@ function AccountSetupFlow({ token }) {
     <div className="min-h-screen flex items-center justify-center bg-[var(--navy-deep)] px-4">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
+          <img src="Logo-scios-dark.png" alt="SCIOS" className="h-14 w-auto object-contain mx-auto mb-4" />
           <div className="text-white font-display">SOS Contracts</div>
           <div className="text-slate-400 text-sm mt-1">Set up your account</div>
         </div>
@@ -2515,6 +3586,11 @@ function App() {
   const signMatch = hash.match(/^#\/sign\/([^/]+)\/([^/]+)/);
   if (signMatch) {
     return <SigningFlow contractId={signMatch[1]} />;
+  }
+
+  const signDataMatch = hash.match(/^#\/sign-data\/(.+)$/);
+  if (signDataMatch) {
+    return <SigningFlow portablePayload={signDataMatch[1]} />;
   }
 
   const setupMatch = hash.match(/^#\/setup\/([^/]+)/);
