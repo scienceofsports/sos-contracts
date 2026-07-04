@@ -76,7 +76,7 @@ export function signRequestEmail(opts: {
     <p style="background:#F1F5F9;padding:12px 16px;border-radius:8px;font-weight:600;">${opts.contractTitle}</p>
     <p>Please click below to review the full agreement and sign securely. You'll be asked to confirm a short code sent to your email to verify your identity.</p>
     <p style="text-align:center;margin:28px 0;">
-      <a href="${opts.signUrl}" style="background:#2563EB;color:#fff;text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:600;display:inline-block;">Review &amp; Sign Contract</a>
+      <a href="${opts.signUrl}" style="background:#22C7E6;color:#0A1A3F;text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:600;display:inline-block;">Review &amp; Sign Contract</a>
     </p>
     <p style="color:#64748b;font-size:13px;">This link is unique to you and valid for 7 days. If you weren't expecting this, you can safely ignore it.</p>
   `);

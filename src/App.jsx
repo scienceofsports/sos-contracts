@@ -137,7 +137,7 @@ function Sidebar({ route, navigate, mobileOpen, setMobileOpen }) {
       <div className={`fixed md:static z-40 top-0 left-0 h-full w-64 bg-[var(--navy-deep)] flex flex-col transition-transform no-print ${mobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
         <div className="sos-rainbow" />
         <div className="px-5 py-6 border-b border-white/10 flex flex-col items-start gap-2">
-          <img src="Logo-scios-bright.png" alt="SCIOS" className="h-12 w-auto object-contain" />
+          <img src="Logo-scios-dark.png" alt="SCIOS" className="h-12 w-auto object-contain" />
           <div className="text-white font-heading">SOS Contracts</div>
         </div>
         <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-1">
@@ -1063,7 +1063,7 @@ function ContractDetail({ contractId, navigate }) {
       <div className="flex flex-wrap gap-2 mb-6 no-print">
         <button onClick={()=>navigate('document:'+contract.id)} className="px-4 py-2 border border-[var(--border)] text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition">View Contract Document</button>
         {auth.isAdmin && contract.status === 'draft' && <button onClick={()=>navigate('contracts:edit:'+contract.id)} className="px-4 py-2 border border-[var(--border)] text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition">Edit</button>}
-        {auth.isAdmin && contract.status === 'draft' && <button onClick={()=>setShowSendModal(true)} className="px-4 py-2 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">Send for Signature</button>}
+        {auth.isAdmin && contract.status === 'draft' && <button onClick={()=>setShowSendModal(true)} className="px-4 py-2 sos-btn-cyan rounded-lg text-sm font-medium transition">Send for Signature</button>}
         {auth.isAdmin && (contract.status === 'draft' || contract.status === 'sent') && <button onClick={()=>setShowMarkSignedModal(true)} className="px-4 py-2 border border-[var(--border)] text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition">Record as Signed Manually</button>}
         {auth.isAdmin && contract.status === 'sent' && <button onClick={()=>setShowImportModal(true)} className="px-4 py-2 border border-emerald-200 text-emerald-700 rounded-lg text-sm font-medium hover:bg-emerald-50 transition">Import Signed Confirmation</button>}
         {auth.isAdmin && (contract.status === 'sent' || contract.status === 'expired' || contract.status === 'declined') && <button onClick={resendContract} className="px-4 py-2 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">Resend / New link</button>}
@@ -1936,7 +1936,7 @@ function ClientsPage({ navigate }) {
     <div className="p-4 md:p-6">
       <div className="flex items-center justify-between mb-6">
         <div className="font-display text-[var(--navy-deep)]">Clients</div>
-        {auth.isAdmin && <button onClick={()=>setShowForm(true)} className="px-4 py-2 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">+ New Client</button>}
+        {auth.isAdmin && <button onClick={()=>setShowForm(true)} className="px-4 py-2 sos-btn-cyan rounded-lg text-sm font-medium transition">+ New Client</button>}
       </div>
       {clients.length === 0 ? <EmptyState title="No clients yet" subtitle="Add your first client to start creating contracts." ctaLabel={auth.isAdmin ? "New Client" : null} onCta={()=>setShowForm(true)} icon="🏟️" /> : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -2285,7 +2285,7 @@ function CompanyProfileSettings() {
           <Field label="IBAN"><input disabled={!auth.isAdmin} value={form.bankIBAN} onChange={e=>set('bankIBAN',e.target.value)} className={inputCls(false)} /></Field>
           <Field label="SWIFT"><input disabled={!auth.isAdmin} value={form.bankSWIFT} onChange={e=>set('bankSWIFT',e.target.value)} className={inputCls(false)} /></Field>
         </div>
-        {auth.isAdmin && <button onClick={save} className="px-4 py-2 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">Save Changes</button>}
+        {auth.isAdmin && <button onClick={save} className="px-4 py-2 sos-btn-cyan rounded-lg text-sm font-medium transition">Save Changes</button>}
       </div>
 
       {/* Authorised signatory — auto-applied to every contract so agreements
@@ -2315,7 +2315,7 @@ function CompanyProfileSettings() {
             )}
           </div>
         </Field>
-        {auth.isAdmin && <button onClick={save} className="px-4 py-2 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">Save Signatory</button>}
+        {auth.isAdmin && <button onClick={save} className="px-4 py-2 sos-btn-cyan rounded-lg text-sm font-medium transition">Save Signatory</button>}
       </div>
 
       {auth.isAdmin && (
@@ -2372,7 +2372,7 @@ function UsersSettings() {
     <div className="p-4 md:p-6">
       <div className="flex items-center justify-between mb-6 max-w-2xl">
         <div className="font-display text-[var(--navy-deep)]">Users & Roles</div>
-        {auth.isAdmin && <button onClick={()=>setShowForm(true)} className="px-4 py-2 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">+ New User</button>}
+        {auth.isAdmin && <button onClick={()=>setShowForm(true)} className="px-4 py-2 sos-btn-cyan rounded-lg text-sm font-medium transition">+ New User</button>}
       </div>
       <div className="bg-white rounded-xl border border-[var(--border)] overflow-x-auto max-w-2xl">
         <table className="w-full text-sm">
@@ -2549,6 +2549,31 @@ function DeclinePanel({ reason, setReason, onCancel, onConfirm, busy }) {
   );
 }
 
+// Compact 4-step progress indicator for the signing card (Verify · Review · Confirm · Sign).
+function SigningSteps({ current }) {
+  const steps = ['Verify', 'Review', 'Confirm', 'Sign'];
+  return (
+    <div className="flex items-center justify-center gap-2 px-8 pt-5 pb-1">
+      {steps.map((label, i) => {
+        const step = i + 1;
+        const isCurrent = step === current;
+        const isDone = step < current;
+        return (
+          <React.Fragment key={label}>
+            <div className="flex items-center gap-1.5">
+              <span className={`inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-semibold ${isCurrent ? 'bg-[var(--cyan)] text-[var(--navy-deep)]' : isDone ? 'bg-[var(--navy-deep)] text-white' : 'bg-slate-200 text-slate-400'}`}>
+                {isDone ? '✓' : step}
+              </span>
+              <span className={`text-[11px] font-medium ${isCurrent ? 'text-[var(--navy-deep)]' : isDone ? 'text-slate-500' : 'text-slate-400'}`}>{label}</span>
+            </div>
+            {step < steps.length && <span className="w-4 h-px bg-slate-200" />}
+          </React.Fragment>
+        );
+      })}
+    </div>
+  );
+}
+
 function SigningFlow({ contractId, portablePayload, reqToken }) {
   const toast = useToast();
   const isPortable = !!portablePayload;
@@ -2566,6 +2591,7 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
   const [emailInput, setEmailInput] = useState('');
   const [emailError, setEmailError] = useState('');
   const [scrolledToBottom, setScrolledToBottom] = useState(false);
+  const [readConfirmed, setReadConfirmed] = useState(false);
   const scrollRef = useRef(null);
 
   const [sigName, setSigName] = useState('');
@@ -2816,23 +2842,29 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
 
   const onScroll = (e) => {
     const el = e.target;
-    if (el.scrollHeight - el.scrollTop - el.clientHeight < 20) setScrolledToBottom(true);
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 60) setScrolledToBottom(true);
   };
 
   const startDraw = (e) => {
     drawing.current = true;
-    const ctx = canvasRef.current.getContext('2d');
-    const rect = canvasRef.current.getBoundingClientRect();
-    const x = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
-    const y = (e.touches ? e.touches[0].clientY : e.clientY) - rect.top;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const x = ((e.touches ? e.touches[0].clientX : e.clientX) - rect.left) * scaleX;
+    const y = ((e.touches ? e.touches[0].clientY : e.clientY) - rect.top) * scaleY;
     ctx.beginPath(); ctx.moveTo(x,y);
   };
   const moveDraw = (e) => {
     if (!drawing.current) return;
-    const ctx = canvasRef.current.getContext('2d');
-    const rect = canvasRef.current.getBoundingClientRect();
-    const x = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
-    const y = (e.touches ? e.touches[0].clientY : e.clientY) - rect.top;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const x = ((e.touches ? e.touches[0].clientX : e.clientX) - rect.left) * scaleX;
+    const y = ((e.touches ? e.touches[0].clientY : e.clientY) - rect.top) * scaleY;
     ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.strokeStyle = '#0f172a';
     ctx.lineTo(x,y); ctx.stroke();
     setCanvasEmpty(false);
@@ -2956,12 +2988,25 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
     }
   };
 
+  const trustLine = (
+    <p className="text-xs text-slate-400 mt-6 text-center">
+      🔒 Secure &amp; encrypted · Identity verified by email{company?.contactEmail ? <> · Questions? {company.contactEmail}</> : null}
+    </p>
+  );
+  const cardFooter = (
+    <div className="border-t border-[var(--border)] px-8 py-3 text-center text-[11px] text-slate-400">
+      Transforming matches into knowledge.
+    </div>
+  );
+
   return (
     <div className="min-h-screen bg-[var(--navy-deep)] py-8 px-4">
       <div className="max-w-2xl mx-auto">
         <div className="text-center mb-6">
+          <img src="Logo-scios-dark.png" alt="Science of Sports" className="h-10 w-auto object-contain mx-auto mb-2" />
           <div className="text-white font-display">SOS Contracts</div>
           <div className="text-slate-400 text-xs mt-1">Secure Electronic Signature</div>
+          {client?.companyName && <div className="text-[var(--cyan)] text-xs mt-1">Prepared for {client.companyName}</div>}
         </div>
 
         {expired ? (
@@ -2972,6 +3017,10 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
           </div>
         ) : (
           <div className="bg-white rounded-xl shadow-2xl overflow-hidden">
+            <div className="sos-rainbow" />
+            {(screen === 1 || screen === 6 || screen === 2 || screen === 3 || screen === 4) && (
+              <SigningSteps current={screen === 6 ? 1 : screen === 2 ? 2 : screen === 3 ? 3 : screen === 4 ? 4 : 1} />
+            )}
             {screen === 1 && (
               <div className="p-8">
                 <div className="font-heading mb-1">You have been invited to sign a document</div>
@@ -2984,8 +3033,8 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
                   <input type="email" value={emailInput} onChange={e=>setEmailInput(e.target.value)} className={inputCls(emailError)} placeholder="you@yourclub.com" />
                 </Field>
                 <p className="text-xs text-amber-600 mb-4">This link expires on {fmtDate(linkExpiry.toISOString())}.</p>
-                <button onClick={confirmIdentity} disabled={otpBusy} className="w-full py-2.5 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition disabled:opacity-50">{otpBusy ? 'Sending code…' : 'Continue'}</button>
-                <p className="text-xs text-slate-400 mt-4 text-center">Questions? Contact {company.contactEmail}</p>
+                <button onClick={confirmIdentity} disabled={otpBusy} className="w-full py-2.5 sos-btn-cyan rounded-lg text-sm font-medium transition disabled:opacity-50">{otpBusy ? 'Sending code…' : 'Continue'}</button>
+                {trustLine}
               </div>
             )}
 
@@ -3004,30 +3053,36 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
                     className={`${inputCls(otpError)} tracking-[0.4em] text-center text-lg font-data`}
                   />
                 </Field>
-                <button onClick={verifyOtp} disabled={otpBusy} className="w-full py-2.5 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition disabled:opacity-50 mb-4">{otpBusy ? 'Verifying…' : 'Verify'}</button>
+                <button onClick={verifyOtp} disabled={otpBusy} className="w-full py-2.5 sos-btn-cyan rounded-lg text-sm font-medium transition disabled:opacity-50 mb-4">{otpBusy ? 'Verifying…' : 'Verify'}</button>
                 <div className="flex items-center justify-between text-xs">
                   <button type="button" onClick={()=>{ setOtpCode(''); setOtpError(''); setScreen(1); }} className="text-slate-500 hover:underline">Change email</button>
                   <button type="button" onClick={resendOtp} disabled={otpBusy} className="text-blue-600 hover:underline disabled:opacity-50">Resend code</button>
                 </div>
+                <p className="text-xs text-slate-400 mt-4 text-center">The code can take up to a minute to arrive — please check your spam folder too.</p>
               </div>
             )}
 
             {screen === 2 && (
               <div className="p-8">
                 <div className="font-heading mb-4">Review Document</div>
-                <div ref={scrollRef} onScroll={onScroll} className="border border-[var(--border)] rounded-lg p-5 h-80 overflow-y-auto text-sm text-slate-600 mb-4 bg-white">
+                <div ref={scrollRef} onScroll={onScroll} className="border border-[var(--border)] rounded-lg p-5 h-[60vh] md:h-96 overflow-y-auto text-sm text-slate-600 mb-4 bg-white">
                   <ContractDocumentBody contract={contract} client={client} company={company} />
                   <p className="text-xs text-slate-400 mt-6">— End of document —</p>
                 </div>
+                <label className="flex items-center gap-2 text-sm text-slate-600 mb-4">
+                  <input type="checkbox" checked={readConfirmed} onChange={e=>setReadConfirmed(e.target.checked)} />
+                  <span>I have read the full agreement</span>
+                </label>
                 <div className="flex items-center justify-between gap-3">
                   <button type="button" onClick={()=>downloadContractPdf({ contract, client, company })} className="text-xs text-blue-600 hover:underline inline-flex items-center gap-1">⬇ Download PDF</button>
                   <div className="flex items-center gap-2">
                     {isServer && <button type="button" onClick={()=>setShowDeclinePanel(true)} className="px-4 py-2.5 text-sm rounded-lg border border-[var(--border)] text-slate-600 hover:bg-slate-50 transition">Decline / Request changes</button>}
-                    <button disabled={!scrolledToBottom} onClick={()=>setScreen(3)} className="px-5 py-2.5 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition disabled:opacity-40 disabled:cursor-not-allowed">
-                      {scrolledToBottom ? 'Proceed to Sign' : 'Scroll to the bottom to continue'}
+                    <button disabled={!(scrolledToBottom || readConfirmed)} onClick={()=>setScreen(3)} className="px-5 py-2.5 sos-btn-cyan rounded-lg text-sm font-medium transition disabled:opacity-40 disabled:cursor-not-allowed">
+                      {(scrolledToBottom || readConfirmed) ? 'Proceed to Sign' : 'Scroll to the bottom to continue'}
                     </button>
                   </div>
                 </div>
+                {trustLine}
                 {isServer && showDeclinePanel && <DeclinePanel reason={declineReason} setReason={setDeclineReason} onCancel={()=>{ setShowDeclinePanel(false); setDeclineReason(''); }} onConfirm={submitDecline} busy={decliningBusy} />}
               </div>
             )}
@@ -3076,7 +3131,7 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
                       </div>
                       <div className="flex justify-end gap-2">
                         <button onClick={()=>{ setEditingClientDetails(false); setClientDetailsForm({ companyName: client.companyName || '', address: client.address || '', vatNumber: client.vatNumber || '', registrationNumber: client.registrationNumber || '' }); }} className="px-3 py-1.5 text-xs rounded-lg border border-[var(--border)] hover:bg-slate-50">Cancel</button>
-                        <button disabled={savingClientDetails} onClick={saveClientDetails} className="px-3 py-1.5 text-xs rounded-lg bg-[var(--blue-primary)] text-white hover:bg-blue-700">{savingClientDetails ? 'Saving…' : 'Save Details'}</button>
+                        <button disabled={savingClientDetails} onClick={saveClientDetails} className="px-3 py-1.5 text-xs rounded-lg sos-btn-cyan">{savingClientDetails ? 'Saving…' : 'Save Details'}</button>
                       </div>
                     </div>
                   )}
@@ -3086,7 +3141,7 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
                   <button onClick={()=>setScreen(2)} className="px-4 py-2 text-sm rounded-lg border border-[var(--border)] hover:bg-slate-50">Back</button>
                   <div className="flex items-center gap-2">
                     {isServer && <button type="button" onClick={()=>setShowDeclinePanel(true)} className="px-4 py-2.5 text-sm rounded-lg border border-[var(--border)] text-slate-600 hover:bg-slate-50 transition">Decline / Request changes</button>}
-                    <button onClick={()=>setScreen(4)} className="px-5 py-2.5 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">Continue to Signature</button>
+                    <button onClick={()=>setScreen(4)} className="px-5 py-2.5 sos-btn-cyan rounded-lg text-sm font-medium transition">Continue to Signature</button>
                   </div>
                 </div>
                 {isServer && showDeclinePanel && <DeclinePanel reason={declineReason} setReason={setDeclineReason} onCancel={()=>{ setShowDeclinePanel(false); setDeclineReason(''); }} onConfirm={submitDecline} busy={decliningBusy} />}
@@ -3113,7 +3168,7 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
                         key={mode}
                         type="button"
                         onClick={()=>setSigMode(mode)}
-                        className={`py-2 text-sm rounded-lg border transition ${sigMode===mode ? 'bg-[var(--blue-primary)] text-white border-[var(--blue-primary)]' : 'border-[var(--border)] text-slate-600 hover:bg-slate-50'}`}
+                        className={`py-2 text-sm rounded-lg border transition ${sigMode===mode ? 'bg-[var(--cyan)] text-[var(--navy-deep)] border-[var(--cyan)]' : 'border-[var(--border)] text-slate-600 hover:bg-slate-50'}`}
                       >{label}</button>
                     ))}
                   </div>
@@ -3183,6 +3238,7 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
                     {busy ? 'Signing…' : 'Sign Agreement'}
                   </button>
                 </div>
+                {trustLine}
               </div>
             )}
 
@@ -3227,6 +3283,7 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
                 <p className="text-xs text-slate-400">{company.name} · {company.contactEmail}</p>
               </div>
             )}
+            {cardFooter}
           </div>
         )}
       </div>
