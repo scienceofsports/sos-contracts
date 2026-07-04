@@ -2038,9 +2038,23 @@ function CompanyProfileSettings() {
   const [showReset, setShowReset] = useState(false);
   const [confirmText, setConfirmText] = useState('');
   const [resetting, setResetting] = useState(false);
+  const [loaded, setLoaded] = useState(false);
 
-  useEffect(() => { companyService.get().then(c => { setCompany(c); setForm(c); }); }, []);
-  if (!form) return <div className="p-6"><Skeleton className="h-96 w-full" /></div>;
+  // Empty company shape used when the database has no company row yet (fresh
+  // install) — so the form always renders and the profile can be filled in.
+  const EMPTY_COMPANY = {
+    name: '', registeredAddress: '', vatNumber: '', registrationNumber: '',
+    contactEmail: '', website: '', bankName: '', bankIBAN: '', bankSWIFT: '', logo: null,
+  };
+
+  useEffect(() => {
+    companyService.get().then(c => {
+      setCompany(c);
+      setForm(c || { ...EMPTY_COMPANY });
+      setLoaded(true);
+    });
+  }, []);
+  if (!loaded || !form) return <div className="p-6"><Skeleton className="h-96 w-full" /></div>;
 
   const set = (k,v) => setForm(f=>({...f,[k]:v}));
   const save = async () => {
