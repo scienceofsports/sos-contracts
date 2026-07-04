@@ -107,8 +107,22 @@ export function clientToRow(obj) {
 /* --------------------------------- CONTRACTS --------------------------------- */
 // Columns that actually exist on the contracts table (snake_case). Any app
 // field not represented here is dropped on write.
-export function contractFromRow(row, payments = []) {
+export function contractFromRow(row, payments = [], events = []) {
   if (!row) return null;
+  // Derive signer/consent/audit fields from the tamper-evident signature_events
+  // ledger (the authoritative source), so the admin UI reflects real signings.
+  const signedEvent = (events || []).find((e) => e.event_type === 'signed') || null;
+  const sentEvent = (events || []).find((e) => e.event_type === 'sent') || null;
+  const auditLog = (events || [])
+    .slice()
+    .sort((a, b) => new Date(a.server_timestamp || a.created_at) - new Date(b.server_timestamp || b.created_at))
+    .map((e) => ({
+      id: e.id,
+      type: e.event_type,
+      message: e.message || e.event_type,
+      at: e.server_timestamp || e.created_at,
+      by: e.actor_id || null,
+    }));
   return {
     id: row.id,
     contractNumber: row.contract_number ?? null,
@@ -139,24 +153,24 @@ export function contractFromRow(row, payments = []) {
     renewalReminderSent: row.renewal_reminder_sent ?? false,
     createdBy: row.created_by ?? null,
     createdAt: row.created_at ?? null,
+    sentAt: sentEvent?.server_timestamp ?? null,
 
-    // ---- Fields that no longer live on the contracts table. Defaulted so the
-    // ---- UI (which still reads them) never crashes. Real values come from
-    // ---- signature_events in a later stage.
-    documentHashAfter: null,
-    signerName: null,
-    signerTitle: null,
-    signerCompany: null,
-    signerEmail: null,
-    signedAt: null,
-    signerIP: null,
-    consentElectronic: false,
-    consentAuthorized: false,
-    consentRead: false,
+    // ---- Signer / consent / evidence fields, sourced from the 'signed'
+    // ---- signature_events row (the authoritative, tamper-evident record).
+    documentHashAfter: signedEvent?.document_hash_after ?? null,
+    signerName: signedEvent?.signer_name ?? null,
+    signerTitle: signedEvent?.signer_title ?? null,
+    signerCompany: signedEvent?.signer_company ?? null,
+    signerEmail: signedEvent?.signer_email ?? null,
+    signedAt: signedEvent?.server_timestamp ?? null,
+    signerIP: signedEvent?.signer_ip ?? null,
+    signatureImageUrl: signedEvent?.signature_image_url ?? null,
+    consentElectronic: signedEvent?.consent_electronic ?? false,
+    consentAuthorized: signedEvent?.consent_authorized ?? false,
+    consentRead: signedEvent?.consent_read ?? false,
 
-    // ---- Nested collections. payments filled by the service; auditLog is a
-    // ---- Stage-2 placeholder (real audit trail = signature_events, later).
-    auditLog: [],
+    // ---- Audit trail from the ledger; payments from the payments table.
+    auditLog,
     payments: payments.map(paymentFromRow),
   };
 }

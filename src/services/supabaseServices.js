@@ -145,7 +145,20 @@ export const contractService = {
       byContract.get(p.contract_id).push(p);
     });
 
-    return contractRows.map((row) => contractFromRow(row, byContract.get(row.id) || []));
+    // Events too, grouped by contract, so list/dashboard reflect real signings.
+    const eventRows = unwrap(
+      await supabase.from('signature_events').select('*').order('server_timestamp', { ascending: true })
+    );
+    const eventsByContract = new Map();
+    (eventRows || []).forEach((e) => {
+      if (!e.contract_id) return;
+      if (!eventsByContract.has(e.contract_id)) eventsByContract.set(e.contract_id, []);
+      eventsByContract.get(e.contract_id).push(e);
+    });
+
+    return contractRows.map((row) =>
+      contractFromRow(row, byContract.get(row.id) || [], eventsByContract.get(row.id) || [])
+    );
   },
 
   getById: async (id) => {
@@ -160,7 +173,38 @@ export const contractService = {
         .eq('contract_id', id)
         .order('due_date', { ascending: true })
     );
-    return contractFromRow(rows[0], paymentRows || []);
+    // Pull the tamper-evident event ledger so signer details + audit trail show.
+    const eventRows = unwrap(
+      await supabase
+        .from('signature_events')
+        .select('*')
+        .eq('contract_id', id)
+        .order('server_timestamp', { ascending: true })
+    );
+    return contractFromRow(rows[0], paymentRows || [], eventRows || []);
+  },
+
+  // The Certificate of Completion for a signed contract (most recent), with a
+  // short-lived signed URL to download the PDF. Returns null if none yet.
+  getCertificate: async (contractId) => {
+    const rows = unwrap(
+      await supabase
+        .from('certificates')
+        .select('*')
+        .eq('contract_id', contractId)
+        .order('generated_at', { ascending: false })
+        .limit(1)
+    );
+    if (!rows || rows.length === 0) return null;
+    const cert = rows[0];
+    // pdf_url is a bucket-prefixed path like "certificates/<contract>/<id>.pdf".
+    const path = (cert.pdf_url || '').replace(/^certificates\//, '');
+    let downloadUrl = null;
+    if (path) {
+      const { data } = await supabase.storage.from('certificates').createSignedUrl(path, 300);
+      downloadUrl = data?.signedUrl || null;
+    }
+    return { id: cert.id, sha256: cert.pdf_sha256, generatedAt: cert.generated_at, downloadUrl };
   },
 
   create: async (data) => {

@@ -968,11 +968,20 @@ function ContractDetail({ contractId, navigate }) {
   const [showMarkPaidPayment, setShowMarkPaidPayment] = useState(null);
   const [showMarkSignedModal, setShowMarkSignedModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [certificate, setCertificate] = useState(null);
 
   const load = useCallback(async () => {
     const c = await contractService.getById(contractId);
     setContract(c);
     if (c) setClient(await clientService.getById(c.clientId));
+    // Load the Certificate of Completion if the contract has been signed.
+    if (c && c.signedAt) {
+      try { setCertificate(await contractService.getCertificate(contractId)); }
+      catch (e) { setCertificate(null); }
+    } else {
+      setCertificate(null);
+    }
   }, [contractId]);
 
   useEffect(() => { load(); }, [load]);
@@ -996,9 +1005,26 @@ function ContractDetail({ contractId, navigate }) {
   };
 
   const deleteContract = async () => {
-    await contractService.delete(contract.id);
-    toast.push('Contract deleted.', 'success');
-    navigate('contracts:all');
+    try {
+      await contractService.delete(contract.id);
+      toast.push('Contract deleted.', 'success');
+      navigate('contracts:all');
+    } catch (err) {
+      // Server-side trigger blocks deleting signed/active contracts.
+      toast.push(err.message || 'Could not delete this contract.', 'error');
+      setShowDeleteModal(false);
+    }
+  };
+
+  const cancelContract = async () => {
+    try {
+      await contractService.updateStatus(contract.id, 'cancelled');
+      toast.push('Contract cancelled. The signed record and evidence are retained.', 'success');
+      setShowCancelModal(false);
+      load();
+    } catch (err) {
+      toast.push(err.message || 'Could not cancel this contract.', 'error');
+    }
   };
 
   return (
@@ -1021,7 +1047,10 @@ function ContractDetail({ contractId, navigate }) {
         {auth.isAdmin && (contract.status === 'draft' || contract.status === 'sent') && <button onClick={()=>setShowMarkSignedModal(true)} className="px-4 py-2 border border-[var(--border)] text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition">Record as Signed Manually</button>}
         {auth.isAdmin && contract.status === 'sent' && <button onClick={()=>setShowImportModal(true)} className="px-4 py-2 border border-emerald-200 text-emerald-700 rounded-lg text-sm font-medium hover:bg-emerald-50 transition">Import Signed Confirmation</button>}
         {auth.isAdmin && (contract.status === 'signed' || contract.status === 'active') && <button onClick={()=>setShowPaymentModal(true)} className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition">+ Add Payment Milestone</button>}
-        {auth.isAdmin && <button onClick={()=>setShowDeleteModal(true)} className="px-4 py-2 border border-red-200 text-red-600 rounded-lg text-sm font-medium hover:bg-red-50 transition">Delete</button>}
+        {/* Signed/active contracts are cancelled (soft), not deleted — the
+            signature evidence must be retained. Other statuses can be deleted. */}
+        {auth.isAdmin && (contract.status === 'signed' || contract.status === 'active') && contract.status !== 'cancelled' && <button onClick={()=>setShowCancelModal(true)} className="px-4 py-2 border border-amber-200 text-amber-700 rounded-lg text-sm font-medium hover:bg-amber-50 transition">Cancel Contract</button>}
+        {auth.isAdmin && contract.status !== 'signed' && contract.status !== 'active' && <button onClick={()=>setShowDeleteModal(true)} className="px-4 py-2 border border-red-200 text-red-600 rounded-lg text-sm font-medium hover:bg-red-50 transition">Delete</button>}
       </div>
 
       {auth.isAdmin && contract.status === 'sent' && (
@@ -1061,6 +1090,13 @@ function ContractDetail({ contractId, navigate }) {
                 </React.Fragment>
               ) : (
                 <div className="flex justify-between"><dt className="text-slate-500">Method</dt><dd className="text-slate-500 text-xs">Recorded manually (paper/offline signature)</dd></div>
+              )}
+              {certificate && certificate.downloadUrl && (
+                <a href={certificate.downloadUrl} target="_blank" rel="noopener noreferrer"
+                   className="mt-3 inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium sos-btn-cyan"
+                   style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}>
+                  ⬇ Download Certificate of Completion (PDF)
+                </a>
               )}
             </div>
           ) : (
@@ -1113,10 +1149,11 @@ function ContractDetail({ contractId, navigate }) {
 
       <ConfirmModal open={showSendModal} onClose={()=>setShowSendModal(false)} onConfirm={sendContract} title="Send for Signature" message={`This will send "${contract.title}" to ${client?.contactName} (${client?.contactEmail}) for electronic signature. Continue?`} confirmLabel="Send" />
       <ConfirmModal open={showDeleteModal} onClose={()=>setShowDeleteModal(false)} onConfirm={deleteContract} title="Delete Contract"
-        message={(contract.status === 'signed' || contract.status === 'active')
-          ? `⚠️ WARNING: "${contract.title}" is a SIGNED, active agreement. Deleting it permanently destroys the contract AND its signature evidence (audit trail, certificate record). This cannot be undone and should only be done for test data or a genuine cancellation. Are you absolutely sure?`
-          : 'This will permanently delete this contract. It has not been signed yet, but this cannot be undone.'}
-        confirmLabel={(contract.status === 'signed' || contract.status === 'active') ? 'Delete signed contract' : 'Delete'} danger />
+        message={`This will permanently delete "${contract.title}". It has not been signed, but this cannot be undone.`}
+        confirmLabel="Delete" danger />
+      <ConfirmModal open={showCancelModal} onClose={()=>setShowCancelModal(false)} onConfirm={cancelContract} title="Cancel Contract"
+        message={`This marks "${contract.title}" as cancelled and removes it from active views. The signed record, signature evidence, and Certificate of Completion are RETAINED (a signed agreement cannot be deleted). Continue?`}
+        confirmLabel="Cancel contract" danger />
       {showPaymentModal && <AddPaymentModal contract={contract} client={client} onClose={()=>setShowPaymentModal(false)} onDone={()=>{ setShowPaymentModal(false); load(); }} />}
       {showMarkPaidPayment && <MarkPaidModal contract={contract} payment={showMarkPaidPayment} onClose={()=>setShowMarkPaidPayment(null)} onDone={()=>{ setShowMarkPaidPayment(null); load(); }} />}
       {showMarkSignedModal && <MarkSignedManuallyModal contract={contract} client={client} onClose={()=>setShowMarkSignedModal(false)} onDone={()=>{ setShowMarkSignedModal(false); load(); }} />}
@@ -2220,7 +2257,6 @@ function UsersSettings() {
   const [users, setUsers] = useState(null);
   const [showForm, setShowForm] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
-  const [linkUser, setLinkUser] = useState(null);
   const [newUser, setNewUser] = useState(null);
 
   const load = useCallback(() => userService.getAll().then(setUsers), []);
@@ -2255,10 +2291,9 @@ function UsersSettings() {
                 <td className="py-3 px-4">{u.name}</td>
                 <td className="py-3 px-4 text-xs">{u.email}</td>
                 <td className="py-3 px-4 capitalize"><Badge status={u.role === 'admin' ? 'active' : 'draft'} />&nbsp;{u.role}</td>
-                <td className="py-3 px-4">{u.password ? <Badge status="active" /> : <Badge status="sent" />}{!u.password && <span className="ml-1.5 text-xs text-slate-400">awaiting setup</span>}</td>
+                <td className="py-3 px-4"><Badge status="active" /></td>
                 <td className="py-3 px-4 space-x-3 whitespace-nowrap">
-                  {auth.isAdmin && !u.password && <button onClick={()=>setLinkUser(u)} className="text-xs text-blue-600 hover:underline">Setup Link</button>}
-                  {auth.isAdmin && <button onClick={()=>setDeleteTarget(u)} className="text-xs text-red-500 hover:underline">Remove</button>}
+                  {auth.isAdmin && u.id !== auth.user.id && <button onClick={()=>setDeleteTarget(u)} className="text-xs text-red-500 hover:underline">Remove</button>}
                 </td>
               </tr>
             ))}
@@ -2267,33 +2302,34 @@ function UsersSettings() {
       </div>
       {!auth.isAdmin && <div className="text-xs text-slate-400 mt-3">Only admins can manage users in this prototype.</div>}
       {showForm && <UserFormModal onClose={()=>setShowForm(false)} onDone={(u)=>{ setShowForm(false); setNewUser(u); load(); }} />}
-      {newUser && <SetupLinkModal user={newUser} onClose={()=>setNewUser(null)} title="User Created" />}
-      {linkUser && <SetupLinkModal user={linkUser} onClose={()=>setLinkUser(null)} title="Setup Link" />}
+      {newUser && <NewUserCreatedModal result={newUser} onClose={()=>setNewUser(null)} />}
       <ConfirmModal open={!!deleteTarget} onClose={()=>setDeleteTarget(null)} onConfirm={confirmDelete} title="Remove User" message={deleteTarget ? `Remove ${deleteTarget.name} (${deleteTarget.email})? They will no longer be able to log in.` : ''} confirmLabel="Remove" danger />
     </div>
   );
 }
 
-function SetupLinkModal({ user, onClose, title }) {
+function NewUserCreatedModal({ result, onClose }) {
   const toast = useToast();
-  const link = userSetupLink(user);
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(link);
-      toast.push('Setup link copied to clipboard.', 'success');
+      await navigator.clipboard.writeText(`Email: ${result.email}\nTemporary password: ${result.tempPassword}`);
+      toast.push('Login details copied.', 'success');
     } catch (e) {
-      toast.push('Could not copy automatically — select and copy the link manually.', 'error');
+      toast.push('Could not copy automatically — copy manually.', 'error');
     }
   };
   return (
-    <Modal open onClose={onClose} title={title} footer={
+    <Modal open onClose={onClose} title="User Created" footer={
       <React.Fragment>
-        <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-[var(--border)] hover:bg-slate-50">Close</button>
-        <button onClick={copy} className="px-4 py-2 text-sm rounded-lg bg-[var(--blue-primary)] text-white hover:bg-blue-700">Copy Link</button>
+        <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-[var(--border)] hover:bg-slate-50">Done</button>
+        <button onClick={copy} className="px-4 py-2 text-sm rounded-lg sos-btn-cyan font-medium" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}>Copy Details</button>
       </React.Fragment>
     }>
-      <p className="text-sm text-slate-600 mb-3">Send this link to <strong>{user.name}</strong> ({user.email}) via WhatsApp, Signal, or another channel you trust — there is no email sending in this prototype yet. It lets them set their own password and expires in 7 days.</p>
-      <div className="bg-slate-50 rounded-lg p-3 text-xs font-data break-all border border-[var(--border)]">{link}</div>
+      <p className="text-sm text-slate-600 mb-3">The account has been created and an email with these login details was sent to <strong>{result.email}</strong>. In case the email doesn't arrive, share this temporary password securely — they should change it after first sign-in.</p>
+      <div className="bg-slate-50 rounded-lg p-3 text-sm border border-[var(--border)]">
+        <div className="mb-1"><span className="text-slate-500">Email:</span> <span className="font-medium">{result.email}</span></div>
+        <div><span className="text-slate-500">Temporary password:</span> <span className="font-data font-semibold">{result.tempPassword}</span></div>
+      </div>
     </Modal>
   );
 }
@@ -2328,7 +2364,7 @@ function UserFormModal({ onClose, onDone }) {
         <button disabled={busy} onClick={submit} className="px-4 py-2 text-sm rounded-lg bg-[var(--blue-primary)] text-white hover:bg-blue-700">{busy ? 'Creating…' : 'Create User'}</button>
       </React.Fragment>
     }>
-      <p className="text-xs text-slate-500 mb-4">No password needed here — after creating the user, you'll get a one-time setup link to send them so they can choose their own password.</p>
+      <p className="text-xs text-slate-500 mb-4">The new user gets an email with their login details and a temporary password. You'll also see the password here in case the email doesn't arrive.</p>
       <Field label="Full Name" required error={errors.name}>
         <input value={form.name} onChange={e=>set('name',e.target.value)} className={inputCls(errors.name)} />
       </Field>

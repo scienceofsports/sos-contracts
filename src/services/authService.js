@@ -85,18 +85,24 @@ export const userService = {
   // the person appears in Users & Roles; wiring the automated invite email is
   // finished alongside the Edge Functions stage.
   create: async (data) => {
-    // Guard against duplicate profile.
-    const { data: existing } = await supabase
-      .from('app_users')
-      .select('id')
-      .eq('email', (data.email || '').toLowerCase())
-      .maybeSingle();
-    if (existing) throw new Error('A user with this email already exists.');
-
-    // We cannot create an auth user from the browser with the anon key, so this
-    // path is completed by an Edge Function (invite-user) in a later step. For
-    // now, throw a clear message if called without that function present.
-    throw new Error('Adding users requires the invite function (set up in a later step). For now, only your own admin account exists.');
+    // Create the teammate via the invite-user Edge Function (runs with the
+    // service role server-side; verifies the caller is an admin). Returns a
+    // temporary password the admin can share if the email doesn't arrive.
+    const { data: result, error } = await supabase.functions.invoke('invite-user', {
+      body: {
+        name: data.name,
+        email: data.email,
+        role: data.role,
+        appOrigin: typeof window !== 'undefined' ? window.location.origin : undefined,
+      },
+    });
+    if (error) {
+      let msg = error.message || 'Could not add the user.';
+      try { const parsed = await error.context?.json?.(); if (parsed?.error) msg = parsed.error; } catch (_) {}
+      throw new Error(msg);
+    }
+    if (result && result.error) throw new Error(result.error);
+    return result; // { id, email, role, tempPassword }
   },
 
   delete: async (id) => {
