@@ -107,6 +107,23 @@ export function signedNotificationEmail(opts: {
   `);
 }
 
+// Notification sent to STAFF when a signer declines / requests changes.
+export function declinedNotificationEmail(opts: {
+  contractTitle: string;
+  signerEmail: string;
+  reason: string;
+}): string {
+  return WRAP(`
+    <p>⚠️ A contract was <strong>declined</strong> by the client.</p>
+    <p style="background:#F1F5F9;padding:12px 16px;border-radius:8px;">
+      <strong>${opts.contractTitle}</strong><br/>
+      Declined by: ${opts.signerEmail}
+    </p>
+    ${opts.reason ? `<p><strong>Reason / changes requested:</strong><br/>${opts.reason}</p>` : `<p style="color:#64748b;font-size:13px;">No reason was provided.</p>`}
+    <p>Open SOS Contracts to resend a fresh link or recall the contract to draft to revise it.</p>
+  `);
+}
+
 // Confirmation sent to the SIGNER after they sign, with the certificate PDF.
 export function signerConfirmationEmail(opts: {
   signerName: string;

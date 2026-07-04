@@ -160,10 +160,14 @@ export function generateContractPdf({ contract, client, company }) {
   const colX = [M, M + colW + 30];
   const startY = y;
   const heads = [`For and on behalf of ${company?.name || '—'}`, `For and on behalf of ${client?.companyName || '—'}`];
-  // Values for the client column when signed; provider column always blank.
+  // Provider column = SOS authorised signatory (auto counter-signature);
+  // client column = the client's signer when signed.
   const signed = !!contract.signedAt;
+  const provDate = contract.signedAt || contract.sentAt || contract.createdAt;
   const vals = [
-    { sig: '', name: '', title: '', date: '' },
+    company?.signatoryName
+      ? { sig: company.signatoryName, name: company.signatoryName, title: company.signatoryTitle || '', date: fmtDate(provDate) }
+      : { sig: '', name: '', title: '', date: '' },
     signed
       ? { sig: contract.signerName || '', name: contract.signerName || '', title: contract.signerTitle || '', date: fmtDate(contract.signedAt) }
       : { sig: '', name: '', title: '', date: '' },

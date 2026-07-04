@@ -8,6 +8,7 @@ export const STATUS_BADGE = {
   active:   { bg:'bg-green-100',  text:'text-green-700'  },
   expired:  { bg:'bg-red-100',    text:'text-red-700'    },
   cancelled:{ bg:'bg-slate-100',  text:'text-slate-500'  },
+  declined: { bg:'bg-red-100',    text:'text-red-700'    },
   paid:     { bg:'bg-green-100',  text:'text-green-700'  },
   pending:  { bg:'bg-amber-100',  text:'text-amber-700'  },
   overdue:  { bg:'bg-red-100',    text:'text-red-700'    },

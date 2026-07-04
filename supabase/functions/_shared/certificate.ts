@@ -112,9 +112,17 @@ export async function buildCertificate(input: {
        { size: 9, f: bold, color: input.integrityOk ? rgb(0.06, 0.5, 0.3) : rgb(0.8, 0.1, 0.1) });
   gap(6); rule();
 
-  // Signature image
+  // Service Provider counter-signature (auto-applied SOS authorised signatory).
+  if (co.signatoryName ?? co.signatory_name) {
+    line('SERVICE PROVIDER (COUNTER-SIGNED)', { size: 10, f: bold, color: CYAN });
+    line(`${co.signatoryName ?? co.signatory_name}${(co.signatoryTitle ?? co.signatory_title) ? ', ' + (co.signatoryTitle ?? co.signatory_title) : ''}`, { size: 10 });
+    line(`On behalf of: ${co.name ?? '—'}`, { size: 9, color: GREY });
+    gap(4); rule();
+  }
+
+  // Client signature image
   ensure(180);
-  line('SIGNATURE', { size: 10, f: bold, color: CYAN });
+  line('CLIENT SIGNATURE', { size: 10, f: bold, color: CYAN });
   if (input.signatureImageBytes) {
     try {
       const img = await pdf.embedPng(input.signatureImageBytes);

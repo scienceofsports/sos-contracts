@@ -1004,6 +1004,26 @@ function ContractDetail({ contractId, navigate }) {
     }
   };
 
+  const resendContract = async () => {
+    try {
+      await signingService.createSigningRequest(contract.id, window.location.origin);
+      toast.push('New signing link sent.', 'success');
+      load();
+    } catch (err) {
+      toast.push(err.message || 'Could not send a new signing link.', 'error');
+    }
+  };
+
+  const reviseContract = async () => {
+    try {
+      await contractService.updateStatus(contract.id, 'draft');
+      toast.push('Contract recalled to draft — you can now edit and resend.', 'success');
+      load();
+    } catch (err) {
+      toast.push(err.message || 'Could not recall this contract to draft.', 'error');
+    }
+  };
+
   const deleteContract = async () => {
     try {
       await contractService.delete(contract.id);
@@ -1046,6 +1066,8 @@ function ContractDetail({ contractId, navigate }) {
         {auth.isAdmin && contract.status === 'draft' && <button onClick={()=>setShowSendModal(true)} className="px-4 py-2 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">Send for Signature</button>}
         {auth.isAdmin && (contract.status === 'draft' || contract.status === 'sent') && <button onClick={()=>setShowMarkSignedModal(true)} className="px-4 py-2 border border-[var(--border)] text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition">Record as Signed Manually</button>}
         {auth.isAdmin && contract.status === 'sent' && <button onClick={()=>setShowImportModal(true)} className="px-4 py-2 border border-emerald-200 text-emerald-700 rounded-lg text-sm font-medium hover:bg-emerald-50 transition">Import Signed Confirmation</button>}
+        {auth.isAdmin && (contract.status === 'sent' || contract.status === 'expired' || contract.status === 'declined') && <button onClick={resendContract} className="px-4 py-2 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">Resend / New link</button>}
+        {auth.isAdmin && (contract.status === 'sent' || contract.status === 'expired' || contract.status === 'declined') && <button onClick={reviseContract} className="px-4 py-2 border border-[var(--border)] text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition">Revise (recall to draft)</button>}
         {auth.isAdmin && (contract.status === 'signed' || contract.status === 'active') && <button onClick={()=>setShowPaymentModal(true)} className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition">+ Add Payment Milestone</button>}
         {/* Signed/active contracts are cancelled (soft), not deleted — the
             signature evidence must be retained. Other statuses can be deleted. */}
@@ -1058,6 +1080,19 @@ function ContractDetail({ contractId, navigate }) {
           <div className="font-heading text-base mb-1 text-amber-800">📧 Sent for signature — awaiting the client</div>
           <p className="text-sm text-amber-700">A signing request has been emailed to <strong>{client?.contactEmail}</strong>. The client will verify their email with a one-time code, review the agreement, and sign. You'll be notified by email the moment they sign, and this contract will move to <strong>Active</strong> automatically.</p>
           <p className="text-xs text-amber-600 mt-2">Sent to the wrong address, or need to resend? Update the client's email under Clients, then use “Record as Signed Manually” only if you have a signed copy by other means.</p>
+        </div>
+      )}
+
+      {auth.isAdmin && contract.status === 'declined' && (
+        <div className="bg-red-50 rounded-xl border border-red-200 p-5 mb-6 no-print">
+          <div className="font-heading text-base mb-1 text-red-800">✋ This contract was declined by the client.</div>
+          {(() => {
+            const declinedEntry = contract.auditLog.slice().reverse().find(a => a.type === 'declined');
+            return declinedEntry
+              ? <p className="text-sm text-red-700">{declinedEntry.message}</p>
+              : <p className="text-sm text-red-700">The client declined this contract.</p>;
+          })()}
+          <p className="text-xs text-red-600 mt-2">Use <strong>Resend / New link</strong> to send a fresh signing link, or <strong>Revise (recall to draft)</strong> to edit the contract before resending.</p>
         </div>
       )}
 
@@ -1254,18 +1289,19 @@ function ContractAttachment({ contract, onChange }) {
 // International-standard signature block: separate labelled lines for
 // Signature, Name, Title, and Date. When signed, the captured values are shown
 // above each line; when blank, empty lines are provided for wet-ink signing.
-function SignatureLines({ signature, name, title, date }) {
-  const Row = ({ label, value, tall }) => (
+function SignatureLines({ signature, signatureImage, name, title, date }) {
+  const Row = ({ label, value, tall, image }) => (
     <div className="mb-4">
-      <div className={`${tall ? 'h-10' : 'h-6'} border-b border-slate-400 flex items-end pb-1`}>
-        {value ? <span className={label === 'Signature' ? 'italic text-slate-800 text-base' : 'text-slate-800'}>{value}</span> : null}
+      <div className={`${tall ? 'h-12' : 'h-6'} border-b border-slate-400 flex items-end pb-1`}>
+        {image ? <img src={image} alt="signature" className="max-h-11 w-auto object-contain" />
+          : value ? <span className={label === 'Signature' ? 'italic text-slate-800 text-base' : 'text-slate-800'}>{value}</span> : null}
       </div>
       <div className="text-[11px] text-slate-500 mt-1 uppercase tracking-wide">{label}</div>
     </div>
   );
   return (
     <div>
-      <Row label="Signature" value={signature} tall />
+      <Row label="Signature" value={signature} image={signatureImage} tall />
       <Row label="Name" value={name} />
       <Row label="Title" value={title} />
       <Row label="Date" value={date} />
@@ -1421,10 +1457,20 @@ function ContractDocumentBody({ contract, client, company }) {
         <div className="sos-pill mb-2" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}>Signatures</div>
         <p className="text-xs text-slate-500 mb-6">Executed by the duly authorised representatives of the Parties as of the dates set out below.</p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-10 text-sm">
-          {/* Service Provider */}
+          {/* Service Provider — auto-applied SOS authorised signatory. */}
           <div>
             <div className="text-xs font-semibold uppercase tracking-wide mb-4" style={{ color:'var(--navy-deep)' }}>For and on behalf of {company.name}</div>
-            <SignatureLines />
+            {company.signatoryName ? (
+              <SignatureLines
+                signatureImage={company.signatorySignature || null}
+                signature={company.signatoryName}
+                name={company.signatoryName}
+                title={company.signatoryTitle}
+                date={fmtDate(contract.signedAt || contract.sentAt || contract.createdAt)}
+              />
+            ) : (
+              <SignatureLines />
+            )}
           </div>
           {/* Client */}
           <div>
@@ -2133,6 +2179,7 @@ function CompanyProfileSettings() {
   const EMPTY_COMPANY = {
     name: '', registeredAddress: '', vatNumber: '', registrationNumber: '',
     contactEmail: '', website: '', bankName: '', bankIBAN: '', bankSWIFT: '', logo: null,
+    signatoryName: '', signatoryTitle: '', signatorySignature: null,
   };
 
   useEffect(() => {
@@ -2171,6 +2218,21 @@ function CompanyProfileSettings() {
     const updated = await companyService.update({ logo: null });
     setForm(updated);
     toast.push('Logo removed.', 'success');
+  };
+
+  const onSignaturePicked = async (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('image/')) { toast.push('Signature must be an image file.', 'error'); return; }
+    if (file.size > 1024 * 1024) { toast.push('Signature image must be under 1MB.', 'error'); return; }
+    const base64 = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(new Error('Could not read the file.'));
+      reader.readAsDataURL(file);
+    });
+    set('signatorySignature', base64); // saved on "Save Signatory"
   };
 
   const doReset = async () => {
@@ -2224,6 +2286,36 @@ function CompanyProfileSettings() {
           <Field label="SWIFT"><input disabled={!auth.isAdmin} value={form.bankSWIFT} onChange={e=>set('bankSWIFT',e.target.value)} className={inputCls(false)} /></Field>
         </div>
         {auth.isAdmin && <button onClick={save} className="px-4 py-2 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">Save Changes</button>}
+      </div>
+
+      {/* Authorised signatory — auto-applied to every contract so agreements
+          are executed as genuine two-party documents (SOS counter-signs). */}
+      <div className="bg-white rounded-xl border border-[var(--border)] p-6 mb-6">
+        <div className="font-heading text-base mb-1 text-[var(--navy-deep)]">Authorised Signatory</div>
+        <p className="text-sm text-slate-500 mb-4">This person's signature is automatically applied as the Service Provider's counter-signature on every contract, so each agreement is signed by both parties.</p>
+        <div className="grid grid-cols-2 gap-4">
+          <Field label="Signatory Name"><input disabled={!auth.isAdmin} value={form.signatoryName || ''} onChange={e=>set('signatoryName',e.target.value)} placeholder="e.g. Constantinos Charalambides" className={inputCls(false)} /></Field>
+          <Field label="Signatory Title"><input disabled={!auth.isAdmin} value={form.signatoryTitle || ''} onChange={e=>set('signatoryTitle',e.target.value)} placeholder="e.g. CEO / Director" className={inputCls(false)} /></Field>
+        </div>
+        <Field label="Signature Image (optional)">
+          <div className="flex items-center gap-4">
+            {form.signatorySignature ? (
+              <img src={form.signatorySignature} alt="Signatory signature" className="h-14 w-auto object-contain border border-[var(--border)] rounded-lg p-1.5 bg-white" />
+            ) : (
+              <div className="h-14 w-32 rounded-lg border border-dashed border-[var(--border)] flex items-center justify-center text-xs text-slate-400">No signature</div>
+            )}
+            {auth.isAdmin && (
+              <div className="flex gap-2">
+                <label className="px-3 py-1.5 text-sm border border-[var(--border)] rounded-lg hover:bg-slate-50 transition cursor-pointer">
+                  Upload
+                  <input type="file" accept="image/*" onChange={onSignaturePicked} className="hidden" />
+                </label>
+                {form.signatorySignature && <button onClick={()=>set('signatorySignature',null)} className="px-3 py-1.5 text-sm border border-red-200 text-red-600 rounded-lg hover:bg-red-50 transition">Remove</button>}
+              </div>
+            )}
+          </div>
+        </Field>
+        {auth.isAdmin && <button onClick={save} className="px-4 py-2 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">Save Signatory</button>}
       </div>
 
       {auth.isAdmin && (
@@ -2439,6 +2531,24 @@ function normalizeSnapshot(snapshot) {
   return { contract, client, company };
 }
 
+// Inline panel shown on the review/summary screens when a signer chooses to
+// decline the contract or request changes. Reason is optional.
+function DeclinePanel({ reason, setReason, onCancel, onConfirm, busy }) {
+  return (
+    <div className="mt-4 border border-amber-200 bg-amber-50 rounded-lg p-4">
+      <div className="text-sm font-medium text-amber-800 mb-1">Decline or request changes</div>
+      <p className="text-xs text-amber-700 mb-3">Let the sender know why you can't sign, or what needs to change. They'll be notified and can send you a revised contract.</p>
+      <Field label="Reason for declining or changes requested (optional)">
+        <textarea value={reason} onChange={e=>setReason(e.target.value)} rows={3} className={`${inputCls(false)} resize-none`} placeholder="e.g. Please update the start date, or the value needs revising." />
+      </Field>
+      <div className="flex justify-end gap-2">
+        <button type="button" onClick={onCancel} className="px-4 py-2 text-sm rounded-lg border border-[var(--border)] hover:bg-white">Cancel</button>
+        <button type="button" disabled={busy} onClick={onConfirm} className="px-4 py-2 text-sm rounded-lg bg-red-600 text-white font-medium hover:bg-red-700 transition disabled:opacity-50">{busy ? 'Submitting…' : 'Confirm decline'}</button>
+      </div>
+    </div>
+  );
+}
+
 function SigningFlow({ contractId, portablePayload, reqToken }) {
   const toast = useToast();
   const isPortable = !!portablePayload;
@@ -2481,6 +2591,34 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
   const [clientDetailsForm, setClientDetailsForm] = useState(null);
   const [clientDetailsErrors, setClientDetailsErrors] = useState({});
   const [savingClientDetails, setSavingClientDetails] = useState(false);
+
+  // Decline / request changes (server mode) + certificate re-download.
+  const [declined, setDeclined] = useState(false);
+  const [showDeclinePanel, setShowDeclinePanel] = useState(false);
+  const [declineReason, setDeclineReason] = useState('');
+  const [decliningBusy, setDecliningBusy] = useState(false);
+
+  const downloadCertificate = async () => {
+    try {
+      const res = await signingService.getCertificate(reqToken);
+      window.open(res.downloadUrl, '_blank');
+    } catch (err) {
+      toast.push(err.message || 'Could not download your certificate.', 'error');
+    }
+  };
+
+  const submitDecline = async () => {
+    setDecliningBusy(true);
+    try {
+      await signingService.decline(reqToken, declineReason.trim());
+      setShowDeclinePanel(false);
+      setDeclined(true);
+    } catch (err) {
+      toast.push(err.message || 'Could not submit your response.', 'error');
+    } finally {
+      setDecliningBusy(false);
+    }
+  };
 
   useEffect(() => {
     (async () => {
@@ -2577,6 +2715,19 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
     );
   }
 
+  // Server mode: the signer declined / requested changes.
+  if (declined) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[var(--navy-deep)] px-4">
+        <div className="bg-white rounded-xl shadow-2xl p-8 max-w-md text-center">
+          <div className="text-4xl mb-4">✋</div>
+          <div className="font-heading mb-2">You've declined this contract.</div>
+          <p className="text-sm text-slate-500">{company ? `${company.name} has been notified.` : 'The sender has been notified.'}</p>
+        </div>
+      </div>
+    );
+  }
+
   // Server mode: the request row already reports this contract as signed.
   if (alreadySigned) {
     return (
@@ -2584,7 +2735,8 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
         <div className="bg-white rounded-xl shadow-2xl p-8 max-w-md text-center">
           <div className="text-4xl mb-4">✅</div>
           <div className="font-heading mb-2">This contract has already been signed.</div>
-          <p className="text-sm text-slate-500">{company ? `Contact ${company.contactEmail} if you need another copy.` : 'Contact the sender if you need another copy.'}</p>
+          <p className="text-sm text-slate-500 mb-5">{company ? `Contact ${company.contactEmail} if you need another copy.` : 'Contact the sender if you need another copy.'}</p>
+          <button type="button" onClick={downloadCertificate} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium sos-btn-cyan">⬇ Download your signed certificate (PDF)</button>
         </div>
       </div>
     );
@@ -2869,10 +3021,14 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
                 </div>
                 <div className="flex items-center justify-between gap-3">
                   <button type="button" onClick={()=>downloadContractPdf({ contract, client, company })} className="text-xs text-blue-600 hover:underline inline-flex items-center gap-1">⬇ Download PDF</button>
-                  <button disabled={!scrolledToBottom} onClick={()=>setScreen(3)} className="px-5 py-2.5 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition disabled:opacity-40 disabled:cursor-not-allowed">
-                    {scrolledToBottom ? 'Proceed to Sign' : 'Scroll to the bottom to continue'}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {isServer && <button type="button" onClick={()=>setShowDeclinePanel(true)} className="px-4 py-2.5 text-sm rounded-lg border border-[var(--border)] text-slate-600 hover:bg-slate-50 transition">Decline / Request changes</button>}
+                    <button disabled={!scrolledToBottom} onClick={()=>setScreen(3)} className="px-5 py-2.5 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition disabled:opacity-40 disabled:cursor-not-allowed">
+                      {scrolledToBottom ? 'Proceed to Sign' : 'Scroll to the bottom to continue'}
+                    </button>
+                  </div>
                 </div>
+                {isServer && showDeclinePanel && <DeclinePanel reason={declineReason} setReason={setDeclineReason} onCancel={()=>{ setShowDeclinePanel(false); setDeclineReason(''); }} onConfirm={submitDecline} busy={decliningBusy} />}
               </div>
             )}
 
@@ -2928,8 +3084,12 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
 
                 <div className="flex justify-between mt-6">
                   <button onClick={()=>setScreen(2)} className="px-4 py-2 text-sm rounded-lg border border-[var(--border)] hover:bg-slate-50">Back</button>
-                  <button onClick={()=>setScreen(4)} className="px-5 py-2.5 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">Continue to Signature</button>
+                  <div className="flex items-center gap-2">
+                    {isServer && <button type="button" onClick={()=>setShowDeclinePanel(true)} className="px-4 py-2.5 text-sm rounded-lg border border-[var(--border)] text-slate-600 hover:bg-slate-50 transition">Decline / Request changes</button>}
+                    <button onClick={()=>setScreen(4)} className="px-5 py-2.5 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">Continue to Signature</button>
+                  </div>
                 </div>
+                {isServer && showDeclinePanel && <DeclinePanel reason={declineReason} setReason={setDeclineReason} onCancel={()=>{ setShowDeclinePanel(false); setDeclineReason(''); }} onConfirm={submitDecline} busy={decliningBusy} />}
               </div>
             )}
 
@@ -3041,8 +3201,9 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
                   /* SERVER MODE: signature recorded server-side; email confirmation is automatic. */
                   <React.Fragment>
                     <p className="text-sm text-slate-600 mb-4">Thank you — this contract is now signed. A confirmation email with your <strong>Certificate of Completion (PDF)</strong> has been sent to you. You can also download a copy of the agreement now:</p>
-                    <div className="flex justify-center mb-6">
-                      <button type="button" onClick={()=>downloadContractPdf({ contract, client, company })} className="px-4 py-2 border border-[var(--border)] rounded-lg text-sm hover:bg-slate-50 inline-flex items-center gap-1">⬇ Download contract (PDF)</button>
+                    <div className="flex flex-col sm:flex-row gap-3 justify-center mb-6">
+                      <button type="button" onClick={()=>downloadContractPdf({ contract, client, company })} className="px-4 py-2 border border-[var(--border)] rounded-lg text-sm hover:bg-slate-50 inline-flex items-center justify-center gap-1">⬇ Download contract (PDF)</button>
+                      <button type="button" onClick={downloadCertificate} className="px-4 py-2 rounded-lg text-sm font-medium sos-btn-cyan inline-flex items-center justify-center gap-1">⬇ Download your signed certificate (PDF)</button>
                     </div>
                   </React.Fragment>
                 ) : isPortable ? (

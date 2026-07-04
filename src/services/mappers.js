@@ -37,6 +37,9 @@ export function companyFromRow(row) {
     bankIBAN: row.bank_iban ?? null,
     bankSWIFT: row.bank_swift ?? null,
     logo: row.logo_url ?? null,
+    signatoryName: row.signatory_name ?? null,
+    signatoryTitle: row.signatory_title ?? null,
+    signatorySignature: row.signatory_signature ?? null,
     updatedAt: row.updated_at ?? null,
   };
 }
@@ -54,6 +57,9 @@ export function companyToRow(obj) {
   if ('bankIBAN' in obj) row.bank_iban = obj.bankIBAN;
   if ('bankSWIFT' in obj) row.bank_swift = obj.bankSWIFT;
   if ('logo' in obj) row.logo_url = obj.logo;
+  if ('signatoryName' in obj) row.signatory_name = obj.signatoryName;
+  if ('signatoryTitle' in obj) row.signatory_title = obj.signatoryTitle;
+  if ('signatorySignature' in obj) row.signatory_signature = obj.signatorySignature;
   return row;
 }
 
