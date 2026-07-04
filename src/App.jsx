@@ -1035,7 +1035,7 @@ function ContractDetail({ contractId, navigate }) {
         {auth.isAdmin && (contract.status === 'draft' || contract.status === 'sent') && <button onClick={()=>setShowMarkSignedModal(true)} className="px-4 py-2 border border-[var(--border)] text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition">Record as Signed Manually</button>}
         {auth.isAdmin && contract.status === 'sent' && <button onClick={()=>setShowImportModal(true)} className="px-4 py-2 border border-emerald-200 text-emerald-700 rounded-lg text-sm font-medium hover:bg-emerald-50 transition">Import Signed Confirmation</button>}
         {auth.isAdmin && (contract.status === 'signed' || contract.status === 'active') && <button onClick={()=>setShowPaymentModal(true)} className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition">+ Add Payment Milestone</button>}
-        {auth.isAdmin && (contract.status === 'draft' || contract.status === 'sent') && <button onClick={()=>setShowDeleteModal(true)} className="px-4 py-2 border border-red-200 text-red-600 rounded-lg text-sm font-medium hover:bg-red-50 transition">Delete</button>}
+        {auth.isAdmin && <button onClick={()=>setShowDeleteModal(true)} className="px-4 py-2 border border-red-200 text-red-600 rounded-lg text-sm font-medium hover:bg-red-50 transition">Delete</button>}
       </div>
 
       {auth.isAdmin && contract.status === 'sent' && (
@@ -1134,7 +1134,11 @@ function ContractDetail({ contractId, navigate }) {
       </div>
 
       <ConfirmModal open={showSendModal} onClose={()=>setShowSendModal(false)} onConfirm={sendContract} title="Send for Signature" message={`This will send "${contract.title}" to ${client?.contactName} (${client?.contactEmail}) for electronic signature. Continue?`} confirmLabel="Send" />
-      <ConfirmModal open={showDeleteModal} onClose={()=>setShowDeleteModal(false)} onConfirm={deleteContract} title="Delete Contract" message="This will permanently delete this contract. It has not been signed yet, but this cannot be undone." confirmLabel="Delete" danger />
+      <ConfirmModal open={showDeleteModal} onClose={()=>setShowDeleteModal(false)} onConfirm={deleteContract} title="Delete Contract"
+        message={(contract.status === 'signed' || contract.status === 'active')
+          ? `⚠️ WARNING: "${contract.title}" is a SIGNED, active agreement. Deleting it permanently destroys the contract AND its signature evidence (audit trail, certificate record). This cannot be undone and should only be done for test data or a genuine cancellation. Are you absolutely sure?`
+          : 'This will permanently delete this contract. It has not been signed yet, but this cannot be undone.'}
+        confirmLabel={(contract.status === 'signed' || contract.status === 'active') ? 'Delete signed contract' : 'Delete'} danger />
       {showPaymentModal && <AddPaymentModal contract={contract} client={client} onClose={()=>setShowPaymentModal(false)} onDone={()=>{ setShowPaymentModal(false); load(); }} />}
       {showMarkPaidPayment && <MarkPaidModal contract={contract} payment={showMarkPaidPayment} onClose={()=>setShowMarkPaidPayment(null)} onDone={()=>{ setShowMarkPaidPayment(null); load(); }} />}
       {showMarkSignedModal && <MarkSignedManuallyModal contract={contract} client={client} onClose={()=>setShowMarkSignedModal(false)} onDone={()=>{ setShowMarkSignedModal(false); load(); }} />}
