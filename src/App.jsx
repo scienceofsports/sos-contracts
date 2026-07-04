@@ -25,12 +25,11 @@ import {
 import { encodePortablePayload, decodePortablePayload } from './lib/portable.js';
 import {
   companyService,
-  userService,
   clientService,
   contractService,
   paymentService,
-} from './services/index.js';
-import { seedIfEmpty } from './services/seed.js';
+} from './services/supabaseServices.js';
+import { userService } from './services/authService.js';
 import { ToastProvider, useToast } from './context/ToastContext.jsx';
 import { AuthProvider, useAuth } from './context/AuthContext.jsx';
 import {
@@ -2859,7 +2858,7 @@ function App() {
 }
 
 function Root() {
-  useEffect(() => { seedIfEmpty(); }, []);
+  // No localStorage seeding — data now lives in Supabase (the real backend).
   return (
     <ToastProvider>
       <AuthProvider>
