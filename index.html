@@ -1727,7 +1727,7 @@ function ContractDetail({ contractId, navigate }) {
         setPortableLinkError('');
         const company = await companyService.get();
         const payload = await encodePortablePayload({ contract, client, company });
-        const link = `${location.origin}${location.pathname}#/sign-data/${payload}`;
+        const link = `${location.origin}${location.pathname}?sign=${payload}`;
         if (link.length > 7500) {
           setPortableLinkError(`This link is very long (${link.length.toLocaleString()} characters) — some email clients or messaging apps may truncate it. Consider trimming the description or special terms, or send it as a plain text file instead of pasting inline.`);
         }
@@ -3583,14 +3583,14 @@ function App() {
   const hash = useHashRoute();
   const auth = useAuth();
 
+  const signParam = new URLSearchParams(location.search).get('sign');
+  if (signParam) {
+    return <SigningFlow portablePayload={signParam} />;
+  }
+
   const signMatch = hash.match(/^#\/sign\/([^/]+)\/([^/]+)/);
   if (signMatch) {
     return <SigningFlow contractId={signMatch[1]} />;
-  }
-
-  const signDataMatch = hash.match(/^#\/sign-data\/(.+)$/);
-  if (signDataMatch) {
-    return <SigningFlow portablePayload={signDataMatch[1]} />;
   }
 
   const setupMatch = hash.match(/^#\/setup\/([^/]+)/);
