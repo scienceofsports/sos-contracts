@@ -11,8 +11,9 @@
 import { handleOptions, json } from '../_shared/cors.ts';
 import { getAdminClient, getClientIp } from '../_shared/supabaseAdmin.ts';
 import { hashDocument } from '../_shared/evidence.ts';
-import { sendEmail, signedNotificationEmail } from '../_shared/email.ts';
+import { sendEmail, signedNotificationEmail, signerConfirmationEmail } from '../_shared/email.ts';
 import { appendEvent } from '../_shared/audit.ts';
+import { buildCertificate } from '../_shared/certificate.ts';
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return handleOptions();
@@ -115,44 +116,80 @@ Deno.serve(async (req) => {
       .eq('id', request.contract_id);
     if (contractUpdateErr) throw new Error(contractUpdateErr.message);
 
-    // 9. Notify staff. Prefer company.contact_email; fall back to the creating
-    //    admin's email (app_users). Never fail signing on a notification error.
+    // 9. Generate the Certificate of Completion PDF, store it, and email it to
+    //    BOTH the signer (confirmation) and staff (notification). Wrapped so a
+    //    certificate/email hiccup never fails the signing itself.
+    const snap = request.document_snapshot || {};
+    const contractTitle = snap?.contract?.title ?? 'Contract';
+    const contractNumber = snap?.contract?.contractNumber ?? snap?.contract?.contract_number ?? '';
     try {
-      const { data: company } = await admin
-        .from('company')
-        .select('contact_email')
-        .limit(1)
-        .maybeSingle();
-      const { data: contract } = await admin
-        .from('contracts')
-        .select('title, created_by')
-        .eq('id', request.contract_id)
-        .maybeSingle();
+      // Re-download the signature PNG we just uploaded, to embed in the PDF.
+      let sigBytes: Uint8Array | null = null;
+      try {
+        const { data: sigBlob } = await admin.storage.from('signatures').download(objectPath);
+        if (sigBlob) sigBytes = new Uint8Array(await sigBlob.arrayBuffer());
+      } catch (_) { sigBytes = bytes; /* fall back to the bytes we just uploaded */ }
 
-      let notifyTo = company?.contact_email ?? null;
-      if (!notifyTo && contract?.created_by) {
-        const { data: admin_user } = await admin
-          .from('app_users')
-          .select('email')
-          .eq('id', contract.created_by)
-          .maybeSingle();
-        notifyTo = admin_user?.email ?? null;
-      }
+      const { bytes: pdfBytes, sha256: pdfSha } = await buildCertificate({
+        snapshot: snap,
+        signer: {
+          name: signerName, title: signerTitle ?? '', company: signerCompany ?? '',
+          email: request.signer_email, ip: signer_ip, userAgent: user_agent, signedAt,
+          consentElectronic: !!consents.electronic, consentAuthorized: !!consents.authorized, consentRead: !!consents.read,
+        },
+        documentHashBefore: request.document_hash_before,
+        documentHashAfter: document_hash_after,
+        integrityOk,
+        signatureImageBytes: sigBytes,
+        contractNumber,
+      });
 
-      if (notifyTo) {
+      // Store the certificate PDF privately + record it.
+      const certPath = `${request.contract_id}/${request.id}.pdf`;
+      await admin.storage.from('certificates').upload(certPath, pdfBytes, { contentType: 'application/pdf', upsert: true });
+      await admin.from('certificates').insert({
+        contract_id: request.contract_id,
+        signing_request_id: request.id,
+        pdf_url: `certificates/${certPath}`,
+        pdf_sha256: pdfSha,
+      });
+
+      // Base64 the PDF for email attachments.
+      const pdfB64 = btoa(Array.from(pdfBytes).map((b) => String.fromCharCode(b)).join(''));
+      const attachments = [{ filename: `Certificate - ${contractNumber || contractTitle}.pdf`, content: pdfB64 }];
+
+      // (a) Confirmation to the SIGNER.
+      try {
         await sendEmail({
-          to: notifyTo,
-          subject: `Contract signed: ${contract?.title ?? ''}`,
-          html: signedNotificationEmail({
-            contractTitle: contract?.title ?? 'Contract',
-            signerName,
-            signerCompany: signerCompany ?? '',
-            signedAt,
+          to: request.signer_email,
+          subject: `Your signed contract: ${contractTitle}`,
+          html: signerConfirmationEmail({
+            signerName, companyName: snap?.company?.name ?? 'Science of Sports', contractTitle, signedAt,
           }),
+          attachments,
         });
-      }
-    } catch (notifyErr) {
-      console.error('signed notification email failed:', notifyErr);
+      } catch (e) { console.error('signer confirmation email failed:', e); }
+
+      // (b) Notification to STAFF (company contact, else creating admin).
+      try {
+        const { data: company } = await admin.from('company').select('contact_email').limit(1).maybeSingle();
+        const { data: contract } = await admin.from('contracts').select('created_by').eq('id', request.contract_id).maybeSingle();
+        let notifyTo = company?.contact_email ?? null;
+        if (!notifyTo && contract?.created_by) {
+          const { data: admin_user } = await admin.from('app_users').select('email').eq('id', contract.created_by).maybeSingle();
+          notifyTo = admin_user?.email ?? null;
+        }
+        if (notifyTo) {
+          await sendEmail({
+            to: notifyTo,
+            subject: `Contract signed: ${contractTitle}`,
+            html: signedNotificationEmail({ contractTitle, signerName, signerCompany: signerCompany ?? '', signedAt }),
+            attachments,
+          });
+        }
+      } catch (e) { console.error('staff notification email failed:', e); }
+    } catch (certErr) {
+      console.error('certificate generation failed:', certErr);
     }
 
     // 10. Done.

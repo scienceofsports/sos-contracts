@@ -13,6 +13,7 @@ export async function sendEmail(opts: {
   subject: string;
   html: string;
   replyTo?: string;
+  attachments?: { filename: string; content: string }[]; // content = base64
 }): Promise<void> {
   const apiKey = Deno.env.get('RESEND_API_KEY');
   if (!apiKey) throw new Error('RESEND_API_KEY not configured');
@@ -29,6 +30,7 @@ export async function sendEmail(opts: {
       subject: opts.subject,
       html: opts.html,
       ...(opts.replyTo ? { reply_to: opts.replyTo } : {}),
+      ...(opts.attachments && opts.attachments.length ? { attachments: opts.attachments } : {}),
     }),
   });
 
@@ -93,6 +95,24 @@ export function signedNotificationEmail(opts: {
       Signed by: ${opts.signerName} (${opts.signerCompany})<br/>
       When: ${opts.signedAt}
     </p>
-    <p>The signed record and Certificate of Completion are available in SOS Contracts.</p>
+    <p>The Certificate of Completion (with the full evidence record) is attached to this email, and the signed record is available in SOS Contracts.</p>
+  `);
+}
+
+// Confirmation sent to the SIGNER after they sign, with the certificate PDF.
+export function signerConfirmationEmail(opts: {
+  signerName: string;
+  companyName: string;
+  contractTitle: string;
+  signedAt: string;
+}): string {
+  return WRAP(`
+    <p>Dear ${opts.signerName || 'Sir/Madam'},</p>
+    <p>Thank you — you have successfully signed the following agreement with <strong>${opts.companyName}</strong>:</p>
+    <p style="background:#F1F5F9;padding:12px 16px;border-radius:8px;font-weight:600;">${opts.contractTitle}</p>
+    <p>Signed on <strong>${opts.signedAt}</strong> (UTC).</p>
+    <p>Your <strong>Certificate of Completion</strong> is attached to this email for your records. It contains the full signature evidence, including the document integrity hash. Please keep it safe.</p>
+    <p>If you have any questions about this agreement, simply reply to this email.</p>
+    <p>With thanks,<br/>The Science of Sports team</p>
   `);
 }
