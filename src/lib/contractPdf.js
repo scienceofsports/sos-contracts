@@ -68,7 +68,12 @@ export function generateContractPdf({ contract, client, company }) {
   segs.forEach((c, i) => { doc.setFillColor(...c); doc.rect(i * segW, 62, segW, 3, 'F'); });
   y = 92;
 
-  text((contract.title || 'Service Agreement').toUpperCase(), { size: 15, style: 'bold', color: NAVY, gap: 6 });
+  // Title split on the dash: client name on top, agreement type below.
+  {
+    const parts = (contract.title || 'Service Agreement').split(/\s+[—–-]\s+/);
+    text((parts[0] || '').toUpperCase(), { size: 16, style: 'bold', color: NAVY, gap: parts.length > 1 ? 1 : 6 });
+    if (parts.length > 1) text(parts.slice(1).join(' - ').toUpperCase(), { size: 12, style: 'bold', color: NAVY, gap: 6 });
+  }
   rule();
 
   // Preamble — both parties, full details (mirrors ContractDocumentBody).

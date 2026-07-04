@@ -1266,7 +1266,18 @@ function ContractDocumentBody({ contract, client, company }) {
         {/* Signature SCIOS rainbow hairline directly under the header band */}
         <div className="sos-rainbow -mx-10 mb-10" />
 
-        <h1 className="font-display text-center mb-8" style={{ color:'var(--navy-deep)' }}>{contract.title.toUpperCase()}</h1>
+        {/* Title split on the dash: client name on top, agreement type below. */}
+        {(() => {
+          const parts = (contract.title || '').split(/\s+[—–-]\s+/);
+          const top = (parts[0] || contract.title || '').toUpperCase();
+          const sub = parts.length > 1 ? parts.slice(1).join(' — ').toUpperCase() : null;
+          return (
+            <div className="text-center mb-8">
+              <h1 className="font-display" style={{ color:'var(--navy-deep)' }}>{top}</h1>
+              {sub && <div className="font-heading tracking-wide mt-1" style={{ color:'var(--navy-deep)' }}>{sub}</div>}
+            </div>
+          );
+        })()}
 
         <p className="text-sm text-slate-700 mb-6">
           This Agreement is made on <strong>{fmtDate(contract.createdAt)}</strong> between:
