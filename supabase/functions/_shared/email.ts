@@ -43,15 +43,23 @@ export async function sendEmail(opts: {
 // ---- Simple branded email templates (inline styles for mail-client safety) --
 const WRAP = (inner: string) => `
 <div style="font-family:Inter,Arial,sans-serif;background:#F8FAFC;padding:32px;">
-  <div style="max-width:520px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;border:1px solid #E2E8F0;">
-    <div style="background:#0A1628;padding:20px 28px;">
-      <span style="color:#fff;font-weight:700;font-size:18px;">Science of Sports</span>
+  <div style="max-width:540px;margin:0 auto;background:#fff;border-radius:14px;overflow:hidden;border:1px solid #E2E8F0;">
+    <!-- Navy header band -->
+    <div style="background:#0A1A3F;padding:22px 30px;">
+      <span style="color:#fff;font-weight:800;font-size:19px;letter-spacing:.02em;">SCIENCE OF SPORTS</span>
     </div>
-    <div style="padding:28px;color:#0f172a;font-size:14px;line-height:1.6;">
+    <!-- Signature rainbow hairline -->
+    <div style="height:4px;background:linear-gradient(90deg,#22C7E6 0%,#2563EB 32%,#8B5CF6 62%,#EC4899 100%);"></div>
+    <!-- Body -->
+    <div style="padding:30px;color:#0f172a;font-size:14px;line-height:1.65;">
       ${inner}
     </div>
-    <div style="padding:16px 28px;border-top:1px solid #E2E8F0;color:#94A3B8;font-size:12px;">
-      C.C. Science of Sports Ltd · Cyprus · This is an automated message from SOS Contracts.
+    <!-- Navy footer band -->
+    <div style="background:#0A1A3F;padding:18px 30px;color:#A9B6CC;font-size:12px;line-height:1.5;">
+      <div style="color:#fff;font-weight:600;margin-bottom:2px;">C.C. Science of Sports Ltd</div>
+      Michalaki Karaoli, Anemomylos Building, Floor 5, 1095 Nicosia, Cyprus<br/>
+      info@scienceofsports.net · +357 22 396997 · HE 449875
+      <div style="color:#22C7E6;font-style:italic;font-weight:600;margin-top:10px;">Transforming matches into knowledge.</div>
     </div>
   </div>
 </div>`;

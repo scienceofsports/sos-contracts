@@ -77,18 +77,22 @@ function LoginScreen() {
           <div className="text-white font-display">SOS Contracts</div>
           <div className="text-slate-400 text-sm mt-1">Science of Sports — Internal Contract Management</div>
         </div>
-        <form onSubmit={submit} className="bg-white rounded-xl shadow-2xl p-8">
-          <Field label="Email" required>
-            <input type="email" value={email} onChange={e=>setEmail(e.target.value)} className={inputCls(false)} placeholder="admin@scienceofsports.com" autoFocus />
-          </Field>
-          <Field label="Password" required>
-            <input type="password" value={password} onChange={e=>setPassword(e.target.value)} className={inputCls(false)} placeholder="••••••••" />
-          </Field>
-          {error && <p className="text-xs text-red-500 mb-4">{error}</p>}
-          <button disabled={busy} className="w-full py-2.5 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition disabled:opacity-50">
-            {busy ? 'Signing in…' : 'Sign In'}
-          </button>
+        <form onSubmit={submit} className="bg-white rounded-xl shadow-2xl overflow-hidden">
+          <div className="sos-rainbow" />
+          <div className="p-8">
+            <Field label="Email" required>
+              <input type="email" value={email} onChange={e=>setEmail(e.target.value)} className={inputCls(false)} placeholder="admin@scienceofsports.com" autoFocus />
+            </Field>
+            <Field label="Password" required>
+              <input type="password" value={password} onChange={e=>setPassword(e.target.value)} className={inputCls(false)} placeholder="••••••••" />
+            </Field>
+            {error && <p className="text-xs text-red-500 mb-4">{error}</p>}
+            <button disabled={busy} className="w-full py-2.5 bg-[var(--cyan)] text-[var(--navy-deep)] rounded-lg text-sm font-semibold hover:bg-[var(--cyan-deep)] transition disabled:opacity-50">
+              {busy ? 'Signing in…' : 'Sign In'}
+            </button>
+          </div>
         </form>
+        <div className="text-center text-slate-500 text-xs mt-6">Transforming matches into knowledge.</div>
       </div>
     </div>
   );
@@ -131,8 +135,9 @@ function Sidebar({ route, navigate, mobileOpen, setMobileOpen }) {
     <React.Fragment>
       {mobileOpen && <div className="fixed inset-0 bg-black/40 z-30 md:hidden no-print" onClick={()=>setMobileOpen(false)}></div>}
       <div className={`fixed md:static z-40 top-0 left-0 h-full w-64 bg-[var(--navy-deep)] flex flex-col transition-transform no-print ${mobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
+        <div className="sos-rainbow" />
         <div className="px-5 py-6 border-b border-white/10 flex flex-col items-start gap-2">
-          <img src="Logo-scios-dark.png" alt="SCIOS" className="h-12 w-auto object-contain" />
+          <img src="Logo-scios-bright.png" alt="SCIOS" className="h-12 w-auto object-contain" />
           <div className="text-white font-heading">SOS Contracts</div>
         </div>
         <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-1">
@@ -146,7 +151,7 @@ function Sidebar({ route, navigate, mobileOpen, setMobileOpen }) {
                     navigate(item.key); setMobileOpen(false);
                   }
                 }}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition ${isActive(item.key) && !item.children ? 'bg-[var(--navy-mid)] text-white' : 'text-slate-300 hover:bg-[var(--navy-mid)]/60 hover:text-white'}`}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition border-l-2 ${isActive(item.key) && !item.children ? 'bg-[var(--navy-mid)] text-white border-[var(--cyan)]' : 'border-transparent text-slate-300 hover:bg-[var(--navy-mid)]/60 hover:text-white'}`}
               >
                 <span>{item.icon}</span>
                 <span className="flex-1 text-left">{item.label}</span>
@@ -158,7 +163,7 @@ function Sidebar({ route, navigate, mobileOpen, setMobileOpen }) {
                     <button
                       key={child.key}
                       onClick={() => { navigate(child.key); setMobileOpen(false); }}
-                      className={`w-full text-left px-3 py-2 rounded-lg text-sm transition ${route === child.key ? 'bg-[var(--navy-mid)] text-white' : 'text-slate-400 hover:bg-[var(--navy-mid)]/60 hover:text-white'}`}
+                      className={`w-full text-left px-3 py-2 rounded-lg text-sm transition border-l-2 ${route === child.key ? 'bg-[var(--navy-mid)] text-[var(--cyan)] border-[var(--cyan)]' : 'border-transparent text-slate-400 hover:bg-[var(--navy-mid)]/60 hover:text-white'}`}
                     >
                       {child.label}
                     </button>
@@ -195,8 +200,8 @@ function useContractsData() {
 function MetricCard({ label, value, sub, color }) {
   return (
     <div className="bg-white rounded-xl border border-[var(--border)] p-5">
-      <div className="text-xs text-slate-500">{label}</div>
-      <div className="font-data text-2xl mt-1.5" style={{ color: color || '#0f172a' }}>{value}</div>
+      <div className="text-[10px] uppercase tracking-wide text-slate-500 font-medium">{label}</div>
+      <div className="font-data text-3xl font-bold mt-1.5" style={{ color: color || 'var(--cyan-deep)' }}>{value}</div>
       {sub && <div className="text-xs text-slate-400 mt-1">{sub}</div>}
     </div>
   );
@@ -330,7 +335,7 @@ function Dashboard({ navigate }) {
   return (
     <div className="p-4 md:p-6">
       <div className="flex items-center justify-between mb-6">
-        <div className="font-display">Dashboard</div>
+        <div className="font-display text-[var(--navy-deep)]">Dashboard</div>
         <button onClick={exportBoardCSV} className="px-4 py-2 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">Board Export</button>
       </div>
 
@@ -436,7 +441,7 @@ function Dashboard({ navigate }) {
       </div>
 
       <div className="bg-white rounded-xl border border-[var(--border)] p-5 mb-6">
-        <div className="font-heading mb-4 text-base">Unsigned Contracts Aging</div>
+        <div className="sos-pill mb-4">Unsigned Contracts Aging</div>
         {unsignedAging.length === 0 ? <EmptyState title="Nothing pending signature" icon="✅" /> : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -457,7 +462,7 @@ function Dashboard({ navigate }) {
       </div>
 
       <div className="bg-white rounded-xl border border-[var(--border)] p-5">
-        <div className="font-heading mb-4 text-base">Top Clients by Value</div>
+        <div className="sos-pill mb-4">Top Clients by Value</div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead><tr className="text-left text-xs text-slate-400 border-b border-[var(--border)]"><th className="py-2 pr-4">Client</th><th className="py-2 pr-4">Total Value</th><th className="py-2 pr-4">Collected</th><th className="py-2 pr-4">Outstanding</th><th className="py-2 pr-4">End Date</th></tr></thead>
@@ -510,8 +515,8 @@ function ContractsList({ navigate, filterStatus }) {
   return (
     <div className="p-4 md:p-6">
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
-        <div className="font-display">Contracts</div>
-        {auth.isAdmin && <button onClick={()=>navigate('contracts:new')} className="px-4 py-2 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">+ New Contract</button>}
+        <div className="font-display text-[var(--navy-deep)]">Contracts</div>
+        {auth.isAdmin && <button onClick={()=>navigate('contracts:new')} className="px-4 py-2 sos-btn-cyan rounded-lg text-sm font-semibold transition">+ New Contract</button>}
       </div>
       <div className="flex flex-wrap gap-3 mb-4">
         <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search contracts…" className="px-3 py-2 text-sm border border-[var(--border)] rounded-lg flex-1 min-w-[200px]" />
@@ -758,7 +763,7 @@ function ContractForm({ navigate, editContractId }) {
 
   return (
     <div className="p-4 md:p-6 max-w-3xl">
-      <div className="font-display mb-6">{isEdit ? 'Edit Contract' : 'New Contract'}</div>
+      <div className="font-display mb-6 text-[var(--navy-deep)]">{isEdit ? 'Edit Contract' : 'New Contract'}</div>
 
       <div className="bg-white rounded-xl border border-[var(--border)] p-6">
         <Field label="Title" required error={errors.title}>
@@ -1001,7 +1006,7 @@ function ContractDetail({ contractId, navigate }) {
       <button onClick={()=>navigate('contracts:all')} className="text-sm text-slate-500 hover:text-slate-700 mb-4">← All Contracts</button>
       <div className="flex flex-wrap items-start justify-between gap-3 mb-6">
         <div>
-          <div className="font-display">{contract.title}</div>
+          <div className="font-display text-[var(--navy-deep)]">{contract.title}</div>
           <div className="text-sm text-slate-400 font-data mt-1">{contract.contractNumber} · v{contract.version}</div>
         </div>
         <div className="flex items-center gap-2">
@@ -1218,18 +1223,27 @@ function ContractDocumentBody({ contract, client, company }) {
 
   return (
     <React.Fragment>
-        <div className="flex items-center justify-center gap-6 mb-10 pb-6 border-b border-[var(--border)]">
-          <div className="flex items-center justify-center">
-            {company.logo ? <img src={company.logo} alt={company.name} className="h-14 w-auto object-contain" /> : <div className="font-display text-blue-700">{company.name}</div>}
+        {/* Navy brand header band: two-logo lockup + contract reference (cyan) */}
+        <div
+          className="rounded-t-lg -mx-10 -mt-10 px-10 py-8"
+          style={{ background: 'var(--navy-deep)', WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}
+        >
+          <div className="flex items-center justify-center gap-6">
+            <div className="flex items-center justify-center">
+              {company.logo ? <img src={company.logo} alt={company.name} className="h-14 w-auto object-contain" /> : <div className="font-display text-white">{company.name}</div>}
+            </div>
+            <div className="text-[var(--cyan)] text-xl font-light">×</div>
+            <div className="flex items-center justify-center bg-white/95 rounded-lg px-4 py-2">
+              {client.logoBase64 ? <img src={client.logoBase64} alt={client.companyName} className="h-12 w-auto object-contain" /> : <div className="font-heading text-[var(--navy-deep)]">{client.companyName}</div>}
+            </div>
           </div>
-          <div className="text-slate-300 text-xl">×</div>
-          <div className="flex items-center justify-center">
-            {client.logoBase64 ? <img src={client.logoBase64} alt={client.companyName} className="h-14 w-auto object-contain" /> : <div className="font-heading text-slate-700">{client.companyName}</div>}
-          </div>
+          <p className="text-center text-sm font-semibold tracking-wide mt-6" style={{ color:'var(--cyan)' }}>{contract.contractNumber}</p>
         </div>
 
-        <h1 className="font-display text-center mb-1">{contract.title.toUpperCase()}</h1>
-        <p className="text-center text-sm text-slate-500 mb-8">{contract.contractNumber}</p>
+        {/* Signature SCIOS rainbow hairline directly under the header band */}
+        <div className="sos-rainbow -mx-10 mb-10" />
+
+        <h1 className="font-display text-center mb-8" style={{ color:'var(--navy-deep)' }}>{contract.title.toUpperCase()}</h1>
 
         <p className="text-sm text-slate-700 mb-6">
           This Agreement is made on <strong>{fmtDate(contract.createdAt)}</strong> between:
@@ -1259,89 +1273,89 @@ function ContractDocumentBody({ contract, client, company }) {
           const entireAgreementNum = n++;
           return (
             <React.Fragment>
-              <h2 className="font-heading text-base mb-2">{purposeNum}. Purpose</h2>
+              <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{purposeNum}.</span> Purpose</div>
               <p className="text-sm text-slate-700 mb-8 whitespace-pre-line">{contract.description || 'The purpose of this Agreement is to define the terms of cooperation between the Parties for the provision of performance analysis and related services by the Service Provider to the Client.'}</p>
 
               {scopeNum && (
                 <React.Fragment>
-                  <h2 className="font-heading text-base mb-3">{scopeNum}. Scope of Services</h2>
+                  <div className="sos-pill mb-4" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{scopeNum}.</span> Scope of Services</div>
                   <table className="w-full text-sm mb-8 border-collapse">
                     <thead>
-                      <tr className="text-left text-xs text-slate-400 border-b border-[var(--border)]">
-                        <th className="py-2 pr-2">Service</th>
-                        <th className="py-2 text-right">Qty</th>
+                      <tr className="text-left text-xs uppercase tracking-wide" style={{ background:'rgba(10,26,63,0.05)', color:'var(--navy-deep)' }}>
+                        <th className="py-2.5 px-3 rounded-l-md">Service</th>
+                        <th className="py-2.5 px-3 text-right rounded-r-md">Qty</th>
                       </tr>
                     </thead>
                     <tbody>
                       {lineItems.map(i => (
                         <tr key={i.key} className="border-b border-[var(--border)]">
-                          <td className="py-2 pr-2">
+                          <td className="py-2 px-3">
                             {i.label}
                             {i.key === 'platform_access' && platformSeatsSummary(contract.services.platform_access) && (
                               <div className="text-xs text-slate-400">Access: {platformSeatsSummary(contract.services.platform_access)} (exact users to be confirmed with the client)</div>
                             )}
                           </td>
-                          <td className="py-2 text-right font-data">{i.unit === 'flat' ? '—' : (i.unit === 'included' || i.complimentary || i.bundledIncluded) ? 'Included' : i.qty}</td>
+                          <td className="py-2 px-3 text-right font-data">{i.unit === 'flat' ? '—' : (i.unit === 'included' || i.complimentary || i.bundledIncluded) ? 'Included' : i.qty}</td>
                         </tr>
                       ))}
-                      <tr>
-                        <td className="py-2 font-medium">Total Contract Value</td>
-                        <td className="py-2 text-right font-data font-medium">{fmtMoney(contract.value, contract.currency)}</td>
+                      <tr style={{ borderTop:'2px solid var(--navy-deep)' }}>
+                        <td className="py-3 px-3 font-semibold" style={{ color:'var(--navy-deep)' }}>Total Contract Value</td>
+                        <td className="py-3 px-3 text-right font-data font-bold" style={{ color:'var(--navy-deep)' }}>{fmtMoney(contract.value, contract.currency)}</td>
                       </tr>
                     </tbody>
                   </table>
                 </React.Fragment>
               )}
 
-              <h2 className="font-heading text-base mb-2">{feesNum}. Fees & Payment</h2>
+              <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{feesNum}.</span> Fees & Payment</div>
               <p className="text-sm text-slate-700 mb-2">In consideration of the services provided under this Agreement, the Client shall pay the Service Provider a total of <strong>{fmtMoney(contract.value, contract.currency)}</strong>, payable <strong>{contract.paymentType.replace('_',' ')}</strong>, net {contract.paymentTermsDays} days from the date of a valid invoice.</p>
               <p className="text-sm text-slate-700 mb-8">All payments shall be made by bank transfer following the issuance of a valid invoice by the Service Provider, in accordance with applicable VAT regulations. A late payment penalty of {contract.latePaymentPenalty}% per month applies to overdue amounts.</p>
 
-              <h2 className="font-heading text-base mb-2">{confidentialityNum}. Confidentiality & Data Protection</h2>
+              <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{confidentialityNum}.</span> Confidentiality & Data Protection</div>
               <p className="text-sm text-slate-700 mb-2">The Service Provider shall process personal data strictly in accordance with the GDPR, the applicable Cyprus data protection legislation (Law 125(I)/2018), and Regulation (EU) 2016/679, and solely on documented instructions from the Client and exclusively for the purposes of this Agreement.</p>
               <p className="text-sm text-slate-700 mb-8">All match analysis, reports, video clips, data outputs, and technical insights produced under this Agreement shall be treated as strictly confidential and used solely for the Client's internal purposes.</p>
 
-              <h2 className="font-heading text-base mb-2">{ipNum}. Intellectual Property Rights</h2>
+              <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{ipNum}.</span> Intellectual Property Rights</div>
               <p className="text-sm text-slate-700 mb-8">All match footage, training footage, video recordings, reports, analytics outputs, player data, databases, clips and any other materials produced, collected or generated by the Service Provider under this Agreement (collectively, the "Deliverables") shall be the exclusive property of the Client. The Client shall have unrestricted, irrevocable and royalty-free rights to use, reproduce, store, modify, distribute and archive the Deliverables for any internal purpose. The Service Provider shall not use, reproduce, disclose, commercialize or share any Deliverables with any third party without the Client's prior written consent.</p>
 
-              <h2 className="font-heading text-base mb-2">{durationNum}. Duration</h2>
+              <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{durationNum}.</span> Duration</div>
               <p className="text-sm text-slate-700 mb-8">This Agreement shall commence on <strong>{fmtDate(contract.startDate)}</strong> and shall remain in force until <strong>{fmtDate(contract.endDate)}</strong>{termYears ? ` (approximately ${termYears} year${termYears>1?'s':''})` : ''}, unless terminated earlier in accordance with Section {terminationNum}.</p>
 
-              <h2 className="font-heading text-base mb-2">{terminationNum}. Termination</h2>
+              <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{terminationNum}.</span> Termination</div>
               <p className="text-sm text-slate-700 mb-2">Either Party may terminate this Agreement with three (3) months' written notice, or immediately in the event of a material breach not remedied within thirty (30) days.</p>
               <p className="text-sm text-slate-700 mb-8">Upon termination or expiration of this Agreement for any reason, the Service Provider shall promptly deliver to the Client all Deliverables produced under this Agreement.</p>
 
-              <h2 className="font-heading text-base mb-2">{liabilityNum}. Limitation of Liability</h2>
+              <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{liabilityNum}.</span> Limitation of Liability</div>
               <p className="text-sm text-slate-700 mb-8">The Service Provider shall not be responsible for sporting results, team selection decisions, or competition outcomes. Total liability under this Agreement shall not exceed the fees paid during the preceding twelve (12) months. This limitation shall not apply to breaches of confidentiality, data protection obligations, or unauthorized use of the Client's data or intellectual property.</p>
 
-              <h2 className="font-heading text-base mb-2">{forceMajeureNum}. Force Majeure</h2>
+              <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{forceMajeureNum}.</span> Force Majeure</div>
               <p className="text-sm text-slate-700 mb-8">Neither Party shall be liable for failure to perform due to events beyond reasonable control.</p>
 
-              <h2 className="font-heading text-base mb-2">{governingLawNum}. Governing Law & Jurisdiction</h2>
+              <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{governingLawNum}.</span> Governing Law & Jurisdiction</div>
               <p className="text-sm text-slate-700 mb-8">This Agreement shall be governed by the laws of {contract.governingLaw}, with exclusive jurisdiction in {contract.jurisdiction}.</p>
 
               {specialTermsNum && (
                 <React.Fragment>
-                  <h2 className="font-heading text-base mb-2">{specialTermsNum}. Special Terms</h2>
+                  <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{specialTermsNum}.</span> Special Terms</div>
                   <p className="text-sm text-slate-700 mb-8 whitespace-pre-line">{contract.specialTerms}</p>
                 </React.Fragment>
               )}
 
-              <h2 className="font-heading text-base mb-2">{entireAgreementNum}. Entire Agreement & Amendments</h2>
+              <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{entireAgreementNum}.</span> Entire Agreement & Amendments</div>
               <p className="text-sm text-slate-700 mb-12">This Agreement constitutes the entire agreement between the Parties. Any amendment must be made in writing and signed by both Parties.</p>
             </React.Fragment>
           );
         })()}
 
-        <h2 className="font-heading text-base mb-6">Signatures</h2>
+        <div className="sos-pill mb-6" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}>Signatures</div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8 text-sm">
           <div>
-            <div className="text-slate-500 mb-1">For {company.name}</div>
+            <div className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color:'var(--navy-deep)' }}>For {company.name}</div>
             <div className="border-b border-slate-300 h-10 mb-2"></div>
             <div className="text-xs text-slate-400">Name / Title / Date</div>
           </div>
           <div>
-            <div className="text-slate-500 mb-1">For {client.companyName}</div>
+            <div className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color:'var(--navy-deep)' }}>For {client.companyName}</div>
             {contract.signedAt ? (
               <React.Fragment>
                 <div className="italic text-slate-700 border-b border-slate-300 pb-2 mb-2">{contract.signerName}</div>
@@ -1354,6 +1368,20 @@ function ContractDocumentBody({ contract, client, company }) {
               </React.Fragment>
             )}
           </div>
+        </div>
+
+        {/* Branded navy footer band with company details + SCIOS tagline */}
+        <div
+          className="rounded-b-lg -mx-10 -mb-10 mt-12 px-10 py-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4"
+          style={{ background: 'var(--navy-deep)', WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}
+        >
+          <div className="text-xs leading-relaxed" style={{ color:'#A9B6CC' }}>
+            <div className="font-semibold text-white">{company.name}</div>
+            <div>{company.registeredAddress}</div>
+            <div>{company.contactEmail}</div>
+            <div>Reg. No. {company.registrationNumber}{company.vatNumber ? ' · VAT ' + company.vatNumber : ''}</div>
+          </div>
+          <div className="text-sm italic md:text-right" style={{ color:'var(--cyan)' }}>Transforming matches into knowledge.</div>
         </div>
     </React.Fragment>
   );
@@ -1651,7 +1679,7 @@ function PaymentsReceivables({ navigate }) {
 
   return (
     <div className="p-4 md:p-6">
-      <div className="font-display mb-6">Receivables</div>
+      <div className="font-display mb-6 text-[var(--navy-deep)]">Receivables</div>
       {rows.length === 0 ? <EmptyState title="Nothing outstanding" icon="🎉" /> : (
         <div className="bg-white rounded-xl border border-[var(--border)] overflow-x-auto">
           <table className="w-full text-sm">
@@ -1736,7 +1764,7 @@ function PaymentsHistory() {
 
   return (
     <div className="p-4 md:p-6">
-      <div className="font-display mb-6">Payment History</div>
+      <div className="font-display mb-6 text-[var(--navy-deep)]">Payment History</div>
       {rows.length === 0 ? <EmptyState title="No payments recorded yet" icon="📒" /> : (
         <div className="bg-white rounded-xl border border-[var(--border)] overflow-x-auto">
           <table className="w-full text-sm">
@@ -1789,7 +1817,7 @@ function ClientsPage({ navigate }) {
   return (
     <div className="p-4 md:p-6">
       <div className="flex items-center justify-between mb-6">
-        <div className="font-display">Clients</div>
+        <div className="font-display text-[var(--navy-deep)]">Clients</div>
         {auth.isAdmin && <button onClick={()=>setShowForm(true)} className="px-4 py-2 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">+ New Client</button>}
       </div>
       {clients.length === 0 ? <EmptyState title="No clients yet" subtitle="Add your first client to start creating contracts." ctaLabel={auth.isAdmin ? "New Client" : null} onCta={()=>setShowForm(true)} icon="🏟️" /> : (
@@ -1943,7 +1971,7 @@ function RevenueReport() {
 
   return (
     <div className="p-4 md:p-6">
-      <div className="font-display mb-6">Revenue Report</div>
+      <div className="font-display mb-6 text-[var(--navy-deep)]">Revenue Report</div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="bg-white rounded-xl border border-[var(--border)] p-5">
           <div className="font-heading text-base mb-4">Revenue by Contract Type</div>
@@ -2000,7 +2028,7 @@ function BoardExport() {
 
   return (
     <div className="p-4 md:p-6">
-      <div className="font-display mb-6">Board Export</div>
+      <div className="font-display mb-6 text-[var(--navy-deep)]">Board Export</div>
       <div className="bg-white rounded-xl border border-[var(--border)] p-6 max-w-lg">
         <dl className="text-sm space-y-3 mb-6">
           <div className="flex justify-between"><dt className="text-slate-500">MRR</dt><dd className="font-data">{fmtMoney(mrr,'EUR')}</dd></div>
@@ -2088,7 +2116,7 @@ function CompanyProfileSettings() {
 
   return (
     <div className="p-4 md:p-6 max-w-2xl">
-      <div className="font-display mb-6">Company Profile</div>
+      <div className="font-display mb-6 text-[var(--navy-deep)]">Company Profile</div>
       <div className="bg-white rounded-xl border border-[var(--border)] p-6 mb-6">
         <Field label="Logo">
           <div className="flex items-center gap-4">
@@ -2180,7 +2208,7 @@ function UsersSettings() {
   return (
     <div className="p-4 md:p-6">
       <div className="flex items-center justify-between mb-6 max-w-2xl">
-        <div className="font-display">Users & Roles</div>
+        <div className="font-display text-[var(--navy-deep)]">Users & Roles</div>
         {auth.isAdmin && <button onClick={()=>setShowForm(true)} className="px-4 py-2 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">+ New User</button>}
       </div>
       <div className="bg-white rounded-xl border border-[var(--border)] overflow-x-auto max-w-2xl">

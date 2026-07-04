@@ -37,10 +37,13 @@ export function generateContractPdf({ contract, client, company }) {
     }
     if (opts.gap) y += opts.gap;
   };
+  // SCIOS brand colours (RGB)
+  const NAVY = [10, 26, 63];
+  const CYAN = [34, 199, 230];
   const rule = () => { ensure(12); doc.setDrawColor(220, 224, 230); doc.line(M, y, W - M, y); y += 12; };
-  // Numbered clause heading + one or more body paragraphs.
+  // Numbered clause heading (navy) + one or more body paragraphs.
   const clause = (heading, ...paras) => {
-    text(heading, { size: 11, style: 'bold', color: [15, 23, 42], gap: 2 });
+    text(heading, { size: 11, style: 'bold', color: NAVY, gap: 2 });
     paras.forEach((p, i) => text(p, { size: 10, gap: i === paras.length - 1 ? 8 : 4 }));
   };
 
@@ -48,17 +51,24 @@ export function generateContractPdf({ contract, client, company }) {
   const termYears = contract.startDate && contract.endDate
     ? Math.max(1, Math.round(daysBetween(contract.startDate, contract.endDate) / 365)) : null;
 
-  // Header band
-  doc.setFillColor(10, 22, 40);
-  doc.rect(0, 0, W, 60, 'F');
+  // Navy header band + signature rainbow hairline
+  doc.setFillColor(...NAVY);
+  doc.rect(0, 0, W, 62, 'F');
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(16);
   doc.setTextColor(255, 255, 255);
-  doc.text('SCIENCE OF SPORTS', M, 38);
-  y = 90;
+  doc.text('SCIENCE OF SPORTS', M, 34);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  doc.setTextColor(...CYAN);
+  doc.text(contract.contractNumber || '', W - M, 34, { align: 'right' });
+  // Rainbow strip (approximated with four coloured segments)
+  const segs = [[34,199,230],[37,99,235],[139,92,246],[236,72,153]];
+  const segW = W / segs.length;
+  segs.forEach((c, i) => { doc.setFillColor(...c); doc.rect(i * segW, 62, segW, 3, 'F'); });
+  y = 92;
 
-  text((contract.title || 'Service Agreement').toUpperCase(), { size: 15, style: 'bold', color: [10, 22, 40], gap: 2 });
-  text(`${contract.contractNumber || ''}`, { size: 9, color: [120, 130, 140], gap: 6 });
+  text((contract.title || 'Service Agreement').toUpperCase(), { size: 15, style: 'bold', color: NAVY, gap: 6 });
   rule();
 
   // Preamble — both parties, full details (mirrors ContractDocumentBody).
@@ -137,7 +147,7 @@ export function generateContractPdf({ contract, client, company }) {
   rule();
 
   // Signature block
-  text('SIGNATURES', { size: 11, style: 'bold', color: [15, 23, 42], gap: 6 });
+  text('SIGNATURES', { size: 11, style: 'bold', color: NAVY, gap: 6 });
   ensure(60);
   const colW = (maxW - 30) / 2;
   const sigY = y;
@@ -161,6 +171,24 @@ export function generateContractPdf({ contract, client, company }) {
 
   // Signature note
   text('This document is provided for review. To execute it, the Client signs electronically through the secure signing link. Upon signing, a Certificate of Completion containing the full signature evidence is issued to both parties.', { size: 9, color: [120, 130, 140] });
+
+  // Branded navy footer band on every page.
+  const pages = doc.getNumberOfPages();
+  for (let p = 1; p <= pages; p++) {
+    doc.setPage(p);
+    doc.setFillColor(...NAVY);
+    doc.rect(0, H - 34, W, 34, 'F');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7.5);
+    doc.setTextColor(255, 255, 255);
+    doc.text('C.C. Science of Sports Ltd', M, H - 20);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(169, 182, 204);
+    doc.text('info@scienceofsports.net · +357 22 396997 · HE 449875', M, H - 10);
+    doc.setFont('helvetica', 'italic');
+    doc.setTextColor(...CYAN);
+    doc.text('Transforming matches into knowledge.', W - M, H - 14, { align: 'right' });
+  }
 
   return doc;
 }

@@ -2,9 +2,17 @@
 
 /* Inter font is loaded via <link> in index.html (Google Fonts). */
 
+/* =========================================================================
+   SCIENCE OF SPORTS — brand design tokens
+   Palette taken from the official SCIOS proposal document:
+   deep navy + electric cyan, bright blue, purple, green, and the signature
+   rainbow gradient hairline.
+   ========================================================================= */
 :root {
-  --navy-deep: #0A1628;
-  --navy-mid: #1E3A5F;
+  --navy-deep: #0A1A3F;   /* header bands, footer, section pills */
+  --navy-mid:  #14294f;
+  --cyan:      #22C7E6;   /* signature accent: stat numbers, links, labels */
+  --cyan-deep: #0FB5D6;
   --blue-primary: #2563EB;
   --green: #10B981;
   --amber: #F59E0B;
@@ -13,12 +21,56 @@
   --slate: #94A3B8;
   --bg: #F8FAFC;
   --border: #E2E8F0;
+  /* Signature SCIOS rainbow strip */
+  --sos-rainbow: linear-gradient(90deg,#22C7E6 0%,#2563EB 32%,#8B5CF6 62%,#EC4899 100%);
 }
 
 html, body { font-family: 'Inter', sans-serif; background: var(--bg); }
 .font-display { font-weight: 700; font-size: 28px; }
 .font-heading { font-weight: 600; font-size: 18px; }
 .font-data { font-weight: 500; font-size: 14px; font-variant-numeric: tabular-nums; }
+
+/* ---- SCIOS branded components (reusable) ---- */
+
+/* The signature rainbow hairline used under header bands. */
+.sos-rainbow { height: 4px; width: 100%; background: var(--sos-rainbow); }
+
+/* Navy pill section header: "1. TITLE" — white on navy with a cyan number. */
+.sos-pill {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: var(--navy-deep); color: #fff;
+  padding: 8px 16px; border-radius: 8px;
+  font-weight: 600; font-size: 14px; letter-spacing: .02em;
+}
+.sos-pill .num { color: var(--cyan); }
+
+/* Small circular lettered clause badge (A, B, Γ…). */
+.sos-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 999px;
+  background: var(--cyan); color: var(--navy-deep);
+  font-size: 11px; font-weight: 700; flex: 0 0 auto;
+}
+
+/* Navy stat card with a big cyan number. */
+.sos-stat {
+  background: var(--navy-deep); border-radius: 12px; padding: 18px 16px; text-align: center;
+}
+.sos-stat .n { color: var(--cyan); font-weight: 800; font-size: 30px; line-height: 1; }
+.sos-stat .l { color: #A9B6CC; font-size: 10px; text-transform: uppercase; letter-spacing: .04em; margin-top: 6px; }
+
+/* Inline chip / tag. */
+.sos-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600;
+}
+.sos-chip-navy { background: var(--navy-deep); color: #fff; }
+.sos-chip-cyan { background: rgba(34,199,230,.15); color: var(--cyan-deep); }
+.sos-chip-green { background: rgba(16,185,129,.15); color: #0f9d6e; }
+
+/* Primary cyan/navy button accents used across the app. */
+.sos-btn-cyan { background: var(--cyan); color: var(--navy-deep); }
+.sos-btn-cyan:hover { background: var(--cyan-deep); }
 
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 4px; }

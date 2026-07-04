@@ -8,7 +8,8 @@
 import { PDFDocument, StandardFonts, rgb } from 'https://esm.sh/pdf-lib@1.17.1';
 import { sha256Hex } from './evidence.ts';
 
-const NAVY = rgb(0.039, 0.086, 0.157);
+const NAVY = rgb(0.039, 0.102, 0.247);   // #0A1A3F
+const CYAN = rgb(0.133, 0.780, 0.902);   // #22C7E6
 const BLUE = rgb(0.145, 0.388, 0.922);
 const GREY = rgb(0.4, 0.45, 0.5);
 const BLACK = rgb(0.06, 0.09, 0.16);
@@ -58,9 +59,14 @@ export async function buildCertificate(input: {
   const rule = () => { page.drawLine({ start: { x: M, y: y + 4 }, end: { x: 545, y: y + 4 }, thickness: 0.5, color: rgb(0.85, 0.88, 0.92) }); y -= 8; };
   const ensure = (need: number) => { if (y < need) { page = pdf.addPage([595, 842]); y = 792; } };
 
-  // Header band
-  page.drawRectangle({ x: 0, y: 802, width: 595, height: 40, color: NAVY });
-  page.drawText('CERTIFICATE OF COMPLETION', { x: M, y: 814, size: 14, font: bold, color: rgb(1, 1, 1) });
+  // Navy header band + brand wordmark + signature rainbow hairline
+  page.drawRectangle({ x: 0, y: 800, width: 595, height: 42, color: NAVY });
+  page.drawText('CERTIFICATE OF COMPLETION', { x: M, y: 816, size: 14, font: bold, color: rgb(1, 1, 1) });
+  page.drawText('SCIENCE OF SPORTS', { x: 595 - M - 130, y: 816, size: 9, font: bold, color: CYAN });
+  // Rainbow strip (four segments)
+  const rseg = [rgb(0.133,0.780,0.902), rgb(0.145,0.388,0.922), rgb(0.545,0.361,0.965), rgb(0.925,0.282,0.6)];
+  const rsw = 595 / rseg.length;
+  rseg.forEach((col, i) => page.drawRectangle({ x: i * rsw, y: 796, width: rsw, height: 4, color: col }));
   y = 770;
 
   line('Science of Sports — Electronic Signature Record', { size: 11, f: bold, color: NAVY });
@@ -68,7 +74,7 @@ export async function buildCertificate(input: {
   gap(4); rule();
 
   // Parties
-  line('PARTIES', { size: 10, f: bold, color: BLUE });
+  line('PARTIES', { size: 10, f: bold, color: CYAN });
   line(`Service Provider: ${co.name ?? '—'}`, { size: 10 });
   if (co.registrationNumber ?? co.registration_number) line(`  Reg. No: ${co.registrationNumber ?? co.registration_number}   VAT: ${co.vatNumber ?? co.vat_number ?? '—'}`, { size: 9, color: GREY });
   line(`Client: ${cl.companyName ?? cl.company_name ?? '—'}`, { size: 10 });
@@ -76,14 +82,14 @@ export async function buildCertificate(input: {
   gap(4); rule();
 
   // Key terms
-  line('KEY TERMS', { size: 10, f: bold, color: BLUE });
+  line('KEY TERMS', { size: 10, f: bold, color: CYAN });
   line(`Value: ${money(c.value, c.currency || 'EUR')}    Type: ${c.type ?? '—'}`, { size: 10 });
   line(`Term: ${c.startDate ?? c.start_date ?? '—'} to ${c.endDate ?? c.end_date ?? '—'}`, { size: 10 });
   line(`Governing Law: ${c.governingLaw ?? c.governing_law ?? '—'}`, { size: 10 });
   gap(4); rule();
 
   // Signer / evidence
-  line('SIGNATORY & EVIDENCE', { size: 10, f: bold, color: BLUE });
+  line('SIGNATORY & EVIDENCE', { size: 10, f: bold, color: CYAN });
   line(`Signed by: ${signer.name}${signer.title ? ', ' + signer.title : ''}`, { size: 10 });
   line(`On behalf of: ${signer.company || (cl.companyName ?? cl.company_name ?? '')}`, { size: 10 });
   line(`Email (verified by one-time code): ${signer.email}`, { size: 10 });
@@ -98,7 +104,7 @@ export async function buildCertificate(input: {
   gap(4); rule();
 
   // Document integrity
-  line('DOCUMENT INTEGRITY (SHA-256)', { size: 10, f: bold, color: BLUE });
+  line('DOCUMENT INTEGRITY (SHA-256)', { size: 10, f: bold, color: CYAN });
   line(`At send:  ${input.documentHashBefore}`, { size: 7, f: font, color: GREY });
   line(`At sign:  ${input.documentHashAfter}`, { size: 7, f: font, color: GREY });
   line(input.integrityOk ? 'Integrity verified — the document was not altered between sending and signing.'
@@ -108,7 +114,7 @@ export async function buildCertificate(input: {
 
   // Signature image
   ensure(180);
-  line('SIGNATURE', { size: 10, f: bold, color: BLUE });
+  line('SIGNATURE', { size: 10, f: bold, color: CYAN });
   if (input.signatureImageBytes) {
     try {
       const img = await pdf.embedPng(input.signatureImageBytes);
@@ -125,7 +131,7 @@ export async function buildCertificate(input: {
 
   // Legal footer
   ensure(90);
-  line('LEGAL BASIS', { size: 10, f: bold, color: BLUE });
+  line('LEGAL BASIS', { size: 10, f: bold, color: CYAN });
   const legal = 'This document is an electronic record of a Simple Electronic Signature executed under Regulation (EU) No 910/2014 (eIDAS). The signatory verified control of the email address above via a one-time code, consented to sign electronically, and confirmed authority to bind their organisation. This certificate, together with the tamper-evident audit trail retained by Science of Sports, constitutes evidence of the agreement.';
   const words = legal.split(' ');
   let lineStr = '';
