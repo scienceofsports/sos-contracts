@@ -118,6 +118,14 @@ export function generateContractPdf({ contract, client, company }) {
   clause(`${feesNum}. Fees & Payment`,
     `In consideration of the services provided under this Agreement, the Client shall pay the Service Provider a total of ${fmtMoney(contract.value, contract.currency)}, payable ${(contract.paymentType || '').replace('_', ' ')}, net ${contract.paymentTermsDays} days from the date of a valid invoice.`,
     `All payments shall be made by bank transfer following the issuance of a valid invoice by the Service Provider, in accordance with applicable VAT regulations. A late payment penalty of ${contract.latePaymentPenalty}% per month applies to overdue amounts.`);
+  if (company?.bankName || company?.bankIBAN || company?.bankSWIFT) {
+    const bankLine = ['Bank Details (Service Provider):',
+      company?.bankName ? `Bank: ${company.bankName}` : null,
+      company?.bankIBAN ? `IBAN: ${company.bankIBAN}` : null,
+      company?.bankSWIFT ? `SWIFT/BIC: ${company.bankSWIFT}` : null,
+    ].filter(Boolean).join('   ');
+    text(bankLine, { size: 9, color: [80, 90, 100], gap: 8 });
+  }
 
   clause(`${confidentialityNum}. Confidentiality & Data Protection`,
     'The Service Provider shall process personal data strictly in accordance with the GDPR, the applicable Cyprus data protection legislation (Law 125(I)/2018), and Regulation (EU) 2016/679, and solely on documented instructions from the Client and exclusively for the purposes of this Agreement.',

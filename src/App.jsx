@@ -1428,7 +1428,15 @@ function ContractDocumentBody({ contract, client, company }) {
 
               <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{feesNum}.</span> Fees & Payment</div>
               <p className="text-sm text-slate-700 mb-2">In consideration of the services provided under this Agreement, the Client shall pay the Service Provider a total of <strong>{fmtMoney(contract.value, contract.currency)}</strong>, payable <strong>{contract.paymentType.replace('_',' ')}</strong>, net {contract.paymentTermsDays} days from the date of a valid invoice.</p>
-              <p className="text-sm text-slate-700 mb-8">All payments shall be made by bank transfer following the issuance of a valid invoice by the Service Provider, in accordance with applicable VAT regulations. A late payment penalty of {contract.latePaymentPenalty}% per month applies to overdue amounts.</p>
+              <p className="text-sm text-slate-700 mb-4">All payments shall be made by bank transfer following the issuance of a valid invoice by the Service Provider, in accordance with applicable VAT regulations. A late payment penalty of {contract.latePaymentPenalty}% per month applies to overdue amounts.</p>
+              {(company.bankName || company.bankIBAN || company.bankSWIFT) && (
+                <div className="text-sm text-slate-700 mb-8 rounded-lg p-4" style={{ background:'rgba(10,26,63,0.04)', border:'1px solid var(--border)' }}>
+                  <div className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color:'var(--navy-deep)' }}>Bank Details (Service Provider)</div>
+                  {company.bankName && <div>Bank: <strong>{company.bankName}</strong></div>}
+                  {company.bankIBAN && <div>IBAN: <strong>{company.bankIBAN}</strong></div>}
+                  {company.bankSWIFT && <div>SWIFT/BIC: <strong>{company.bankSWIFT}</strong></div>}
+                </div>
+              )}
 
               <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{confidentialityNum}.</span> Confidentiality & Data Protection</div>
               <p className="text-sm text-slate-700 mb-2">The Service Provider shall process personal data strictly in accordance with the GDPR, the applicable Cyprus data protection legislation (Law 125(I)/2018), and Regulation (EU) 2016/679, and solely on documented instructions from the Client and exclusively for the purposes of this Agreement.</p>
@@ -2104,9 +2112,18 @@ function CompanyProfileSettings() {
   if (!loaded || !form) return <div className="p-6"><Skeleton className="h-96 w-full" /></div>;
 
   const set = (k,v) => setForm(f=>({...f,[k]:v}));
+  const [saving, setSaving] = useState(false);
   const save = async () => {
-    await companyService.update(form);
-    toast.push('Company profile updated.', 'success');
+    setSaving(true);
+    try {
+      const updated = await companyService.update(form);
+      setForm(updated);
+      toast.push('Company profile saved.', 'success');
+    } catch (err) {
+      toast.push('Could not save: ' + (err.message || 'unknown error'), 'error');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const onLogoPicked = async (e) => {
