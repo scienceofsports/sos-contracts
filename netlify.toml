@@ -1,0 +1,11 @@
+# Netlify build config for the Vite app.
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+# SPA fallback: the app uses client-side routing (hash + ?req=/?sign= query
+# params), so every path should serve index.html and let the app route.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

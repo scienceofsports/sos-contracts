@@ -5,7 +5,7 @@ const RESEND_ENDPOINT = 'https://api.resend.com/emails';
 // From-address for all signing emails. Overridable via the SIGNING_FROM_EMAIL
 // secret; defaults to the branded contracts address.
 function fromAddress(): string {
-  return Deno.env.get('SIGNING_FROM_EMAIL') || 'SOS Contracts <contracts@scienceofsports.net>';
+  return Deno.env.get('SIGNING_FROM_EMAIL') || 'Science of Sports <info@scienceofsports.net>';
 }
 
 export async function sendEmail(opts: {
