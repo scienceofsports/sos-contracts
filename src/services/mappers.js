@@ -90,6 +90,7 @@ export function clientFromRow(row) {
     registrationNumber: row.registration_number ?? null,
     currency: row.currency ?? null,
     logoBase64: row.logo_url ?? null,
+    ccEmails: row.cc_emails ?? [],
     createdAt: row.created_at ?? null,
   };
 }
@@ -107,6 +108,7 @@ export function clientToRow(obj) {
   if ('registrationNumber' in obj) row.registration_number = obj.registrationNumber;
   if ('currency' in obj) row.currency = obj.currency;
   if ('logoBase64' in obj) row.logo_url = obj.logoBase64;
+  if ('ccEmails' in obj) row.cc_emails = obj.ccEmails;
   return row;
 }
 
@@ -157,6 +159,13 @@ export function contractFromRow(row, payments = [], events = []) {
     documentHashBefore: row.document_hash_before ?? null,
     renewalStatus: row.renewal_status ?? null,
     renewalReminderSent: row.renewal_reminder_sent ?? false,
+    // Client-provided contact people captured during signing.
+    contactName: row.contact_name ?? null,
+    contactRole: row.contact_role ?? null,
+    contactEmail: row.contact_email ?? null,
+    contactPhone: row.contact_phone ?? null,
+    financeName: row.finance_name ?? null,
+    financeEmail: row.finance_email ?? null,
     createdBy: row.created_by ?? null,
     createdAt: row.created_at ?? null,
     sentAt: sentEvent?.server_timestamp ?? null,
@@ -215,6 +224,12 @@ export function contractToRow(obj) {
   if ('documentHashBefore' in obj) row.document_hash_before = obj.documentHashBefore;
   if ('renewalStatus' in obj) row.renewal_status = obj.renewalStatus;
   if ('renewalReminderSent' in obj) row.renewal_reminder_sent = obj.renewalReminderSent;
+  if ('contactName' in obj) row.contact_name = obj.contactName;
+  if ('contactRole' in obj) row.contact_role = obj.contactRole;
+  if ('contactEmail' in obj) row.contact_email = obj.contactEmail;
+  if ('contactPhone' in obj) row.contact_phone = obj.contactPhone;
+  if ('financeName' in obj) row.finance_name = obj.financeName;
+  if ('financeEmail' in obj) row.finance_email = obj.financeEmail;
   if ('createdBy' in obj) row.created_by = obj.createdBy;
   return row;
 }

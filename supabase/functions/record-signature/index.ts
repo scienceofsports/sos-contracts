@@ -26,6 +26,13 @@ Deno.serve(async (req) => {
       signerCompany,
       consents,
       signatureImageBase64,
+      // Client-provided designated contact + finance contact (all optional).
+      contactName,
+      contactRole,
+      contactEmail,
+      contactPhone,
+      financeName,
+      financeEmail,
     } = body;
     if (!token) throw new Error('token is required');
 
@@ -110,9 +117,20 @@ Deno.serve(async (req) => {
       .eq('id', request.id);
     if (reqUpdateErr) throw new Error(reqUpdateErr.message);
 
+    // Persist the client-provided contact people alongside activation. Only set
+    // fields that were actually provided; leave the rest null.
+    const nz = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
     const { error: contractUpdateErr } = await admin
       .from('contracts')
-      .update({ status: 'active' })
+      .update({
+        status: 'active',
+        contact_name: nz(contactName),
+        contact_role: nz(contactRole),
+        contact_email: nz(contactEmail),
+        contact_phone: nz(contactPhone),
+        finance_name: nz(financeName),
+        finance_email: nz(financeEmail),
+      })
       .eq('id', request.contract_id);
     if (contractUpdateErr) throw new Error(contractUpdateErr.message);
 
@@ -188,6 +206,25 @@ Deno.serve(async (req) => {
           });
         }
       } catch (e) { console.error('staff notification email failed:', e); }
+
+      // (c) CC recipients on the client (finance, a director…): send them the same
+      //     signed certificate. Read from the frozen snapshot (snake or camel).
+      const ccEmails: string[] = Array.isArray(snap?.client?.cc_emails)
+        ? snap.client.cc_emails
+        : (Array.isArray(snap?.client?.ccEmails) ? snap.client.ccEmails : []);
+      for (const cc of ccEmails) {
+        if (!cc || typeof cc !== 'string' || cc === request.signer_email) continue;
+        try {
+          await sendEmail({
+            to: cc,
+            subject: `Signed contract: ${contractTitle}`,
+            html: signerConfirmationEmail({
+              signerName, companyName: snap?.company?.name ?? 'Science of Sports', contractTitle, signedAt,
+            }),
+            attachments,
+          });
+        } catch (e) { console.error(`CC certificate email to ${cc} failed:`, e); }
+      }
     } catch (certErr) {
       console.error('certificate generation failed:', certErr);
     }

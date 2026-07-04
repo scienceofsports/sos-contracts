@@ -114,6 +114,28 @@ Deno.serve(async (req) => {
       });
     }
 
+    // 9b. CC recipients (finance, a director…): send the SAME sign-request email
+    //     to each address on the client's cc_emails. Informational only — they
+    //     don't sign. Each send is isolated so a CC failure never breaks the flow.
+    const ccEmails: string[] = Array.isArray(client.cc_emails) ? client.cc_emails : [];
+    for (const cc of ccEmails) {
+      if (!cc || typeof cc !== 'string' || cc === client.contact_email) continue;
+      try {
+        await sendEmail({
+          to: cc,
+          subject: `Please review & sign: ${contract.title}`,
+          html: signRequestEmail({
+            clientContactName: client.contact_name,
+            companyName: company.name,
+            contractTitle: contract.title,
+            signUrl,
+          }),
+        });
+      } catch (ccErr) {
+        console.error(`CC sign-request email to ${cc} failed:`, ccErr);
+      }
+    }
+
     // 10. Success.
     return json({ ok: true, token, signUrl, emailSent: true });
   } catch (e) {

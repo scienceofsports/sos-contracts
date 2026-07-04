@@ -1364,6 +1364,24 @@ function ContractDocumentBody({ contract, client, company }) {
         </p>
         <p className="text-sm text-slate-700 mb-8">The above are hereinafter jointly referred to as the "Parties".</p>
 
+        {/* About the Service Provider — informational credibility box, kept OUTSIDE
+            the numbered-clause IIFE so it never shifts clause numbers. */}
+        <div
+          className="rounded-lg mb-8 px-5 py-4"
+          style={{ background:'rgba(10,26,63,0.04)', border:'1px solid var(--border)', WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}
+        >
+          <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}>About the Service Provider</div>
+          <p className="text-sm text-slate-700 mb-3">Science of Sports (C.C. Science of Sports Ltd, HE 449875) is Cyprus's leading football intelligence company. Built by UEFA-qualified analysts and engineers, it operates the first fully integrated football analytics platform originating from Cyprus, serving federations, academies, coaches, scouts and players.</p>
+          <ul className="text-sm text-slate-700 space-y-1.5 list-disc pl-5">
+            <li>Official Performance Analysis Partner of the Cyprus Football Association — the platform trusted by all Cyprus National Teams.</li>
+            <li>15 countries analysed · 150+ teams served · 3,000+ players profiled.</li>
+            <li>1,000+ youth and national-team matches analysed annually.</li>
+            <li>Official partner of the Cyprus Coaches Association (creators of the "Coach of the Month" awards).</li>
+            <li>Founders of the Annual Youth Football Player &amp; Coach Awards.</li>
+            <li>Creators of "Youth Zone" with Cablenet — Cyprus's first TV show dedicated to youth football.</li>
+          </ul>
+        </div>
+
         {(() => {
           let n = 1;
           const purposeNum = n++;
@@ -1453,6 +1471,22 @@ function ContractDocumentBody({ contract, client, company }) {
             </React.Fragment>
           );
         })()}
+
+        {/* Client's designated contact — captured from the client during signing. */}
+        {contract.contactName && (
+          <React.Fragment>
+            <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}>Designated Contact</div>
+            <p className="text-sm text-slate-700 mb-8">
+              Client's designated contact for operations &amp; communication: <strong>{contract.contactName}</strong>
+              {contract.contactRole ? `, ${contract.contactRole}` : ''}
+              {contract.contactEmail ? ` · ${contract.contactEmail}` : ''}
+              {contract.contactPhone ? ` · ${contract.contactPhone}` : ''}.
+              {(contract.financeName || contract.financeEmail) && (
+                <> Finance contact: {contract.financeName || ''}{contract.financeName && contract.financeEmail ? ' · ' : ''}{contract.financeEmail || ''}.</>
+              )}
+            </p>
+          </React.Fragment>
+        )}
 
         <div className="sos-pill mb-2" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}>Signatures</div>
         <p className="text-xs text-slate-500 mb-6">Executed by the duly authorised representatives of the Parties as of the dates set out below.</p>
@@ -1979,6 +2013,13 @@ function ClientFormModal({ client, readOnly, onClose, onDone }) {
     vatNumber: client.vatNumber || '', registrationNumber: client.registrationNumber || '', currency: client.currency || 'EUR',
   } : { companyName:'', contactName:'', contactEmail:'', contactPhone:'', address:'', country:'CY', vatNumber:'', registrationNumber:'', currency:'EUR' });
   const [logoBase64, setLogoBase64] = useState(client && client.logoBase64 ? client.logoBase64 : null);
+  // CC recipients (finance, a director…) — up to 3 email inputs; non-empty
+  // ones are collected into ccEmails on save. Padded to 3 for stable inputs.
+  const [ccEmails, setCcEmails] = useState(() => {
+    const existing = (client && Array.isArray(client.ccEmails)) ? client.ccEmails : [];
+    return [existing[0] || '', existing[1] || '', existing[2] || ''];
+  });
+  const setCc = (i, v) => setCcEmails(arr => arr.map((x, idx) => idx === i ? v : x));
   const [errors, setErrors] = useState({});
   const [busy, setBusy] = useState(false);
   const [logoBusy, setLogoBusy] = useState(false);
@@ -2016,11 +2057,15 @@ function ClientFormModal({ client, readOnly, onClose, onDone }) {
     if (!form.companyName.trim()) e.companyName = 'Required.';
     if (!form.contactName.trim()) e.contactName = 'Required.';
     if (!validateEmail(form.contactEmail)) e.contactEmail = 'Enter a valid email.';
+    // CC recipients: validate only the non-blank ones; ignore blanks.
+    const ccTrimmed = ccEmails.map(x => (x || '').trim());
+    ccTrimmed.forEach((x, i) => { if (x && !validateEmail(x)) e[`cc${i}`] = 'Enter a valid email.'; });
     setErrors(e);
     if (Object.keys(e).length) return;
+    const cleanedCc = ccTrimmed.filter(x => x && validateEmail(x));
     setBusy(true);
     try {
-      const payload = { ...form, vatNumber: form.vatNumber || null, registrationNumber: form.registrationNumber || null, logoBase64: logoBase64 || null };
+      const payload = { ...form, vatNumber: form.vatNumber || null, registrationNumber: form.registrationNumber || null, logoBase64: logoBase64 || null, ccEmails: cleanedCc };
       if (isEdit) {
         await clientService.update(client.id, payload);
         toast.push('Client updated.', 'success');
@@ -2067,6 +2112,16 @@ function ClientFormModal({ client, readOnly, onClose, onDone }) {
       <div className="grid grid-cols-2 gap-4">
         <Field label="VAT Number (optional)"><input disabled={readOnly} value={form.vatNumber} onChange={e=>set('vatNumber',e.target.value)} className={inputCls(false)} /></Field>
         <Field label="Registration Number (optional)"><input disabled={readOnly} value={form.registrationNumber} onChange={e=>set('registrationNumber',e.target.value)} className={inputCls(false)} placeholder="e.g. HE123456" /></Field>
+      </div>
+
+      <div className="mt-2 pt-3 border-t border-[var(--border)]">
+        <div className="text-sm font-medium mb-1">CC recipients (optional)</div>
+        <p className="text-xs text-slate-400 mb-3">These people also receive the signing request and the signed certificate (they don't sign).</p>
+        {[0,1,2].map(i => (
+          <Field key={i} label={i === 0 ? 'CC email 1' : `CC email ${i+1}`} error={errors[`cc${i}`]}>
+            <input disabled={readOnly} type="email" value={ccEmails[i]} onChange={e=>setCc(i, e.target.value)} className={inputCls(errors[`cc${i}`])} placeholder={i === 0 ? 'finance@yourclub.com' : (i === 1 ? 'director@yourclub.com' : 'you@yourclub.com')} />
+          </Field>
+        ))}
       </div>
     </Modal>
   );
@@ -2549,6 +2604,27 @@ function DeclinePanel({ reason, setReason, onCancel, onConfirm, busy }) {
   );
 }
 
+// Compact "Why Science of Sports" trust panel — a few credibility chips to
+// reassure a nervous signer. Approved credentials only (no sales language).
+function TrustPanel() {
+  const badges = [
+    ['🏆', 'Official CFA Partner'],
+    ['⚽', '3,000+ players profiled'],
+    ['📊', '1,000+ matches analysed / year'],
+    ['🇨🇾', '#1 in Cyprus'],
+  ];
+  return (
+    <div className="rounded-lg mb-6 px-4 py-3" style={{ background:'rgba(10,26,63,0.04)', border:'1px solid var(--border)' }}>
+      <div className="text-xs font-semibold mb-2" style={{ color:'var(--navy-deep)' }}>Why Science of Sports</div>
+      <div className="flex flex-wrap gap-2">
+        {badges.map(([icon, label]) => (
+          <span key={label} className="sos-chip sos-chip-cyan">{icon} {label}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // Compact 4-step progress indicator for the signing card (Verify · Review · Confirm · Sign).
 function SigningSteps({ current }) {
   const steps = ['Verify', 'Review', 'Confirm', 'Sign'];
@@ -2617,6 +2693,11 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
   const [clientDetailsForm, setClientDetailsForm] = useState(null);
   const [clientDetailsErrors, setClientDetailsErrors] = useState({});
   const [savingClientDetails, setSavingClientDetails] = useState(false);
+
+  // Client-provided designated contact person + finance contact (captured on
+  // screen 3, stored on the contract via record-signature). Session-only state.
+  const [contactForm, setContactForm] = useState({ contactName:'', contactRole:'', contactEmail:'', contactPhone:'', financeName:'', financeEmail:'' });
+  const setContact = (k,v) => setContactForm(f=>({...f,[k]:v}));
 
   // Decline / request changes (server mode) + certificate re-download.
   const [declined, setDeclined] = useState(false);
@@ -2923,6 +3004,21 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
       const hashAfter = await sha256(contract.title + contract.description + contract.value);
       const signedAt = nowISO();
 
+      // Client-provided contact people (blanks -> null; guard emails).
+      const clean = (v) => { const t = (v || '').trim(); return t || null; };
+      const cleanEmail = (v) => { const t = (v || '').trim(); return t && validateEmail(t) ? t : null; };
+      const contactPayload = {
+        contactName: clean(contactForm.contactName),
+        contactRole: clean(contactForm.contactRole),
+        contactEmail: cleanEmail(contactForm.contactEmail),
+        contactPhone: clean(contactForm.contactPhone),
+        financeName: clean(contactForm.financeName),
+        financeEmail: cleanEmail(contactForm.financeEmail),
+      };
+      // Reflect the captured contact on the in-memory contract so the executed
+      // document (ContractDocumentBody) renders the Designated Contact block.
+      setContract(c => ({ ...(c || {}), ...contactPayload }));
+
       // CAPTURE THE SIGNATURE as a data URL (typed name, drawn canvas, or uploaded image).
       let signatureImageBase64 = null;
       if (sigMode === 'upload') {
@@ -2950,6 +3046,7 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
           signerName: sigName, signerTitle: sigTitle, signerCompany: sigCompany,
           consents: { electronic: consents.electronic, authorized: consents.authorized, read: consents.read },
           signatureImageBase64,
+          ...contactPayload,
         });
         setSignedResult({ signedAt: res.signedAt });
         setScreen(5);
@@ -2977,6 +3074,7 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
         signedAt, signerIP: '203.0.113.42',
         documentHashAfter: hashAfter,
         consentElectronic: consents.electronic, consentAuthorized: consents.authorized, consentRead: consents.read,
+        ...contactPayload,
       });
       await contractService.addAuditEntry(contract.id, { type:'signed', message:`Contract signed by ${sigName} (${sigTitle})`, by: null });
       setSignedResult({ signedAt });
@@ -3029,6 +3127,7 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
                   <div className="text-sm font-medium">{contract.title}</div>
                   <div className="text-xs text-slate-400 mt-1">From {company.name}</div>
                 </div>
+                <TrustPanel />
                 <Field label="Confirm your email address to continue" required error={emailError}>
                   <input type="email" value={emailInput} onChange={e=>setEmailInput(e.target.value)} className={inputCls(emailError)} placeholder="you@yourclub.com" />
                 </Field>
@@ -3135,6 +3234,36 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
                       </div>
                     </div>
                   )}
+                </div>
+
+                <div className="mt-4 border border-[var(--border)] rounded-lg p-4">
+                  <div className="text-sm font-medium mb-1">Your Designated Contact Person</div>
+                  <p className="text-xs text-slate-500 mb-3">Please provide the main person we'll coordinate with for operations and communication, and your finance contact for invoicing.</p>
+                  <Field label="Contact Name">
+                    <input value={contactForm.contactName} onChange={e=>setContact('contactName', e.target.value)} className={inputCls(false)} placeholder="e.g. Maria Georgiou" />
+                  </Field>
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field label="Role / Position">
+                      <input value={contactForm.contactRole} onChange={e=>setContact('contactRole', e.target.value)} className={inputCls(false)} placeholder="e.g. Technical Director" />
+                    </Field>
+                    <Field label="Phone">
+                      <input value={contactForm.contactPhone} onChange={e=>setContact('contactPhone', e.target.value)} className={inputCls(false)} />
+                    </Field>
+                  </div>
+                  <Field label="Email" error={contactForm.contactEmail && !validateEmail(contactForm.contactEmail) ? 'Enter a valid email.' : undefined}>
+                    <input type="email" value={contactForm.contactEmail} onChange={e=>setContact('contactEmail', e.target.value)} className={inputCls(contactForm.contactEmail && !validateEmail(contactForm.contactEmail))} placeholder="contact@yourclub.com" />
+                  </Field>
+                  <div className="mt-3 pt-3 border-t border-[var(--border)]">
+                    <div className="text-xs font-medium text-slate-600 mb-2">Finance / Accounts Contact (optional)</div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <Field label="Name">
+                        <input value={contactForm.financeName} onChange={e=>setContact('financeName', e.target.value)} className={inputCls(false)} />
+                      </Field>
+                      <Field label="Email" error={contactForm.financeEmail && !validateEmail(contactForm.financeEmail) ? 'Enter a valid email.' : undefined}>
+                        <input type="email" value={contactForm.financeEmail} onChange={e=>setContact('financeEmail', e.target.value)} className={inputCls(contactForm.financeEmail && !validateEmail(contactForm.financeEmail))} placeholder="finance@yourclub.com" />
+                      </Field>
+                    </div>
+                  </div>
                 </div>
 
                 <div className="flex justify-between mt-6">
