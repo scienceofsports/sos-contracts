@@ -23,6 +23,7 @@ import {
   round2,
 } from './lib/format.js';
 import { encodePortablePayload, decodePortablePayload } from './lib/portable.js';
+import { downloadContractPdf } from './lib/contractPdf.js';
 import {
   companyService,
   clientService,
@@ -2726,7 +2727,7 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
                   <p className="text-xs text-slate-400 mt-6">— End of document —</p>
                 </div>
                 <div className="flex items-center justify-between gap-3">
-                  <a href={`data:text/plain;charset=utf-8,${encodeURIComponent(contract.title + '\n\n' + contract.description)}`} download={`${contract.contractNumber}.txt`} className="text-xs text-blue-600 hover:underline">Download document</a>
+                  <button type="button" onClick={()=>downloadContractPdf({ contract, client, company })} className="text-xs text-blue-600 hover:underline inline-flex items-center gap-1">⬇ Download PDF</button>
                   <button disabled={!scrolledToBottom} onClick={()=>setScreen(3)} className="px-5 py-2.5 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition disabled:opacity-40 disabled:cursor-not-allowed">
                     {scrolledToBottom ? 'Proceed to Sign' : 'Scroll to the bottom to continue'}
                   </button>
@@ -2864,7 +2865,12 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
 
                 {isServer ? (
                   /* SERVER MODE: signature recorded server-side; email confirmation is automatic. */
-                  <p className="text-sm text-slate-600 mb-6">Thank you — this contract is now signed. A copy and confirmation have been sent by email. You can close this page.</p>
+                  <React.Fragment>
+                    <p className="text-sm text-slate-600 mb-4">Thank you — this contract is now signed. A confirmation email with your <strong>Certificate of Completion (PDF)</strong> has been sent to you. You can also download a copy of the agreement now:</p>
+                    <div className="flex justify-center mb-6">
+                      <button type="button" onClick={()=>downloadContractPdf({ contract, client, company })} className="px-4 py-2 border border-[var(--border)] rounded-lg text-sm hover:bg-slate-50 inline-flex items-center gap-1">⬇ Download contract (PDF)</button>
+                    </div>
+                  </React.Fragment>
                 ) : isPortable ? (
                   <React.Fragment>
                     <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-800 text-left mb-6">
