@@ -1854,23 +1854,61 @@ function ClientsPage({ navigate }) {
   const auth = useAuth();
   const toast = useToast();
   const [clients, setClients] = useState(null);
+  const [statsByClient, setStatsByClient] = useState({});
   const [showForm, setShowForm] = useState(false);
   const [editClient, setEditClient] = useState(null);
   const [search, setSearch] = useState('');
-  const [view, setView] = useState(() => localStorage.getItem('clientsView') || 'list');
+  const [view, setView] = useState(() => localStorage.getItem('clientsView') || 'cards');
+  const [sort, setSort] = useState(() => localStorage.getItem('clientsSort') || 'name');
 
   const setViewMode = (v) => { setView(v); localStorage.setItem('clientsView', v); };
+  const setSortMode = (v) => { setSort(v); localStorage.setItem('clientsSort', v); };
 
-  const load = useCallback(() => clientService.getAll().then(setClients), []);
+  const load = useCallback(() => {
+    clientService.getAll().then(setClients);
+    // Per client, derive: most-advanced contract status + total contract value.
+    contractService.getAll().then(contracts => {
+      const rank = { active: 5, signed: 4, sent: 3, draft: 2, expired: 1, cancelled: 0 };
+      const stats = {};
+      contracts.forEach(c => {
+        if (!c.clientId) return;
+        const s = stats[c.clientId] || (stats[c.clientId] = { status: null, total: 0, currency: c.currency || 'EUR', endDate: null });
+        s.total += Number(c.value) || 0;
+        if (s.status === null || (rank[c.status] ?? -1) > (rank[s.status] ?? -1)) s.status = c.status;
+        if (c.endDate && (!s.endDate || c.endDate > s.endDate)) s.endDate = c.endDate;
+      });
+      setStatsByClient(stats);
+    });
+  }, []);
   useEffect(() => { load(); }, [load]);
 
   if (!clients) return <div className="p-6"><Skeleton className="h-96 w-full" /></div>;
 
   const q = search.trim().toLowerCase();
-  const visible = q
+  const filtered = q
     ? clients.filter(c => [c.companyName, c.contactName, c.contactEmail]
         .some(f => (f || '').toLowerCase().includes(q)))
     : clients;
+
+  const statusRank = { active: 5, signed: 4, sent: 3, draft: 2, expired: 1, cancelled: 0 };
+  const name = c => (c.companyName || '').toLowerCase();
+  const visible = [...filtered].sort((a, b) => {
+    const sa = statsByClient[a.id], sb = statsByClient[b.id];
+    switch (sort) {
+      case 'amount':   // biggest deals first; ties → name
+        return ((sb?.total || 0) - (sa?.total || 0)) || name(a).localeCompare(name(b));
+      case 'endDate': { // soonest renewal first; no-contract sinks to bottom
+        const ea = sa?.endDate || '9999', eb = sb?.endDate || '9999';
+        return ea.localeCompare(eb) || name(a).localeCompare(name(b));
+      }
+      case 'status':   // most-advanced first; ties → name
+        return ((statusRank[sb?.status] ?? -1) - (statusRank[sa?.status] ?? -1)) || name(a).localeCompare(name(b));
+      case 'recent':   // newest added first
+        return (b.createdAt || '').localeCompare(a.createdAt || '');
+      default:         // name A–Z
+        return name(a).localeCompare(name(b));
+    }
+  });
 
   return (
     <div className="p-4 md:p-6">
@@ -1880,8 +1918,15 @@ function ClientsPage({ navigate }) {
       </div>
       {clients.length === 0 ? <EmptyState title="No clients yet" subtitle="Add your first client to start creating contracts." ctaLabel={auth.isAdmin ? "New Client" : null} onCta={()=>setShowForm(true)} icon="🏟️" /> : (
         <>
-        <div className="mb-4 flex items-center gap-3">
+        <div className="mb-4 flex items-center gap-3 flex-wrap">
           <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search clients by name, contact, or email…" className="px-3 py-2 text-sm border border-[var(--border)] rounded-lg flex-1 md:max-w-sm" />
+          <select value={sort} onChange={e=>setSortMode(e.target.value)} className="px-3 py-2 text-sm border border-[var(--border)] rounded-lg bg-white text-slate-600" title="Sort clients">
+            <option value="name">Name (A–Z)</option>
+            <option value="amount">Amount (high→low)</option>
+            <option value="endDate">End of contract (soonest)</option>
+            <option value="status">Status</option>
+            <option value="recent">Recently added</option>
+          </select>
           <div className="inline-flex rounded-lg border border-[var(--border)] overflow-hidden text-sm">
             <button onClick={()=>setViewMode('list')} className={`px-3 py-2 transition ${view==='list' ? 'bg-[var(--navy-deep)] text-white' : 'bg-white text-slate-500 hover:bg-slate-50'}`} title="List view">☰ List</button>
             <button onClick={()=>setViewMode('cards')} className={`px-3 py-2 transition border-l border-[var(--border)] ${view==='cards' ? 'bg-[var(--navy-deep)] text-white' : 'bg-white text-slate-500 hover:bg-slate-50'}`} title="Card view">▦ Cards</button>
@@ -1890,19 +1935,18 @@ function ClientsPage({ navigate }) {
         {visible.length === 0 ? (
           <div className="text-sm text-slate-400 py-8 text-center">No clients match “{search}”.</div>
         ) : view === 'cards' ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+        <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))' }}>
           {visible.map(c => (
-            <button key={c.id} onClick={()=>setEditClient(c)} className="text-left bg-white rounded-lg border border-[var(--border)] p-3 hover:border-blue-300 hover:shadow-sm transition cursor-pointer">
-              <div className="flex items-center gap-2.5 mb-2">
-                <ClientLogo client={c} size={36} />
-                <div className="min-w-0">
-                  <div className="font-heading text-sm truncate">{c.companyName}</div>
-                  <div className="text-[11px] text-slate-400">{c.country} · {c.currency}</div>
+            <button key={c.id} onClick={()=>setEditClient(c)} className="aspect-square text-center bg-white rounded-lg border border-[var(--border)] p-3 hover:border-blue-300 hover:shadow-sm transition cursor-pointer flex flex-col items-center justify-center gap-2 overflow-hidden">
+              <ClientLogo client={c} size={44} />
+              <div className="w-full min-w-0">
+                <div className="font-heading text-sm truncate">{c.companyName}</div>
+                <div className="font-data text-sm text-[var(--navy-deep)] mb-1.5">
+                  {statsByClient[c.id]?.total ? fmtMoney(statsByClient[c.id].total, statsByClient[c.id].currency) : '—'}
                 </div>
-              </div>
-              <div className="text-xs text-slate-600 space-y-0.5">
-                <div className="truncate">{c.contactName}</div>
-                <div className="text-[11px] text-slate-400 truncate">{c.contactEmail}</div>
+                {statsByClient[c.id]?.status
+                  ? <Badge status={statsByClient[c.id].status} />
+                  : <span className="text-[11px] text-slate-300">No contract</span>}
               </div>
             </button>
           ))}
@@ -1913,9 +1957,15 @@ function ClientsPage({ navigate }) {
             <button key={c.id} onClick={()=>setEditClient(c)} className="w-full text-left flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50 transition cursor-pointer">
               <ClientLogo client={c} size={32} />
               <div className="font-heading text-sm truncate flex-1 min-w-0">{c.companyName}</div>
-              <div className="hidden sm:block text-sm text-slate-600 truncate flex-1 min-w-0">{c.contactName}</div>
               <div className="hidden md:block text-xs text-slate-400 truncate flex-1 min-w-0">{c.contactEmail}</div>
-              <div className="text-[11px] text-slate-400 whitespace-nowrap w-16 text-right">{c.country} · {c.currency}</div>
+              <div className="font-data text-sm text-[var(--navy-deep)] whitespace-nowrap w-24 text-right">
+                {statsByClient[c.id]?.total ? fmtMoney(statsByClient[c.id].total, statsByClient[c.id].currency) : '—'}
+              </div>
+              <div className="whitespace-nowrap w-24 text-right">
+                {statsByClient[c.id]?.status
+                  ? <Badge status={statsByClient[c.id].status} />
+                  : <span className="text-[11px] text-slate-300">No contract</span>}
+              </div>
             </button>
           ))}
         </div>
