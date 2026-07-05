@@ -74,7 +74,7 @@ function LoginScreen() {
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <img src="Logo-scios-dark.png" alt="SCIOS" className="h-14 w-auto object-contain mx-auto mb-4" />
-          <div className="text-white font-display">Science of Sports Contracts</div>
+          <div className="text-white font-display">SCIOS Contracts</div>
           <div className="text-slate-400 text-sm mt-1">Science of Sports — Internal Contract Management</div>
         </div>
         <form onSubmit={submit} className="bg-white rounded-xl shadow-2xl overflow-hidden">
@@ -138,7 +138,7 @@ function Sidebar({ route, navigate, mobileOpen, setMobileOpen }) {
         <div className="sos-rainbow" />
         <div className="px-5 py-6 border-b border-white/10 flex flex-col items-start gap-2">
           <img src="Logo-scios-dark.png" alt="SCIOS" className="h-12 w-auto object-contain" />
-          <div className="text-white font-heading">Science of Sports Contracts</div>
+          <div className="text-white font-heading">SCIOS Contracts</div>
         </div>
         <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-1">
           {NAV.map(item => (
@@ -3160,7 +3160,7 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
               </React.Fragment>
             )}
           </div>
-          <div className="text-white font-display">Science of Sports Contracts</div>
+          <div className="text-white font-display">SCIOS Contracts</div>
           <div className="text-slate-400 text-xs mt-1">Secure Electronic Signature</div>
           {client?.companyName && <div className="text-[var(--cyan)] text-xs mt-1">Prepared for {client.companyName}</div>}
         </div>
@@ -3501,7 +3501,7 @@ function AuthedApp() {
         <div className="md:hidden sticky top-0 z-20 bg-[var(--navy-deep)] px-4 py-3 flex items-center justify-between no-print">
           <div className="flex items-center gap-2">
             <img src="Logo-scios-dark.png" alt="SCIOS" className="h-6 w-auto object-contain" />
-            <div className="text-white font-heading text-sm">Science of Sports Contracts</div>
+            <div className="text-white font-heading text-sm">SCIOS Contracts</div>
           </div>
           <button onClick={()=>setMobileOpen(true)} className="text-white text-xl leading-none">☰</button>
         </div>
@@ -3571,7 +3571,7 @@ function AccountSetupFlow({ token }) {
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <img src="Logo-scios-dark.png" alt="SCIOS" className="h-14 w-auto object-contain mx-auto mb-4" />
-          <div className="text-white font-display">Science of Sports Contracts</div>
+          <div className="text-white font-display">SCIOS Contracts</div>
           <div className="text-slate-400 text-sm mt-1">Set up your account</div>
         </div>
         <form onSubmit={submit} className="bg-white rounded-xl shadow-2xl p-8">

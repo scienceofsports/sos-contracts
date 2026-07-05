@@ -67,7 +67,7 @@ export const userService = {
     if (!profile || !profile.role) {
       // Authenticated with no staff profile — deny access.
       await supabase.auth.signOut();
-      throw new Error('This account is not authorised for Science of Sports Contracts.');
+      throw new Error('This account is not authorised for SCIOS Contracts.');
     }
     return profile;
   },
