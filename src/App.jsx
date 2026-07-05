@@ -2988,6 +2988,14 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
           consents: { electronic: consents.electronic, authorized: consents.authorized, read: consents.read },
           signatureImageBase64,
           ...contactPayload,
+          // Client's confirmed company details (address, VAT, reg) so the final
+          // signed document reflects what the signer confirmed, not the blanks.
+          clientDetails: clientDetailsForm ? {
+            companyName: (clientDetailsForm.companyName || '').trim() || null,
+            address: (clientDetailsForm.address || '').trim() || null,
+            vatNumber: (clientDetailsForm.vatNumber || '').trim() || null,
+            registrationNumber: (clientDetailsForm.registrationNumber || '').trim() || null,
+          } : null,
         });
         setSignedResult({ signedAt: res.signedAt });
         setScreen(5);

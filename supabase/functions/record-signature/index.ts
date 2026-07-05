@@ -34,6 +34,8 @@ Deno.serve(async (req) => {
       contactPhone,
       financeName,
       financeEmail,
+      // Client's confirmed company details (address, VAT, reg) from signing.
+      clientDetails,
     } = body;
     if (!token) throw new Error('token is required');
 
@@ -139,6 +141,25 @@ Deno.serve(async (req) => {
     //    BOTH the signer (confirmation) and staff (notification). Wrapped so a
     //    certificate/email hiccup never fails the signing itself.
     const snap = request.document_snapshot || {};
+    // Apply the client's confirmed company details (address/VAT/reg/name) onto
+    // the snapshot's client block so the executed document reflects what the
+    // signer confirmed at signing (fixes a lingering "[address]" placeholder).
+    if (clientDetails && snap.client) {
+      if (clientDetails.companyName) { snap.client.company_name = clientDetails.companyName; snap.client.companyName = clientDetails.companyName; }
+      if (clientDetails.address) { snap.client.address = clientDetails.address; }
+      if (clientDetails.vatNumber) { snap.client.vat_number = clientDetails.vatNumber; snap.client.vatNumber = clientDetails.vatNumber; }
+      if (clientDetails.registrationNumber) { snap.client.registration_number = clientDetails.registrationNumber; snap.client.registrationNumber = clientDetails.registrationNumber; }
+      // Persist the confirmed details back onto the client record + the request
+      // snapshot so the admin view and re-downloads stay consistent.
+      try {
+        await admin.from('clients').update({
+          address: clientDetails.address ?? undefined,
+          vat_number: clientDetails.vatNumber ?? undefined,
+          registration_number: clientDetails.registrationNumber ?? undefined,
+        }).eq('id', snap.client.id);
+        await admin.from('signing_requests').update({ document_snapshot: snap }).eq('id', request.id);
+      } catch (_) { /* non-fatal */ }
+    }
     const contractTitle = snap?.contract?.title ?? 'Contract';
     const contractNumber = snap?.contract?.contractNumber ?? snap?.contract?.contract_number ?? '';
     try {
