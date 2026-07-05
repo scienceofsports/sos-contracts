@@ -1222,8 +1222,15 @@ function ContractAttachment({ contract, onChange }) {
         reader.readAsDataURL(file);
       });
       await contractService.setAttachment(contract.id, base64, file.name);
+      // An uploaded signed contract is a live, in-force deal — activate it.
+      // (We use 'active', not 'signed': 'signed' implies the platform's
+      // cryptographic evidence trail, which an offline PDF doesn't carry.)
+      // Skip if already active/signed so re-uploading a replacement is a no-op.
+      if (contract.status !== 'active' && contract.status !== 'signed') {
+        await contractService.updateStatus(contract.id, 'active');
+      }
       await contractService.addAuditEntry(contract.id, { type:'document', message:`Signed document uploaded (${file.name})`, by: auth.user.id });
-      toast.push('Document uploaded.', 'success');
+      toast.push('Signed contract uploaded — marked active.', 'success');
       onChange();
     } catch (err) {
       toast.push(err.message, 'error');
