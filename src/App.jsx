@@ -1856,11 +1856,18 @@ function ClientsPage({ navigate }) {
   const [clients, setClients] = useState(null);
   const [showForm, setShowForm] = useState(false);
   const [editClient, setEditClient] = useState(null);
+  const [search, setSearch] = useState('');
 
   const load = useCallback(() => clientService.getAll().then(setClients), []);
   useEffect(() => { load(); }, [load]);
 
   if (!clients) return <div className="p-6"><Skeleton className="h-96 w-full" /></div>;
+
+  const q = search.trim().toLowerCase();
+  const visible = q
+    ? clients.filter(c => [c.companyName, c.contactName, c.contactEmail]
+        .some(f => (f || '').toLowerCase().includes(q)))
+    : clients;
 
   return (
     <div className="p-4 md:p-6">
@@ -1869,8 +1876,15 @@ function ClientsPage({ navigate }) {
         {auth.isAdmin && <button onClick={()=>setShowForm(true)} className="px-4 py-2 sos-btn-cyan rounded-lg text-sm font-medium transition">+ New Client</button>}
       </div>
       {clients.length === 0 ? <EmptyState title="No clients yet" subtitle="Add your first client to start creating contracts." ctaLabel={auth.isAdmin ? "New Client" : null} onCta={()=>setShowForm(true)} icon="🏟️" /> : (
+        <>
+        <div className="mb-4">
+          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search clients by name, contact, or email…" className="px-3 py-2 text-sm border border-[var(--border)] rounded-lg w-full md:max-w-sm" />
+        </div>
+        {visible.length === 0 ? (
+          <div className="text-sm text-slate-400 py-8 text-center">No clients match “{search}”.</div>
+        ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {clients.map(c => (
+          {visible.map(c => (
             <button key={c.id} onClick={()=>setEditClient(c)} className="text-left bg-white rounded-xl border border-[var(--border)] p-5 hover:border-blue-300 hover:shadow-sm transition cursor-pointer">
               <div className="flex items-center gap-3 mb-3">
                 <ClientLogo client={c} size={44} />
@@ -1893,6 +1907,8 @@ function ClientsPage({ navigate }) {
             </button>
           ))}
         </div>
+        )}
+        </>
       )}
       {showForm && <ClientFormModal onClose={()=>setShowForm(false)} onDone={()=>{ setShowForm(false); load(); }} />}
       {editClient && <ClientFormModal client={editClient} readOnly={!auth.isAdmin} onClose={()=>setEditClient(null)} onDone={()=>{ setEditClient(null); load(); }} />}

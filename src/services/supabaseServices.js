@@ -92,7 +92,7 @@ export const companyService = {
 export const clientService = {
   getAll: async () => {
     const rows = unwrap(
-      await supabase.from('clients').select('*').order('created_at', { ascending: true })
+      await supabase.from('clients').select('*').order('company_name', { ascending: true })
     );
     return (rows || []).map(clientFromRow);
   },
