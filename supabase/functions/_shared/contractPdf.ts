@@ -32,7 +32,6 @@ const BOX_BORDER = rgb(0.82, 0.85, 0.89);
 const FOOTER_GREY = rgb(0.663, 0.714, 0.8); // #A9B6CC
 
 // Rainbow strip segments (cyan #22C7E6, blue #2563EB, purple #8B5CF6, pink #EC4899)
-const RAINBOW = [rgb(0.133, 0.780, 0.902), rgb(0.145, 0.388, 0.922), rgb(0.545, 0.361, 0.965), rgb(0.925, 0.282, 0.6)];
 
 // deno-lint-ignore no-explicit-any
 type Any = any;
@@ -202,14 +201,24 @@ export async function buildContractPdf(input: {
   const clientLogo = await embedImage(pick(cl, 'logoBase64', 'logo_url', 'logo'));
 
   // --- Rainbow strip helper (four coloured segments). -----------------------
+  // Full-spectrum rainbow (matches the on-screen CSS gradient), drawn as many
+  // thin interpolated slices so it reads as a smooth gradient edge-to-edge.
   const drawRainbow = (pg: Any, topY: number, h = 3) => {
-    const rsw = W / RAINBOW.length;
-    RAINBOW.forEach((col, i) => {
-      const x0 = i * rsw;
-      // Last segment runs to the page edge so no rounding gap is left on the right.
-      const w = (i === RAINBOW.length - 1) ? (W - x0) : rsw + 0.5;
-      pg.drawRectangle({ x: x0, y: topY - h, width: w, height: h, color: col });
-    });
+    // Same 7 stops as --sos-rainbow: cyan→green→yellow→orange→pink→purple→blue.
+    const stops = [[34,199,230],[34,230,138],[230,230,34],[245,166,35],[236,72,153],[139,92,246],[37,99,235]];
+    const N = 96;
+    const sliceW = W / N;
+    for (let i = 0; i < N; i++) {
+      const t = (i / (N - 1)) * (stops.length - 1);
+      const a = Math.floor(t), b = Math.min(a + 1, stops.length - 1), f = t - a;
+      const col = rgb(
+        (stops[a][0] + (stops[b][0] - stops[a][0]) * f) / 255,
+        (stops[a][1] + (stops[b][1] - stops[a][1]) * f) / 255,
+        (stops[a][2] + (stops[b][2] - stops[a][2]) * f) / 255,
+      );
+      const w = (i === N - 1) ? (W - i * sliceW) : sliceW + 1;
+      pg.drawRectangle({ x: i * sliceW, y: topY - h, width: w, height: h, color: col });
+    }
   };
 
   // --- Full navy header band with two-logo lockup + cyan contract number. ---

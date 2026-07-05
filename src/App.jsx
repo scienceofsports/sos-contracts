@@ -74,7 +74,7 @@ function LoginScreen() {
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <img src="Logo-scios-dark.png" alt="SCIOS" className="h-14 w-auto object-contain mx-auto mb-4" />
-          <div className="text-white font-display">SOS Contracts</div>
+          <div className="text-white font-display">Science of Sports Contracts</div>
           <div className="text-slate-400 text-sm mt-1">Science of Sports — Internal Contract Management</div>
         </div>
         <form onSubmit={submit} className="bg-white rounded-xl shadow-2xl overflow-hidden">
@@ -138,7 +138,7 @@ function Sidebar({ route, navigate, mobileOpen, setMobileOpen }) {
         <div className="sos-rainbow" />
         <div className="px-5 py-6 border-b border-white/10 flex flex-col items-start gap-2">
           <img src="Logo-scios-dark.png" alt="SCIOS" className="h-12 w-auto object-contain" />
-          <div className="text-white font-heading">SOS Contracts</div>
+          <div className="text-white font-heading">Science of Sports Contracts</div>
         </div>
         <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-1">
           {NAV.map(item => (
@@ -1338,7 +1338,7 @@ function ContractDocumentBody({ contract, client, company }) {
         </div>
 
         {/* Signature SCIOS rainbow hairline directly under the header band */}
-        <div className="sos-rainbow -mx-10 mb-10" />
+        <div className="sos-rainbow-bleed mb-10" />
 
         {/* Title split on the dash: client name on top, agreement type below. */}
         {(() => {
@@ -1545,7 +1545,7 @@ function ContractDocumentBody({ contract, client, company }) {
         <div className="sos-pill mb-2" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}>Signatures</div>
         <p className="text-xs text-slate-500 mb-6">Executed by the duly authorised representatives of the Parties as of the dates set out below.</p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-10 text-sm">
-          {/* Service Provider — auto-applied SOS authorised signatory. */}
+          {/* Service Provider — auto-applied Scios authorised signatory. */}
           <div>
             <div className="text-xs font-semibold uppercase tracking-wide mb-4" style={{ color:'var(--navy-deep)' }}>For and on behalf of {company.name}</div>
             {company.signatoryName ? (
@@ -1577,7 +1577,7 @@ function ContractDocumentBody({ contract, client, company }) {
         </div>
 
         {/* Signature SCIOS rainbow hairline directly above the footer band */}
-        <div className="sos-rainbow -mx-10 mt-12" />
+        <div className="sos-rainbow-bleed mt-12" />
         {/* Branded navy footer band with company details + SCIOS tagline */}
         <div
           className="rounded-b-lg -mx-10 -mb-10 px-10 py-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4"
@@ -1624,7 +1624,7 @@ function ContractDocument({ contractId, navigate }) {
         </div>
       )}
 
-      <div className="bg-white rounded-xl border border-[var(--border)] p-10">
+      <div className="bg-white rounded-xl border border-[var(--border)] p-10 overflow-hidden">
         <ContractDocumentBody contract={contract} client={client} company={company} />
       </div>
     </div>
@@ -2350,7 +2350,7 @@ function CompanyProfileSettings() {
       </div>
 
       {/* Authorised signatory — auto-applied to every contract so agreements
-          are executed as genuine two-party documents (SOS counter-signs). */}
+          are executed as genuine two-party documents (Scios counter-signs). */}
       <div className="bg-white rounded-xl border border-[var(--border)] p-6 mb-6">
         <div className="font-heading text-base mb-1 text-[var(--navy-deep)]">Authorised Signatory</div>
         <p className="text-sm text-slate-500 mb-4">This person's signature is automatically applied as the Service Provider's counter-signature on every contract, so each agreement is signed by both parties.</p>
@@ -3160,7 +3160,7 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
               </React.Fragment>
             )}
           </div>
-          <div className="text-white font-display">SOS Contracts</div>
+          <div className="text-white font-display">Science of Sports Contracts</div>
           <div className="text-slate-400 text-xs mt-1">Secure Electronic Signature</div>
           {client?.companyName && <div className="text-[var(--cyan)] text-xs mt-1">Prepared for {client.companyName}</div>}
         </div>
@@ -3501,7 +3501,7 @@ function AuthedApp() {
         <div className="md:hidden sticky top-0 z-20 bg-[var(--navy-deep)] px-4 py-3 flex items-center justify-between no-print">
           <div className="flex items-center gap-2">
             <img src="Logo-scios-dark.png" alt="SCIOS" className="h-6 w-auto object-contain" />
-            <div className="text-white font-heading text-sm">SOS Contracts</div>
+            <div className="text-white font-heading text-sm">Science of Sports Contracts</div>
           </div>
           <button onClick={()=>setMobileOpen(true)} className="text-white text-xl leading-none">☰</button>
         </div>
@@ -3571,7 +3571,7 @@ function AccountSetupFlow({ token }) {
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <img src="Logo-scios-dark.png" alt="SCIOS" className="h-14 w-auto object-contain mx-auto mb-4" />
-          <div className="text-white font-display">SOS Contracts</div>
+          <div className="text-white font-display">Science of Sports Contracts</div>
           <div className="text-slate-400 text-sm mt-1">Set up your account</div>
         </div>
         <form onSubmit={submit} className="bg-white rounded-xl shadow-2xl p-8">

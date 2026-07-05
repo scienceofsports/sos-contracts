@@ -82,14 +82,14 @@ export function generateContractPdf({ contract, client, company }) {
   };
 
   // -------------------------------------------------------------------------
-  // Header band with the two-logo lockup (SOS × client) + cyan contract number
+  // Header band with the two-logo lockup (Scios × client) + cyan contract number
   // + rainbow hairline. Drawn on PAGE 1 only.
   // -------------------------------------------------------------------------
   const drawHeaderP1 = () => {
     doc.setFillColor(...NAVY);
     doc.rect(0, 0, W, HEADER_BAND, 'F');
 
-    // The SOS wordmark PNG is WIDE (star + "SCIENCE OF SPORTS"); give each logo
+    // The Scios wordmark PNG is WIDE (star + "SCIENCE OF SPORTS"); give each logo
     // a generous fit box (200w × 44h) so it renders at full prominence and
     // matches the server-generated (sent/signed) PDFs.
     const logoH = 44;
@@ -101,7 +101,7 @@ export function generateContractPdf({ contract, client, company }) {
     doc.setFontSize(crossSize);
     const crossW = doc.getTextWidth('×');
 
-    // Resolve SOS + client lockup elements. Images preferred; text fallback.
+    // Resolve Scios + client lockup elements. Images preferred; text fallback.
     const sosLogo = company?.logo || null;
     const clientLogo = client?.logoBase64 || null;
     const sosFit = sosLogo ? fitImage(sosLogo, logoMaxW, logoH) : null;
@@ -116,7 +116,7 @@ export function generateContractPdf({ contract, client, company }) {
     const totalW = sosW + gap + crossW + gap + cliW;
     let cx = (W - totalW) / 2;
 
-    // --- SOS logo / wordmark. ---
+    // --- Scios logo / wordmark. ---
     let placed = false;
     if (sosLogo && sosFit) {
       try {
@@ -183,17 +183,22 @@ export function generateContractPdf({ contract, client, company }) {
     drawRainbow(26);
   };
 
-  // Rainbow strip (four coloured segments), drawn with its top at `topY`.
+  // Full-spectrum rainbow strip (matches the on-screen CSS gradient), drawn as
+  // many thin interpolated slices so it reads as a smooth gradient edge-to-edge.
   const drawRainbow = (topY) => {
-    const segs = [[34, 199, 230], [37, 99, 235], [139, 92, 246], [236, 72, 153]];
-    const segW = W / segs.length;
-    segs.forEach((c, i) => {
-      const x0 = i * segW;
-      // Last segment runs to the page edge so no rounding gap is left on the right.
-      const w = (i === segs.length - 1) ? (W - x0) : segW + 0.5;
+    // Same 7 stops as --sos-rainbow: cyan→green→yellow→orange→pink→purple→blue.
+    const stops = [[34,199,230],[34,230,138],[230,230,34],[245,166,35],[236,72,153],[139,92,246],[37,99,235]];
+    const N = 96;                       // slice count → smoothness
+    const sliceW = W / N;
+    for (let i = 0; i < N; i++) {
+      const t = (i / (N - 1)) * (stops.length - 1);
+      const a = Math.floor(t), b = Math.min(a + 1, stops.length - 1), f = t - a;
+      const c = [0,1,2].map(k => Math.round(stops[a][k] + (stops[b][k] - stops[a][k]) * f));
       doc.setFillColor(...c);
-      doc.rect(x0, topY, w, 3, 'F');
-    });
+      // +1 overlap and last slice to the edge → no seams, no right-side gap.
+      const w = (i === N - 1) ? (W - i * sliceW) : sliceW + 1;
+      doc.rect(i * sliceW, topY, w, 3, 'F');
+    }
   };
 
   // Footer band, drawn on every page at the end.
@@ -654,7 +659,7 @@ export function generateContractPdf({ contract, client, company }) {
   const signed = !!contract.signedAt;
   const provDate = contract.signedAt || contract.sentAt || contract.createdAt;
   const cols = [
-    // Provider column = SOS authorised signatory (auto counter-signature).
+    // Provider column = Scios authorised signatory (auto counter-signature).
     { sigImg: company?.signatorySignature || null, sigFallback: company?.signatoryName || '', name: company?.signatoryName || '', title: company?.signatoryTitle || '', date: (company?.signatoryName ? fmtDate(provDate) : '') },
     // Client column = the client's drawn signature when signed (blank pre-sign).
     { sigImg: signed ? (contract.signerSignature || null) : null, sigFallback: signed ? (contract.signerName || '') : '', name: signed ? (contract.signerName || '') : '', title: signed ? (contract.signerTitle || '') : '', date: signed ? fmtDate(contract.signedAt) : '' },

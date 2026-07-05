@@ -22,7 +22,7 @@
   --bg: #F8FAFC;
   --border: #E2E8F0;
   /* Signature SCIOS rainbow strip */
-  --sos-rainbow: linear-gradient(90deg,#22C7E6 0%,#2563EB 32%,#8B5CF6 62%,#EC4899 100%);
+  --sos-rainbow: linear-gradient(90deg,#22C7E6 0%,#22E68A 18%,#E6E622 34%,#F5A623 50%,#EC4899 66%,#8B5CF6 82%,#2563EB 100%);
 }
 
 html, body { font-family: 'Inter', sans-serif; background: var(--bg); }
@@ -33,7 +33,11 @@ html, body { font-family: 'Inter', sans-serif; background: var(--bg); }
 /* ---- SCIOS branded components (reusable) ---- */
 
 /* The signature rainbow hairline used under header bands. */
-.sos-rainbow { height: 4px; width: 100%; background: var(--sos-rainbow); }
+.sos-rainbow { height: 4px; width: 100%; background: var(--sos-rainbow); background-size: 100% 100%; }
+/* Full-bleed variant for the contract card: overshoots the p-10 padding on
+   both sides so it always touches both edges; the card's overflow-hidden clips
+   the overshoot, leaving no white sliver on the right. */
+.sos-rainbow-bleed { height: 4px; margin-left: -44px; margin-right: -44px; background: var(--sos-rainbow); background-size: 100% 100%; }
 
 /* Navy pill section header: "1. TITLE" — white on navy with a cyan number. */
 .sos-pill {
