@@ -1857,6 +1857,9 @@ function ClientsPage({ navigate }) {
   const [showForm, setShowForm] = useState(false);
   const [editClient, setEditClient] = useState(null);
   const [search, setSearch] = useState('');
+  const [view, setView] = useState(() => localStorage.getItem('clientsView') || 'list');
+
+  const setViewMode = (v) => { setView(v); localStorage.setItem('clientsView', v); };
 
   const load = useCallback(() => clientService.getAll().then(setClients), []);
   useEffect(() => { load(); }, [load]);
@@ -1877,33 +1880,42 @@ function ClientsPage({ navigate }) {
       </div>
       {clients.length === 0 ? <EmptyState title="No clients yet" subtitle="Add your first client to start creating contracts." ctaLabel={auth.isAdmin ? "New Client" : null} onCta={()=>setShowForm(true)} icon="🏟️" /> : (
         <>
-        <div className="mb-4">
-          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search clients by name, contact, or email…" className="px-3 py-2 text-sm border border-[var(--border)] rounded-lg w-full md:max-w-sm" />
+        <div className="mb-4 flex items-center gap-3">
+          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search clients by name, contact, or email…" className="px-3 py-2 text-sm border border-[var(--border)] rounded-lg flex-1 md:max-w-sm" />
+          <div className="inline-flex rounded-lg border border-[var(--border)] overflow-hidden text-sm">
+            <button onClick={()=>setViewMode('list')} className={`px-3 py-2 transition ${view==='list' ? 'bg-[var(--navy-deep)] text-white' : 'bg-white text-slate-500 hover:bg-slate-50'}`} title="List view">☰ List</button>
+            <button onClick={()=>setViewMode('cards')} className={`px-3 py-2 transition border-l border-[var(--border)] ${view==='cards' ? 'bg-[var(--navy-deep)] text-white' : 'bg-white text-slate-500 hover:bg-slate-50'}`} title="Card view">▦ Cards</button>
+          </div>
         </div>
         {visible.length === 0 ? (
           <div className="text-sm text-slate-400 py-8 text-center">No clients match “{search}”.</div>
-        ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        ) : view === 'cards' ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
           {visible.map(c => (
-            <button key={c.id} onClick={()=>setEditClient(c)} className="text-left bg-white rounded-xl border border-[var(--border)] p-5 hover:border-blue-300 hover:shadow-sm transition cursor-pointer">
-              <div className="flex items-center gap-3 mb-3">
-                <ClientLogo client={c} size={44} />
-                <div>
-                  <div className="font-heading text-base">{c.companyName}</div>
-                  <div className="text-xs text-slate-400">{c.country} · {c.currency}</div>
+            <button key={c.id} onClick={()=>setEditClient(c)} className="text-left bg-white rounded-lg border border-[var(--border)] p-3 hover:border-blue-300 hover:shadow-sm transition cursor-pointer">
+              <div className="flex items-center gap-2.5 mb-2">
+                <ClientLogo client={c} size={36} />
+                <div className="min-w-0">
+                  <div className="font-heading text-sm truncate">{c.companyName}</div>
+                  <div className="text-[11px] text-slate-400">{c.country} · {c.currency}</div>
                 </div>
               </div>
-              <div className="text-sm text-slate-600 space-y-1">
-                <div>{c.contactName}</div>
-                <div className="text-xs">{c.contactEmail}</div>
-                <div className="text-xs">{c.contactPhone}</div>
+              <div className="text-xs text-slate-600 space-y-0.5">
+                <div className="truncate">{c.contactName}</div>
+                <div className="text-[11px] text-slate-400 truncate">{c.contactEmail}</div>
               </div>
-              {(c.vatNumber || c.registrationNumber) && (
-                <div className="text-xs text-slate-400 mt-2 space-y-0.5">
-                  {c.vatNumber && <div>VAT: {c.vatNumber}</div>}
-                  {c.registrationNumber && <div>Reg. No: {c.registrationNumber}</div>}
-                </div>
-              )}
+            </button>
+          ))}
+        </div>
+        ) : (
+        <div className="bg-white rounded-xl border border-[var(--border)] overflow-hidden divide-y divide-[var(--border)]">
+          {visible.map(c => (
+            <button key={c.id} onClick={()=>setEditClient(c)} className="w-full text-left flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50 transition cursor-pointer">
+              <ClientLogo client={c} size={32} />
+              <div className="font-heading text-sm truncate flex-1 min-w-0">{c.companyName}</div>
+              <div className="hidden sm:block text-sm text-slate-600 truncate flex-1 min-w-0">{c.contactName}</div>
+              <div className="hidden md:block text-xs text-slate-400 truncate flex-1 min-w-0">{c.contactEmail}</div>
+              <div className="text-[11px] text-slate-400 whitespace-nowrap w-16 text-right">{c.country} · {c.currency}</div>
             </button>
           ))}
         </div>
