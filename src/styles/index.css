@@ -50,6 +50,7 @@ html, body { font-family: 'Inter', sans-serif; background: var(--bg); }
   padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600;
 }
 .sos-chip-cyan { background: rgba(34,199,230,.15); color: var(--cyan-deep); }
+.sos-chip-green { background: rgba(16,185,129,.15); color: #059669; }
 
 /* Primary cyan/navy button accents used across the app. */
 .sos-btn-cyan { background: var(--cyan); color: var(--navy-deep); }

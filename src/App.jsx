@@ -1406,7 +1406,10 @@ function ContractDocumentBody({ contract, client, company }) {
                     if (!groupItems.length) return null;
                     return (
                       <div key={group} className="mb-5 last:mb-0">
-                        <div className="text-sm font-semibold mb-2" style={{ color:'var(--cyan-deep)' }}>{group}</div>
+                        <div className="flex items-center gap-2 mb-2.5">
+                          <span aria-hidden style={{ background:'var(--cyan)', width:3, height:14, borderRadius:2, WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }} />
+                          <span className="text-xs font-bold uppercase tracking-wide" style={{ color:'var(--navy-deep)' }}>{group}</span>
+                        </div>
                         <div className="space-y-2">
                           {groupItems.map(i => {
                             const qtyNote = i.unit === 'per_match' ? ` (${i.qty} matches)` : i.unit === 'per_unit' ? ` (${i.qty})` : '';
@@ -1415,10 +1418,10 @@ function ContractDocumentBody({ contract, client, company }) {
                               <div key={i.key} className="text-sm text-slate-700">
                                 <span className="font-medium" style={{ color:'var(--navy-deep)' }}>{i.label}</span>
                                 {qtyNote && <span className="text-slate-500">{qtyNote}</span>}
-                                {chip && <span className="sos-chip sos-chip-cyan ml-2 align-middle" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}>{chip}</span>}
+                                {chip && <span className={`sos-chip ${chip === 'Complimentary' ? 'sos-chip-green' : 'sos-chip-cyan'} ml-2 align-middle`} style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}>{chip}</span>}
                                 <span className="text-slate-500"> — {i.detail}</span>
                                 {i.key === 'platform_access' && platformSeatsSummary(contract.services.platform_access) && (
-                                  <div className="text-xs text-slate-400 mt-0.5">Access: {platformSeatsSummary(contract.services.platform_access)} (exact users to be confirmed with the client)</div>
+                                  <div className="text-xs text-slate-600 mt-0.5">Access: {platformSeatsSummary(contract.services.platform_access)} (exact users to be confirmed with the client)</div>
                                 )}
                               </div>
                             );
@@ -1449,10 +1452,10 @@ function ContractDocumentBody({ contract, client, company }) {
                           <td className="py-2 px-3">
                             {i.label}
                             {i.key === 'platform_access' && platformSeatsSummary(contract.services.platform_access) && (
-                              <div className="text-xs text-slate-400">Access: {platformSeatsSummary(contract.services.platform_access)} (exact users to be confirmed with the client)</div>
+                              <div className="text-xs text-slate-600">Access: {platformSeatsSummary(contract.services.platform_access)} (exact users to be confirmed with the client)</div>
                             )}
                           </td>
-                          <td className="py-2 px-3 text-right font-data">{i.unit === 'flat' ? '—' : (i.unit === 'included' || i.complimentary || i.bundledIncluded) ? 'Included' : i.qty}</td>
+                          <td className="py-2 px-3 text-right font-data">{i.unit === 'flat' ? fmtMoney(i.amount, contract.currency) : (i.unit === 'included' || i.complimentary || i.bundledIncluded) ? 'Included' : i.qty}</td>
                         </tr>
                       ))}
                       <tr style={{ borderTop:'2px solid var(--navy-deep)' }}>
@@ -1477,8 +1480,10 @@ function ContractDocumentBody({ contract, client, company }) {
               )}
 
               <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{confidentialityNum}.</span> Confidentiality & Data Protection</div>
-              <p className="text-sm text-slate-700 mb-2">The Service Provider shall process personal data strictly in accordance with the GDPR, the applicable Cyprus data protection legislation (Law 125(I)/2018), and Regulation (EU) 2016/679, and solely on documented instructions from the Client and exclusively for the purposes of this Agreement.</p>
-              <p className="text-sm text-slate-700 mb-8">All match analysis, reports, video clips, data outputs, and technical insights produced under this Agreement shall be treated as strictly confidential and used solely for the Client's internal purposes.</p>
+              <div className="mb-8 pl-4 pr-5 py-4 rounded-r-lg" style={{ background:'#EEF0FB', borderLeft:'3px solid var(--navy-deep)', WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}>
+                <p className="text-sm text-slate-700 mb-2"><span className="font-semibold" style={{ color:'var(--navy-deep)' }}>Confidentiality & GDPR.</span> The Service Provider shall process personal data strictly in accordance with the GDPR, the applicable Cyprus data protection legislation (Law 125(I)/2018), and Regulation (EU) 2016/679, and solely on documented instructions from the Client and exclusively for the purposes of this Agreement.</p>
+                <p className="text-sm text-slate-700">All match analysis, reports, video clips, data outputs, and technical insights produced under this Agreement shall be treated as strictly confidential and used solely for the Client's internal purposes.</p>
+              </div>
 
               <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{ipNum}.</span> Intellectual Property Rights</div>
               <p className="text-sm text-slate-700 mb-8">All match footage, training footage, video recordings, reports, analytics outputs, player data, databases, clips and any other materials produced, collected or generated by the Service Provider under this Agreement (collectively, the "Deliverables") shall be the exclusive property of the Client. The Client shall have unrestricted, irrevocable and royalty-free rights to use, reproduce, store, modify, distribute and archive the Deliverables for any internal purpose. The Service Provider shall not use, reproduce, disclose, commercialize or share any Deliverables with any third party without the Client's prior written consent.</p>
@@ -1528,6 +1533,15 @@ function ContractDocumentBody({ contract, client, company }) {
           </React.Fragment>
         )}
 
+        {/* Navy closing panel — warm, confident sign-off before the signatures. */}
+        <div className="rounded-lg px-6 py-5 mb-10" style={{ background:'var(--navy-deep)', WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}>
+          <p className="text-sm leading-relaxed" style={{ color:'#E6ECF7' }}>
+            Science of Sports is proud to partner with {client.companyName} and is committed to delivering
+            performance analysis of the highest professional standard throughout this Agreement.
+            <span className="font-semibold" style={{ color:'var(--cyan)' }}> Transforming matches into knowledge — together.</span>
+          </p>
+        </div>
+
         <div className="sos-pill mb-2" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}>Signatures</div>
         <p className="text-xs text-slate-500 mb-6">Executed by the duly authorised representatives of the Parties as of the dates set out below.</p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-10 text-sm">
@@ -1562,9 +1576,11 @@ function ContractDocumentBody({ contract, client, company }) {
           </div>
         </div>
 
+        {/* Signature SCIOS rainbow hairline directly above the footer band */}
+        <div className="sos-rainbow -mx-10 mt-12" />
         {/* Branded navy footer band with company details + SCIOS tagline */}
         <div
-          className="rounded-b-lg -mx-10 -mb-10 mt-12 px-10 py-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4"
+          className="rounded-b-lg -mx-10 -mb-10 px-10 py-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4"
           style={{ background: 'var(--navy-deep)', WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}
         >
           <div className="text-xs leading-relaxed" style={{ color:'#A9B6CC' }}>

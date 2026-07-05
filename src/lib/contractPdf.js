@@ -39,8 +39,11 @@ export function generateContractPdf({ contract, client, company }) {
   const BLACK = [30, 34, 45];       // #1E222D body colour
   const GREY = [102, 115, 128];     // secondary
   const SOFT_GREY = [79, 89, 99];   // About / detail text
-  const CHIP_BG = [231, 248, 252];  // light-cyan chip fill
+  const CHIP_BG = [231, 248, 252];  // light-cyan chip fill (Included)
+  const CHIP_GREEN_BG = [224, 246, 238]; // light-green chip fill (Complimentary)
+  const CHIP_GREEN_TX = [5, 150, 105];   // #059669 green chip text
   const BOX_BG = [245, 247, 249];   // subtle navy tint for the bank box
+  const LILAC_BG = [238, 240, 251];  // #EEF0FB — callout box fill (Confidentiality)
   const BOX_BORDER = [209, 217, 227];
   const FOOTER_GREY = [169, 182, 204]; // #A9B6CC
 
@@ -184,11 +187,19 @@ export function generateContractPdf({ contract, client, company }) {
   const drawRainbow = (topY) => {
     const segs = [[34, 199, 230], [37, 99, 235], [139, 92, 246], [236, 72, 153]];
     const segW = W / segs.length;
-    segs.forEach((c, i) => { doc.setFillColor(...c); doc.rect(i * segW, topY, segW, 3, 'F'); });
+    segs.forEach((c, i) => {
+      const x0 = i * segW;
+      // Last segment runs to the page edge so no rounding gap is left on the right.
+      const w = (i === segs.length - 1) ? (W - x0) : segW + 0.5;
+      doc.setFillColor(...c);
+      doc.rect(x0, topY, w, 3, 'F');
+    });
   };
 
   // Footer band, drawn on every page at the end.
   const drawFooter = () => {
+    // Signature SCIOS rainbow hairline sitting directly above the footer band.
+    drawRainbow(H - FOOTER_BAND - 3);
     doc.setFillColor(...NAVY);
     doc.rect(0, H - FOOTER_BAND, W, FOOTER_BAND, 'F');
     doc.setFont('helvetica', 'bold');
@@ -284,18 +295,53 @@ export function generateContractPdf({ contract, client, company }) {
     paras.forEach((p, i) => text(p, { size: 10, gap: i === paras.length - 1 ? 10 : 4 }));
   };
 
+  // Callout clause: pill header, then the paragraphs inside a lilac box with a
+  // navy left-bar (matches the on-screen Confidentiality callout). `lead` is a
+  // bold navy lead-in prepended to the first paragraph.
+  const calloutClause = (num, title, lead, ...paras) => {
+    ensure(40);
+    pillHeader(num, title);
+    const padX = 12, padY = 10, barW = 3, textW = maxW - padX * 2;
+    // Measure wrapped height first so the box sizes correctly.
+    doc.setFontSize(10);
+    let lineCount = 0;
+    paras.forEach((p, i) => {
+      const s = i === 0 ? `${lead} ${p}` : p;
+      lineCount += doc.splitTextToSize(s, textW).length;
+    });
+    const gaps = (paras.length - 1) * 4;
+    const boxH = padY * 2 + lineCount * 14 + gaps;
+    ensure(boxH + 6);
+    const boxTop = y;
+    doc.setFillColor(...LILAC_BG);
+    doc.roundedRect(M, boxTop, maxW, boxH, 4, 4, 'F');
+    doc.setFillColor(...NAVY);
+    doc.rect(M, boxTop, barW, boxH, 'F');
+    y = boxTop + padY;
+    paras.forEach((p, i) => {
+      if (i === 0) {
+        // Bold navy lead-in on the same first line, then the rest as body.
+        text(`${lead} ${p}`, { x: M + padX, width: textW, size: 10, gap: i === paras.length - 1 ? 0 : 4 });
+      } else {
+        text(p, { x: M + padX, width: textW, size: 10, gap: i === paras.length - 1 ? 0 : 4 });
+      }
+    });
+    y = boxTop + boxH + 10;
+  };
+
   // Small inline "Included"/"Complimentary" chip: light-cyan rounded rect with
   // cyan-deep bold text. `baselineY` is the text baseline of the line it sits on.
   const chip = (label, x, baselineY) => {
     const size = 8;
     const padX = 6;
     const chipH = 12;
+    const green = label === 'Complimentary';
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(size);
     const w = doc.getTextWidth(label) + padX * 2;
-    doc.setFillColor(...CHIP_BG);
+    doc.setFillColor(...(green ? CHIP_GREEN_BG : CHIP_BG));
     doc.roundedRect(x, baselineY - chipH + 3, w, chipH, 3, 3, 'F');
-    doc.setTextColor(...CYAN_DEEP);
+    doc.setTextColor(...(green ? CHIP_GREEN_TX : CYAN_DEEP));
     doc.text(label, x + padX, baselineY - 0.5);
     return x + w;
   };
@@ -375,8 +421,17 @@ export function generateContractPdf({ contract, client, company }) {
       const groupItems = lineItems.filter((i) => i.group === group);
       if (!groupItems.length) return;
       ensure(30);
-      // Cyan bold service-group subheading.
-      text(group, { size: 10, style: 'bold', color: CYAN_DEEP, gap: 4 });
+      // Service-group subheading: cyan accent bar + navy uppercase label
+      // (colour lives in the bar; the text stays navy and fully legible).
+      y += 10;
+      const ghBaseline = y;
+      doc.setFillColor(...CYAN);
+      doc.rect(M, ghBaseline - 8, 3, 10, 'F');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor(...NAVY);
+      doc.text(group.toUpperCase(), M + 8, ghBaseline);
+      y += 4;
       groupItems.forEach((i) => {
         const qtyNote = i.unit === 'per_match' ? ` (${i.qty} matches)` : i.unit === 'per_unit' ? ` (${i.qty})` : '';
         const chipLabel = i.bundledIncluded ? 'Included' : i.complimentary ? 'Complimentary' : i.unit === 'included' ? 'Included' : null;
@@ -404,7 +459,7 @@ export function generateContractPdf({ contract, client, company }) {
         text(i.detail, { size: 9.5, color: SOFT_GREY, gap: 2, x: itemX, width: itemW });
         if (i.key === 'platform_access') {
           const seats = platformSeatsSummary(services?.platform_access);
-          if (seats) text(`Access: ${seats} (exact users to be confirmed with the client).`, { size: 9, color: GREY, gap: 2, x: itemX + 10, width: itemW - 10 });
+          if (seats) text(`Access: ${seats} (exact users to be confirmed with the client).`, { size: 9, color: SOFT_GREY, gap: 2, x: itemX + 10, width: itemW - 10 });
         }
       });
       y += 6;
@@ -441,7 +496,7 @@ export function generateContractPdf({ contract, client, company }) {
     // qty on the right, thin rule under each row.
     doc.setFont('helvetica', 'normal');
     lineItems.forEach((i) => {
-      const qty = i.unit === 'flat' ? '—'
+      const qty = i.unit === 'flat' ? fmtMoney(i.amount, contract.currency)
         : (i.unit === 'included' || i.complimentary || i.bundledIncluded) ? 'Included'
         : String(i.qty);
       // Compose the service label; platform access carries a seats subline.
@@ -465,7 +520,7 @@ export function generateContractPdf({ contract, client, company }) {
       // Seats subline (grey).
       if (subLines.length) {
         doc.setFontSize(8.5);
-        doc.setTextColor(...GREY);
+        doc.setTextColor(...SOFT_GREY);
         ly += 1;
         subLines.forEach((ln) => { doc.text(ln, M + cellPadX, ly); ly += 11; });
       }
@@ -523,8 +578,9 @@ export function generateContractPdf({ contract, client, company }) {
     y = boxTop + boxH + 10;
   }
 
-  // --- Confidentiality & Data Protection -----------------------------------
-  clause(confidentialityNum, 'Confidentiality & Data Protection',
+  // --- Confidentiality & Data Protection (lilac callout) -------------------
+  calloutClause(confidentialityNum, 'Confidentiality & Data Protection',
+    'Confidentiality & GDPR.',
     'The Service Provider shall process personal data strictly in accordance with the GDPR, the applicable Cyprus data protection legislation (Law 125(I)/2018), and Regulation (EU) 2016/679, and solely on documented instructions from the Client and exclusively for the purposes of this Agreement.',
     "All match analysis, reports, video clips, data outputs, and technical insights produced under this Agreement shall be treated as strictly confidential and used solely for the Client's internal purposes.");
 
@@ -561,6 +617,29 @@ export function generateContractPdf({ contract, client, company }) {
   // --- Entire Agreement ----------------------------------------------------
   clause(entireAgreementNum, 'Entire Agreement & Amendments',
     'This Agreement constitutes the entire agreement between the Parties. Any amendment must be made in writing and signed by both Parties.');
+
+  // --- Navy closing panel — warm, confident sign-off before signatures. ----
+  {
+    const padX = 16, padY = 14, innerW = maxW - padX * 2;
+    const body = `Science of Sports is proud to partner with ${clientName} and is committed to delivering performance analysis of the highest professional standard throughout this Agreement.`;
+    const emph = 'Transforming matches into knowledge — together.';
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
+    const bodyLines = doc.splitTextToSize(body, innerW);
+    doc.setFont('helvetica', 'bold');
+    const emphLines = doc.splitTextToSize(emph, innerW);
+    const boxH = padY * 2 + bodyLines.length * 14 + 6 + emphLines.length * 14;
+    ensure(boxH + 12);
+    const boxTop = y;
+    doc.setFillColor(...NAVY);
+    doc.roundedRect(M, boxTop, maxW, boxH, 4, 4, 'F');
+    let ty = boxTop + padY;
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(230, 236, 247);
+    bodyLines.forEach((ln) => { ty += 10; doc.text(ln, M + padX, ty); ty += 4; });
+    ty += 6;
+    doc.setFont('helvetica', 'bold'); doc.setTextColor(...CYAN);
+    emphLines.forEach((ln) => { ty += 10; doc.text(ln, M + padX, ty); ty += 4; });
+    y = boxTop + boxH + 14;
+  }
 
   // --- SIGNATURES — two columns with real signature IMAGES. ----------------
   // Keep the whole block together; push to a fresh page if it wouldn't fit.

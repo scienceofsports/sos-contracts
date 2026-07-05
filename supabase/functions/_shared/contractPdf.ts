@@ -24,7 +24,10 @@ const BLACK = rgb(0.118, 0.133, 0.176);  // #1E222D (matches jsPDF body colour)
 const SOFT_GREY = rgb(0.31, 0.35, 0.39);
 const WHITE = rgb(1, 1, 1);
 const CHIP_BG = rgb(0.906, 0.973, 0.988);   // light-cyan chip fill (approx rgba(34,199,230,.15) on white)
+const CHIP_GREEN_BG = rgb(0.878, 0.965, 0.933); // light-green chip fill (Complimentary)
+const CHIP_GREEN_TX = rgb(0.020, 0.588, 0.412); // #059669 green chip text
 const BOX_BG = rgb(0.96, 0.968, 0.976);     // subtle navy tint for boxes
+const LILAC_BG = rgb(0.933, 0.941, 0.984);  // #EEF0FB — callout box fill (Confidentiality)
 const BOX_BORDER = rgb(0.82, 0.85, 0.89);
 const FOOTER_GREY = rgb(0.663, 0.714, 0.8); // #A9B6CC
 
@@ -201,7 +204,12 @@ export async function buildContractPdf(input: {
   // --- Rainbow strip helper (four coloured segments). -----------------------
   const drawRainbow = (pg: Any, topY: number, h = 3) => {
     const rsw = W / RAINBOW.length;
-    RAINBOW.forEach((col, i) => pg.drawRectangle({ x: i * rsw, y: topY - h, width: rsw, height: h, color: col }));
+    RAINBOW.forEach((col, i) => {
+      const x0 = i * rsw;
+      // Last segment runs to the page edge so no rounding gap is left on the right.
+      const w = (i === RAINBOW.length - 1) ? (W - x0) : rsw + 0.5;
+      pg.drawRectangle({ x: x0, y: topY - h, width: w, height: h, color: col });
+    });
   };
 
   // --- Full navy header band with two-logo lockup + cyan contract number. ---
@@ -283,6 +291,8 @@ export async function buildContractPdf(input: {
   // --- Footer band, drawn on every page. -----------------------------------
   const drawFooter = (pg: Any) => {
     pg.drawRectangle({ x: 0, y: 0, width: W, height: 38, color: NAVY });
+    // Signature SCIOS rainbow hairline directly above the footer band (y 38→41).
+    drawRainbow(pg, 41, 3);
     pg.drawText(companyName0, { x: M, y: 24, size: 7.5, font: bold, color: WHITE });
     const contactEmail = pick(co, 'contactEmail', 'contact_email') || 'info@scienceofsports.net';
     const reg = pick(co, 'registrationNumber', 'registration_number') || 'HE 449875';
@@ -368,6 +378,43 @@ export async function buildContractPdf(input: {
     ensure(40);
     pillHeader(num, title);
     paras.forEach((p, i) => text(p, { size: 10, gap: i === paras.length - 1 ? 10 : 4 }));
+  };
+
+  // Callout clause: pill header, then paragraphs inside a lilac box with a navy
+  // left-bar (mirrors the on-screen Confidentiality callout). `lead` is a bold
+  // navy lead-in prepended to the first paragraph.
+  const wrapMeasure = (str: string, size: number, width: number): number => {
+    const words = String(str ?? '').split(/\s+/);
+    let line = '', count = 0;
+    for (const w of words) {
+      const test = line ? line + ' ' + w : w;
+      if (font.widthOfTextAtSize(test, size) > width && line) { count++; line = w; }
+      else line = test;
+    }
+    if (line) count++;
+    return count;
+  };
+  const calloutClause = (num: number | null, title: string, lead: string, ...paras: Any[]) => {
+    ensure(40);
+    pillHeader(num, title);
+    const padX = 12, padY = 10, barW = 3, textW = maxW - padX * 2;
+    let lineCount = 0;
+    paras.forEach((p, i) => {
+      const s = i === 0 ? `${lead} ${p}` : p;
+      lineCount += wrapMeasure(s, 10, textW);
+    });
+    const gaps = (paras.length - 1) * 4;
+    const boxH = padY * 2 + lineCount * 14 + gaps;
+    ensure(boxH + 6);
+    const boxTop = y;
+    page.drawRectangle({ x: M, y: py(boxTop + boxH), width: maxW, height: boxH, color: LILAC_BG });
+    page.drawRectangle({ x: M, y: py(boxTop + boxH), width: barW, height: boxH, color: NAVY });
+    y = boxTop + padY;
+    paras.forEach((p, i) => {
+      const s = i === 0 ? `${lead} ${p}` : p;
+      text(s, { x: M + padX, width: textW, size: 10, gap: i === paras.length - 1 ? 0 : 4 });
+    });
+    y = boxTop + boxH + 10;
   };
 
   // --- Data prep -----------------------------------------------------------
@@ -456,9 +503,10 @@ export async function buildContractPdf(input: {
     const padX = 6;
     const w = font.widthOfTextAtSize(label, size) + padX * 2;
     const chipH = 13;
+    const green = label === 'Complimentary';
     // baselineY is the downward baseline of the text line the chip sits on.
-    page.drawRectangle({ x, y: py(baselineY + 3), width: w, height: chipH, color: CHIP_BG });
-    page.drawText(label, { x: x + padX, y: py(baselineY - 1.5), size, font: bold, color: CYAN_DEEP });
+    page.drawRectangle({ x, y: py(baselineY + 3), width: w, height: chipH, color: green ? CHIP_GREEN_BG : CHIP_BG });
+    page.drawText(label, { x: x + padX, y: py(baselineY - 1.5), size, font: bold, color: green ? CHIP_GREEN_TX : CYAN_DEEP });
     return x + w;
   };
 
@@ -470,8 +518,13 @@ export async function buildContractPdf(input: {
       const groupItems = lineItems.filter((i) => i.group === group);
       if (!groupItems.length) return;
       ensure(30);
-      // Cyan bold service-group subheading.
-      text(group, { size: 10, f: bold, color: CYAN_DEEP, gap: 4 });
+      // Service-group subheading: cyan accent bar + navy uppercase label
+      // (colour lives in the bar; the text stays navy and fully legible).
+      y += 10;
+      const ghBaseline = y;
+      page.drawRectangle({ x: M, y: py(ghBaseline + 2), width: 3, height: 10, color: CYAN });
+      page.drawText(group.toUpperCase(), { x: M + 8, y: py(ghBaseline), size: 9, font: bold, color: NAVY });
+      y += 4;
       groupItems.forEach((i) => {
         const qtyNote = i.unit === 'per_match' ? ` (${i.qty} matches)` : i.unit === 'per_unit' ? ` (${i.qty})` : '';
         const chipLabel = i.bundledIncluded ? 'Included' : i.complimentary ? 'Complimentary' : i.unit === 'included' ? 'Included' : null;
@@ -494,7 +547,7 @@ export async function buildContractPdf(input: {
         text(i.detail, { size: 9.5, color: SOFT_GREY, gap: 2, x: itemX, width: itemW });
         if (i.key === 'platform_access') {
           const seats = platformSeatsSummary(services?.platform_access);
-          if (seats) text(`Access: ${seats} (exact users to be confirmed with the client).`, { size: 9, color: GREY, gap: 2, x: itemX + 10, width: itemW - 10 });
+          if (seats) text(`Access: ${seats} (exact users to be confirmed with the client).`, { size: 9, color: SOFT_GREY, gap: 2, x: itemX + 10, width: itemW - 10 });
         }
       });
       y += 6;
@@ -539,7 +592,7 @@ export async function buildContractPdf(input: {
 
     // Body rows.
     lineItems.forEach((i) => {
-      const qty = i.unit === 'flat' ? '—'
+      const qty = i.unit === 'flat' ? fmtMoney(i.amount, currency)
         : (i.unit === 'included' || i.complimentary || i.bundledIncluded) ? 'Included'
         : String(i.qty);
       const seats = (i.key === 'platform_access') ? platformSeatsSummary(services?.platform_access) : '';
@@ -555,7 +608,7 @@ export async function buildContractPdf(input: {
       for (const ln of labelLines) { page.drawText(ln, { x: M + cellPadX, y: py(ly), size: 9.5, font, color: BLACK }); ly += 12; }
       if (subLines.length) {
         ly += 1;
-        for (const ln of subLines) { page.drawText(ln, { x: M + cellPadX, y: py(ly), size: 8.5, font, color: GREY }); ly += 11; }
+        for (const ln of subLines) { page.drawText(ln, { x: M + cellPadX, y: py(ly), size: 8.5, font, color: SOFT_GREY }); ly += 11; }
       }
       // QTY right-aligned (bold navy when "Included").
       const qf = qty === 'Included' ? bold : font;
@@ -608,8 +661,9 @@ export async function buildContractPdf(input: {
     }
   }
 
-  // --- Confidentiality & Data Protection -----------------------------------
-  clause(confidentialityNum, 'Confidentiality & Data Protection',
+  // --- Confidentiality & Data Protection (lilac callout) -------------------
+  calloutClause(confidentialityNum, 'Confidentiality & Data Protection',
+    'Confidentiality & GDPR.',
     'The Service Provider shall process personal data strictly in accordance with the GDPR, the applicable Cyprus data protection legislation (Law 125(I)/2018), and Regulation (EU) 2016/679, and solely on documented instructions from the Client and exclusively for the purposes of this Agreement.',
     "All match analysis, reports, video clips, data outputs, and technical insights produced under this Agreement shall be treated as strictly confidential and used solely for the Client's internal purposes.");
 
@@ -665,6 +719,27 @@ export async function buildContractPdf(input: {
       }
       y += 6;
     }
+  }
+
+  // --- Navy closing panel — warm, confident sign-off before signatures. ----
+  {
+    const padX = 16, padY = 14, innerW = maxW - padX * 2;
+    const body = `Science of Sports is proud to partner with ${clientName0} and is committed to delivering performance analysis of the highest professional standard throughout this Agreement.`;
+    const emph = 'Transforming matches into knowledge — together.';
+    const bodyLc = wrapMeasure(body, 10, innerW);
+    const emphLc = (() => {
+      const words = emph.split(/\s+/); let line = '', count = 0;
+      for (const w of words) { const t = line ? line + ' ' + w : w; if (bold.widthOfTextAtSize(t, 10) > innerW && line) { count++; line = w; } else line = t; }
+      if (line) count++; return count;
+    })();
+    const boxH = padY * 2 + bodyLc * 14 + 6 + emphLc * 14;
+    ensure(boxH + 12);
+    const boxTop = y;
+    page.drawRectangle({ x: M, y: py(boxTop + boxH), width: maxW, height: boxH, color: NAVY });
+    y = boxTop + padY;
+    text(body, { x: M + padX, width: innerW, size: 10, color: rgb(0.902, 0.925, 0.969), gap: 6 });
+    text(emph, { x: M + padX, width: innerW, size: 10, f: bold, color: CYAN });
+    y = boxTop + boxH + 14;
   }
 
   // --- SIGNATURES — two columns with real signature IMAGES. ----------------
