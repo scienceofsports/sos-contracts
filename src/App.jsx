@@ -1358,12 +1358,10 @@ function ContractDocumentBody({ contract, client, company }) {
         </p>
         <p className="text-sm text-slate-700 mb-8">The above are hereinafter jointly referred to as the "Parties".</p>
 
-        {/* About the Service Provider — informational credibility box, kept OUTSIDE
-            the numbered-clause IIFE so it never shifts clause numbers. */}
-        <div
-          className="rounded-lg mb-8 px-5 py-4"
-          style={{ background:'rgba(10,26,63,0.04)', border:'1px solid var(--border)', WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}
-        >
+        {/* About the Service Provider — informational credibility section, kept OUTSIDE
+            the numbered-clause IIFE so it never shifts clause numbers. Rendered as a
+            clean section (no tinted box) to match the Purpose clause below. */}
+        <div className="mb-8">
           <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}>About the Service Provider</div>
           <p className="text-sm text-slate-700 mb-3">Science of Sports (C.C. Science of Sports Ltd, HE 449875) is Cyprus's leading football intelligence company. Built by UEFA-qualified analysts and engineers, it operates the first fully integrated football analytics platform originating from Cyprus, serving federations, academies, coaches, scouts and players.</p>
           <ul className="text-sm text-slate-700 space-y-1.5 list-disc pl-5">
@@ -1393,7 +1391,40 @@ function ContractDocumentBody({ contract, client, company }) {
           return (
             <React.Fragment>
               <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{purposeNum}.</span> Purpose</div>
-              <p className="text-sm text-slate-700 mb-8 whitespace-pre-line">{contract.description || 'The purpose of this Agreement is to define the terms of cooperation between the Parties for the provision of performance analysis and related services by the Service Provider to the Client.'}</p>
+              {lineItems.length > 0 ? (
+                <div className="mb-8">
+                  <p className="text-sm text-slate-700 mb-4">The Service Provider will provide the Client with the following services:</p>
+                  {SERVICE_GROUPS.map(group => {
+                    const groupItems = lineItems.filter(i => i.group === group);
+                    if (!groupItems.length) return null;
+                    return (
+                      <div key={group} className="mb-5 last:mb-0">
+                        <div className="text-sm font-semibold mb-2" style={{ color:'var(--cyan-deep)' }}>{group}</div>
+                        <div className="space-y-2">
+                          {groupItems.map(i => {
+                            const qtyNote = i.unit === 'per_match' ? ` (${i.qty} matches)` : i.unit === 'per_unit' ? ` (${i.qty})` : '';
+                            const chip = i.bundledIncluded ? 'Included' : i.complimentary ? 'Complimentary' : i.unit === 'included' ? 'Included' : null;
+                            return (
+                              <div key={i.key} className="text-sm text-slate-700">
+                                <span className="font-medium" style={{ color:'var(--navy-deep)' }}>{i.label}</span>
+                                {qtyNote && <span className="text-slate-500">{qtyNote}</span>}
+                                {chip && <span className="sos-chip sos-chip-cyan ml-2 align-middle" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}>{chip}</span>}
+                                <span className="text-slate-500"> — {i.detail}</span>
+                                {i.key === 'platform_access' && platformSeatsSummary(contract.services.platform_access) && (
+                                  <div className="text-xs text-slate-400 mt-0.5">Access: {platformSeatsSummary(contract.services.platform_access)} (exact users to be confirmed with the client)</div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <p className="text-sm text-slate-700 mt-4">{contract.slaHours || 24}-hour SLA on delivery of key analytical outputs after each match.</p>
+                </div>
+              ) : (
+                <p className="text-sm text-slate-700 mb-8 whitespace-pre-line">{contract.description || 'The purpose of this Agreement is to define the terms of cooperation between the Parties for the provision of performance analysis and related services by the Service Provider to the Client.'}</p>
+              )}
 
               {scopeNum && (
                 <React.Fragment>
@@ -2447,14 +2478,18 @@ function normalizeSnapshot(snapshot) {
     address: pick(cl, 'address'),
     vatNumber: pick(cl, 'vatNumber', 'vat_number'),
     registrationNumber: pick(cl, 'registrationNumber', 'registration_number'),
+    logoBase64: pick(cl, 'logoBase64', 'logo_url'),
   };
   const company = {
     name: pick(co, 'name'),
-    logo: pick(co, 'logo'),
+    logo: pick(co, 'logo', 'logo_url'),
     registeredAddress: pick(co, 'registeredAddress', 'registered_address'),
     contactEmail: pick(co, 'contactEmail', 'contact_email'),
     vatNumber: pick(co, 'vatNumber', 'vat_number'),
     registrationNumber: pick(co, 'registrationNumber', 'registration_number'),
+    signatoryName: pick(co, 'signatoryName', 'signatory_name'),
+    signatoryTitle: pick(co, 'signatoryTitle', 'signatory_title'),
+    signatorySignature: pick(co, 'signatorySignature', 'signatory_signature'),
   };
   return { contract, client, company };
 }
@@ -2562,10 +2597,11 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
   const [busy, setBusy] = useState(false);
   const [signedResult, setSignedResult] = useState(null);
 
-  const [editingClientDetails, setEditingClientDetails] = useState(false);
   const [clientDetailsForm, setClientDetailsForm] = useState(null);
-  const [clientDetailsErrors, setClientDetailsErrors] = useState({});
   const [savingClientDetails, setSavingClientDetails] = useState(false);
+  // Combined validation errors for the "Confirm Agreement Summary" step
+  // (company details + designated contact + finance) — all mandatory.
+  const [confirmErrors, setConfirmErrors] = useState({});
 
   // Client-provided designated contact person + finance contact (captured on
   // screen 3, stored on the contract via record-signature). Session-only state.
@@ -2584,6 +2620,16 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
       window.open(res.downloadUrl, '_blank');
     } catch (err) {
       toast.push(err.message || 'Could not download your certificate.', 'error');
+    }
+  };
+
+  // Re-download the fully-signed contract PDF (both parties' signatures).
+  const downloadSignedContract = async () => {
+    try {
+      const res = await signingService.getSignedContract(reqToken);
+      window.open(res.downloadUrl, '_blank');
+    } catch (err) {
+      toast.push(err.message || 'Could not download the signed contract.', 'error');
     }
   };
 
@@ -2648,34 +2694,49 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
     })();
   }, [contractId, isPortable, portablePayload, isServer, reqToken]);
 
-  const saveClientDetails = async () => {
+  // Validate + persist the company details AND designated/finance contacts, then
+  // advance to the signature screen. All fields are mandatory before continuing.
+  const continueToSignature = async () => {
+    const cd = clientDetailsForm || {};
     const e = {};
-    if (!clientDetailsForm.companyName.trim()) e.companyName = 'Company name is required.';
-    setClientDetailsErrors(e);
+    // Client company details — all required.
+    if (!cd.companyName || !cd.companyName.trim()) e.companyName = 'Company name is required.';
+    if (!cd.address || !cd.address.trim()) e.address = 'Registered address is required.';
+    if (!cd.vatNumber || !cd.vatNumber.trim()) e.vatNumber = 'VAT number is required.';
+    if (!cd.registrationNumber || !cd.registrationNumber.trim()) e.registrationNumber = 'Registration number is required.';
+    // Designated contact — all required.
+    if (!contactForm.contactName.trim()) e.contactName = 'Contact name is required.';
+    if (!contactForm.contactRole.trim()) e.contactRole = 'Role is required.';
+    if (!contactForm.contactPhone.trim()) e.contactPhone = 'Phone is required.';
+    if (!contactForm.contactEmail.trim()) e.contactEmail = 'Email is required.';
+    else if (!validateEmail(contactForm.contactEmail)) e.contactEmail = 'Enter a valid email.';
+    // Finance contact — name + email required.
+    if (!contactForm.financeName.trim()) e.financeName = 'Finance name is required.';
+    if (!contactForm.financeEmail.trim()) e.financeEmail = 'Finance email is required.';
+    else if (!validateEmail(contactForm.financeEmail)) e.financeEmail = 'Enter a valid email.';
+    setConfirmErrors(e);
     if (Object.keys(e).length) return;
+
     setSavingClientDetails(true);
     try {
       // Portable AND server mode: the signer has no DB auth, so edits are
       // session-only — they display on screen but don't write the client record.
       if (isPortable || isServer) {
-        const updated = { ...client, companyName: clientDetailsForm.companyName.trim(), address: clientDetailsForm.address.trim(), vatNumber: clientDetailsForm.vatNumber.trim() || null, registrationNumber: clientDetailsForm.registrationNumber.trim() || null };
+        const updated = { ...client, companyName: cd.companyName.trim(), address: cd.address.trim(), vatNumber: cd.vatNumber.trim(), registrationNumber: cd.registrationNumber.trim() };
         setClient(updated);
         setSigCompany(updated.companyName);
-        setEditingClientDetails(false);
-        toast.push('Details updated for this session — they will be included on your signed contract.', 'success');
-        return;
+      } else {
+        const updated = await clientService.update(client.id, {
+          companyName: cd.companyName.trim(),
+          address: cd.address.trim(),
+          vatNumber: cd.vatNumber.trim(),
+          registrationNumber: cd.registrationNumber.trim(),
+        });
+        setClient(updated);
+        setSigCompany(updated.companyName);
+        await contractService.addAuditEntry(contract.id, { type:'client_update', message:`Client updated their company details via the signing link (${updated.companyName})`, by: null });
       }
-      const updated = await clientService.update(client.id, {
-        companyName: clientDetailsForm.companyName.trim(),
-        address: clientDetailsForm.address.trim(),
-        vatNumber: clientDetailsForm.vatNumber.trim() || null,
-        registrationNumber: clientDetailsForm.registrationNumber.trim() || null,
-      });
-      setClient(updated);
-      setSigCompany(updated.companyName);
-      await contractService.addAuditEntry(contract.id, { type:'client_update', message:`Client updated their company details via the signing link (${updated.companyName})`, by: null });
-      setEditingClientDetails(false);
-      toast.push('Company details updated.', 'success');
+      setScreen(4);
     } catch (err) {
       toast.push(err.message, 'error');
     } finally {
@@ -2716,7 +2777,10 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
           <div className="text-4xl mb-4">✅</div>
           <div className="font-heading mb-2">This contract has already been signed.</div>
           <p className="text-sm text-slate-500 mb-5">{company ? `Contact ${company.contactEmail} if you need another copy.` : 'Contact the sender if you need another copy.'}</p>
-          <button type="button" onClick={downloadCertificate} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium sos-btn-cyan">⬇ Download your signed certificate (PDF)</button>
+          <div className="flex flex-col sm:flex-row gap-3 justify-center">
+            <button type="button" onClick={downloadSignedContract} className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium sos-btn-cyan">⬇ Download signed contract (PDF)</button>
+            <button type="button" onClick={downloadCertificate} className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium border border-[var(--border)] hover:bg-slate-50">⬇ Download certificate</button>
+          </div>
         </div>
       </div>
     );
@@ -2888,9 +2952,13 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
         financeName: clean(contactForm.financeName),
         financeEmail: cleanEmail(contactForm.financeEmail),
       };
-      // Reflect the captured contact on the in-memory contract so the executed
-      // document (ContractDocumentBody) renders the Designated Contact block.
-      setContract(c => ({ ...(c || {}), ...contactPayload }));
+      // Reflect the captured contact + signer details on the in-memory contract
+      // so the executed document (ContractDocumentBody / downloaded PDF) shows
+      // the Designated Contact block AND fills the CLIENT signature column.
+      setContract(c => ({
+        ...(c || {}), ...contactPayload,
+        signedAt, signerName: sigName, signerTitle: sigTitle, signerCompany: sigCompany,
+      }));
 
       // CAPTURE THE SIGNATURE as a data URL (typed name, drawn canvas, or uploaded image).
       let signatureImageBase64 = null;
@@ -2974,7 +3042,15 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
     <div className="min-h-screen bg-[var(--navy-deep)] py-8 px-4">
       <div className="max-w-2xl mx-auto">
         <div className="text-center mb-6">
-          <img src="Logo-scios-dark.png" alt="Science of Sports" className="h-10 w-auto object-contain mx-auto mb-2" />
+          <div className="flex items-center justify-center gap-4 mb-2">
+            <img src="Logo-scios-dark.png" alt="Science of Sports" className="h-10 w-auto object-contain" />
+            {client?.logoBase64 && (
+              <React.Fragment>
+                <span className="text-[var(--cyan)] text-lg">×</span>
+                <img src={client.logoBase64} alt={client.companyName} className="h-10 w-auto object-contain" />
+              </React.Fragment>
+            )}
+          </div>
           <div className="text-white font-display">SOS Contracts</div>
           <div className="text-slate-400 text-xs mt-1">Secure Electronic Signature</div>
           {client?.companyName && <div className="text-[var(--cyan)] text-xs mt-1">Prepared for {client.companyName}</div>}
@@ -3071,69 +3147,51 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
                   <div className="flex justify-between"><span className="text-slate-500">Governed by</span><span>{contract.governingLaw}</span></div>
                 </div>
 
+                <p className="text-xs text-slate-500 mt-4">Please confirm your company details and provide your contact people. All fields are required to proceed.</p>
+
                 <div className="mt-4 border border-[var(--border)] rounded-lg p-4">
-                  <div className="flex items-center justify-between mb-1">
-                    <div className="text-sm font-medium">Your Company Details</div>
-                    {!editingClientDetails && <button onClick={()=>setEditingClientDetails(true)} className="text-xs text-blue-600 hover:underline">Edit</button>}
+                  <div className="text-sm font-medium mb-3">Your Company Details</div>
+                  <Field label="Company Name" required error={confirmErrors.companyName}>
+                    <input value={clientDetailsForm.companyName} onChange={e=>setClientDetailsForm(f=>({...f,companyName:e.target.value}))} className={inputCls(confirmErrors.companyName)} />
+                  </Field>
+                  <Field label="Registered Address" required error={confirmErrors.address}>
+                    <input value={clientDetailsForm.address} onChange={e=>setClientDetailsForm(f=>({...f,address:e.target.value}))} className={inputCls(confirmErrors.address)} />
+                  </Field>
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field label="VAT Number" required error={confirmErrors.vatNumber}>
+                      <input value={clientDetailsForm.vatNumber} onChange={e=>setClientDetailsForm(f=>({...f,vatNumber:e.target.value}))} className={inputCls(confirmErrors.vatNumber)} />
+                    </Field>
+                    <Field label="Registration Number" required error={confirmErrors.registrationNumber}>
+                      <input value={clientDetailsForm.registrationNumber} onChange={e=>setClientDetailsForm(f=>({...f,registrationNumber:e.target.value}))} className={inputCls(confirmErrors.registrationNumber)} />
+                    </Field>
                   </div>
-                  {!editingClientDetails ? (
-                    <div className="text-sm text-slate-600 space-y-1">
-                      <div>{client.companyName}</div>
-                      {client.address && <div className="text-xs text-slate-400">{client.address}</div>}
-                      <div className="text-xs text-slate-400">
-                        {client.vatNumber ? `VAT: ${client.vatNumber}` : 'VAT: —'} · {client.registrationNumber ? `Reg. No: ${client.registrationNumber}` : 'Reg. No: —'}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="mt-2">
-                      <p className="text-xs text-slate-500 mb-3">Correct your company details below if anything is wrong — these are saved to your record and reflected on the contract document. This does not change the deal terms above.</p>
-                      <Field label="Company Name" required error={clientDetailsErrors.companyName}>
-                        <input value={clientDetailsForm.companyName} onChange={e=>setClientDetailsForm(f=>({...f,companyName:e.target.value}))} className={inputCls(clientDetailsErrors.companyName)} />
-                      </Field>
-                      <Field label="Registered Address">
-                        <input value={clientDetailsForm.address} onChange={e=>setClientDetailsForm(f=>({...f,address:e.target.value}))} className={inputCls(false)} />
-                      </Field>
-                      <div className="grid grid-cols-2 gap-3">
-                        <Field label="VAT Number">
-                          <input value={clientDetailsForm.vatNumber} onChange={e=>setClientDetailsForm(f=>({...f,vatNumber:e.target.value}))} className={inputCls(false)} />
-                        </Field>
-                        <Field label="Registration Number">
-                          <input value={clientDetailsForm.registrationNumber} onChange={e=>setClientDetailsForm(f=>({...f,registrationNumber:e.target.value}))} className={inputCls(false)} />
-                        </Field>
-                      </div>
-                      <div className="flex justify-end gap-2">
-                        <button onClick={()=>{ setEditingClientDetails(false); setClientDetailsForm({ companyName: client.companyName || '', address: client.address || '', vatNumber: client.vatNumber || '', registrationNumber: client.registrationNumber || '' }); }} className="px-3 py-1.5 text-xs rounded-lg border border-[var(--border)] hover:bg-slate-50">Cancel</button>
-                        <button disabled={savingClientDetails} onClick={saveClientDetails} className="px-3 py-1.5 text-xs rounded-lg sos-btn-cyan">{savingClientDetails ? 'Saving…' : 'Save Details'}</button>
-                      </div>
-                    </div>
-                  )}
                 </div>
 
                 <div className="mt-4 border border-[var(--border)] rounded-lg p-4">
                   <div className="text-sm font-medium mb-1">Your Designated Contact Person</div>
                   <p className="text-xs text-slate-500 mb-3">Please provide the main person we'll coordinate with for operations and communication, and your finance contact for invoicing.</p>
-                  <Field label="Contact Name">
-                    <input value={contactForm.contactName} onChange={e=>setContact('contactName', e.target.value)} className={inputCls(false)} placeholder="e.g. Maria Georgiou" />
+                  <Field label="Contact Name" required error={confirmErrors.contactName}>
+                    <input value={contactForm.contactName} onChange={e=>setContact('contactName', e.target.value)} className={inputCls(confirmErrors.contactName)} placeholder="e.g. Maria Georgiou" />
                   </Field>
                   <div className="grid grid-cols-2 gap-3">
-                    <Field label="Role / Position">
-                      <input value={contactForm.contactRole} onChange={e=>setContact('contactRole', e.target.value)} className={inputCls(false)} placeholder="e.g. Technical Director" />
+                    <Field label="Role / Position" required error={confirmErrors.contactRole}>
+                      <input value={contactForm.contactRole} onChange={e=>setContact('contactRole', e.target.value)} className={inputCls(confirmErrors.contactRole)} placeholder="e.g. Technical Director" />
                     </Field>
-                    <Field label="Phone">
-                      <input value={contactForm.contactPhone} onChange={e=>setContact('contactPhone', e.target.value)} className={inputCls(false)} />
+                    <Field label="Phone" required error={confirmErrors.contactPhone}>
+                      <input value={contactForm.contactPhone} onChange={e=>setContact('contactPhone', e.target.value)} className={inputCls(confirmErrors.contactPhone)} />
                     </Field>
                   </div>
-                  <Field label="Email" error={contactForm.contactEmail && !validateEmail(contactForm.contactEmail) ? 'Enter a valid email.' : undefined}>
-                    <input type="email" value={contactForm.contactEmail} onChange={e=>setContact('contactEmail', e.target.value)} className={inputCls(contactForm.contactEmail && !validateEmail(contactForm.contactEmail))} placeholder="contact@yourclub.com" />
+                  <Field label="Email" required error={confirmErrors.contactEmail}>
+                    <input type="email" value={contactForm.contactEmail} onChange={e=>setContact('contactEmail', e.target.value)} className={inputCls(confirmErrors.contactEmail)} placeholder="contact@yourclub.com" />
                   </Field>
                   <div className="mt-3 pt-3 border-t border-[var(--border)]">
-                    <div className="text-xs font-medium text-slate-600 mb-2">Finance / Accounts Contact (optional)</div>
+                    <div className="text-xs font-medium text-slate-600 mb-2">Finance / Accounts Contact</div>
                     <div className="grid grid-cols-2 gap-3">
-                      <Field label="Name">
-                        <input value={contactForm.financeName} onChange={e=>setContact('financeName', e.target.value)} className={inputCls(false)} />
+                      <Field label="Name" required error={confirmErrors.financeName}>
+                        <input value={contactForm.financeName} onChange={e=>setContact('financeName', e.target.value)} className={inputCls(confirmErrors.financeName)} />
                       </Field>
-                      <Field label="Email" error={contactForm.financeEmail && !validateEmail(contactForm.financeEmail) ? 'Enter a valid email.' : undefined}>
-                        <input type="email" value={contactForm.financeEmail} onChange={e=>setContact('financeEmail', e.target.value)} className={inputCls(contactForm.financeEmail && !validateEmail(contactForm.financeEmail))} placeholder="finance@yourclub.com" />
+                      <Field label="Email" required error={confirmErrors.financeEmail}>
+                        <input type="email" value={contactForm.financeEmail} onChange={e=>setContact('financeEmail', e.target.value)} className={inputCls(confirmErrors.financeEmail)} placeholder="finance@yourclub.com" />
                       </Field>
                     </div>
                   </div>
@@ -3143,7 +3201,7 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
                   <button onClick={()=>setScreen(2)} className="px-4 py-2 text-sm rounded-lg border border-[var(--border)] hover:bg-slate-50">Back</button>
                   <div className="flex items-center gap-2">
                     {isServer && <button type="button" onClick={()=>setShowDeclinePanel(true)} className="px-4 py-2.5 text-sm rounded-lg border border-[var(--border)] text-slate-600 hover:bg-slate-50 transition">Decline / Request changes</button>}
-                    <button onClick={()=>setScreen(4)} className="px-5 py-2.5 sos-btn-cyan rounded-lg text-sm font-medium transition">Continue to Signature</button>
+                    <button disabled={savingClientDetails} onClick={continueToSignature} className="px-5 py-2.5 sos-btn-cyan rounded-lg text-sm font-medium transition disabled:opacity-50">{savingClientDetails ? 'Saving…' : 'Continue to Signature'}</button>
                   </div>
                 </div>
                 {isServer && showDeclinePanel && <DeclinePanel reason={declineReason} setReason={setDeclineReason} onCancel={()=>{ setShowDeclinePanel(false); setDeclineReason(''); }} onConfirm={submitDecline} busy={decliningBusy} />}
@@ -3260,8 +3318,8 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
                   <React.Fragment>
                     <p className="text-sm text-slate-600 mb-4">Thank you — this contract is now signed. A confirmation email with your <strong>Certificate of Completion (PDF)</strong> has been sent to you. You can also download a copy of the agreement now:</p>
                     <div className="flex flex-col sm:flex-row gap-3 justify-center mb-6">
-                      <button type="button" onClick={()=>downloadContractPdf({ contract, client, company })} className="px-4 py-2 border border-[var(--border)] rounded-lg text-sm hover:bg-slate-50 inline-flex items-center justify-center gap-1">⬇ Download contract (PDF)</button>
-                      <button type="button" onClick={downloadCertificate} className="px-4 py-2 rounded-lg text-sm font-medium sos-btn-cyan inline-flex items-center justify-center gap-1">⬇ Download your signed certificate (PDF)</button>
+                      <button type="button" onClick={downloadSignedContract} className="px-4 py-2 rounded-lg text-sm font-medium sos-btn-cyan inline-flex items-center justify-center gap-1">⬇ Download signed contract (PDF)</button>
+                      <button type="button" onClick={downloadCertificate} className="px-4 py-2 border border-[var(--border)] rounded-lg text-sm hover:bg-slate-50 inline-flex items-center justify-center gap-1">⬇ Download certificate</button>
                     </div>
                   </React.Fragment>
                 ) : isPortable ? (

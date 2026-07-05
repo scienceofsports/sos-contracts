@@ -14,6 +14,7 @@ import { hashDocument } from '../_shared/evidence.ts';
 import { sendEmail, signedNotificationEmail, signerConfirmationEmail } from '../_shared/email.ts';
 import { appendEvent } from '../_shared/audit.ts';
 import { buildCertificate } from '../_shared/certificate.ts';
+import { buildContractPdf } from '../_shared/contractPdf.ts';
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return handleOptions();
@@ -175,6 +176,28 @@ Deno.serve(async (req) => {
       // Base64 the PDF for email attachments.
       const pdfB64 = btoa(Array.from(pdfBytes).map((b) => String.fromCharCode(b)).join(''));
       const attachments = [{ filename: `Certificate - ${contractNumber || contractTitle}.pdf`, content: pdfB64 }];
+
+      // Also build the fully-executed (dual-signed) contract PDF, store it at a
+      // deterministic path in the contract-attachments bucket (so it can be
+      // re-downloaded via get-signed-contract), and attach it to every email.
+      try {
+        const { bytes: contractPdfBytes } = await buildContractPdf({
+          snapshot: snap,
+          signer: {
+            name: signerName, title: signerTitle ?? '', company: signerCompany ?? '',
+            email: request.signer_email, signedAt,
+          },
+          signatureImageBytes: sigBytes,
+        });
+        const signedContractPath = `${request.contract_id}/${request.id}-signed-contract.pdf`;
+        await admin.storage.from('contract-attachments').upload(
+          signedContractPath, contractPdfBytes, { contentType: 'application/pdf', upsert: true },
+        );
+        const contractB64 = btoa(Array.from(contractPdfBytes).map((b) => String.fromCharCode(b)).join(''));
+        attachments.push({ filename: `Signed Contract - ${contractNumber || contractTitle}.pdf`, content: contractB64 });
+      } catch (contractPdfErr) {
+        console.error('signed contract PDF generation failed:', contractPdfErr);
+      }
 
       // (a) Confirmation to the SIGNER.
       try {

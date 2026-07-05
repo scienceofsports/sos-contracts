@@ -52,6 +52,9 @@ export const signingService = {
   // short-lived signed URL in { downloadUrl }).
   getCertificate: async (token) => invoke('get-certificate', { token }),
 
+  // PUBLIC: re-download the signed CONTRACT PDF (both parties' signatures).
+  getSignedContract: async (token) => invoke('get-signed-contract', { token }),
+
   // PUBLIC: decline the contract / request changes (optional reason).
   decline: async (token, reason) =>
     invoke('decline-signing-request', { token, reason }),
