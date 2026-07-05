@@ -3,10 +3,12 @@
 // human-readable contract, generated AFTER signing so it carries BOTH parties'
 // signatures (SOS authorised signatory + the client's actual drawn signature).
 //
-// This mirrors the client-side jsPDF layout in src/lib/contractPdf.js and the
-// canonical ContractDocumentBody in App.jsx — same clause wording, same
-// structure — but embeds the real signature images and freezes the signed
-// document for emailing + re-download.
+// This mirrors the canonical ContractDocumentBody in App.jsx — same clause
+// wording, same structure, and now the same PREMIUM LOOK: navy header band with
+// the two-logo lockup, a rainbow hairline, navy "pill" section headers with
+// cyan clause numbers, cyan service-group subheadings, "Included" chips, a
+// tinted bank-details box, a two-column signature block with real signature
+// IMAGES, and a navy footer with the cyan italic tagline.
 //
 // The snapshot is the FROZEN document_snapshot: raw DB rows (snake_case). A
 // small `pick()` helper reads snake OR camel so this stays robust.
@@ -16,9 +18,18 @@ import { sha256Hex } from './evidence.ts';
 
 const NAVY = rgb(0.039, 0.102, 0.247);   // #0A1A3F
 const CYAN = rgb(0.133, 0.780, 0.902);   // #22C7E6
+const CYAN_DEEP = rgb(0.059, 0.710, 0.839); // #0FB5D6 (chip text / subheadings)
 const GREY = rgb(0.4, 0.45, 0.5);
 const BLACK = rgb(0.118, 0.133, 0.176);  // #1E222D (matches jsPDF body colour)
 const SOFT_GREY = rgb(0.31, 0.35, 0.39);
+const WHITE = rgb(1, 1, 1);
+const CHIP_BG = rgb(0.906, 0.973, 0.988);   // light-cyan chip fill (approx rgba(34,199,230,.15) on white)
+const BOX_BG = rgb(0.96, 0.968, 0.976);     // subtle navy tint for boxes
+const BOX_BORDER = rgb(0.82, 0.85, 0.89);
+const FOOTER_GREY = rgb(0.663, 0.714, 0.8); // #A9B6CC
+
+// Rainbow strip segments (cyan #22C7E6, blue #2563EB, purple #8B5CF6, pink #EC4899)
+const RAINBOW = [rgb(0.133, 0.780, 0.902), rgb(0.145, 0.388, 0.922), rgb(0.545, 0.361, 0.965), rgb(0.925, 0.282, 0.6)];
 
 // deno-lint-ignore no-explicit-any
 type Any = any;
@@ -125,9 +136,11 @@ function platformSeatsSummary(svc: Any): string {
 function dataUrlToBytes(dataUrl: Any): Uint8Array | null {
   try {
     if (!dataUrl || typeof dataUrl !== 'string') return null;
-    const b64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
+    // Accept full data URLs, bare base64, and tolerate whitespace/newlines.
+    let b64 = dataUrl.includes(',') ? dataUrl.slice(dataUrl.indexOf(',') + 1) : dataUrl;
+    b64 = b64.replace(/\s/g, '');
     if (!b64) return null;
-    return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    return Uint8Array.from(atob(b64), (ch) => ch.charCodeAt(0));
   } catch (_) {
     return null;
   }
@@ -150,12 +163,14 @@ export async function buildContractPdf(input: {
 
   const W = 595, H = 842;               // A4 portrait
   const M = 50;
-  const CONTENT_TOP = 92;               // below the header band
-  const BOTTOM = 60;                    // above the footer band
+  const HEADER_BAND = 78;               // navy band height on page 1
+  const CONTENT_TOP_P1 = 118;           // below the full header band + rainbow (page 1)
+  const CONTENT_TOP_REST = 58;          // below the slim running header (pages 2+)
+  const BOTTOM = 52;                    // above the footer band
   const maxW = W - M * 2;
 
   let page = pdf.addPage([W, H]);
-  let y = CONTENT_TOP;
+  let y = CONTENT_TOP_P1;
 
   // Embed a base64 data-URL image, trying PNG then JPG. Returns null on failure.
   async function embedImage(dataUrl: Any) {
@@ -176,34 +191,105 @@ export async function buildContractPdf(input: {
     }
   }
 
-  // --- Header band, drawn on every page. -----------------------------------
+  // --- Header images (embedded once, reused on the page-1 lockup). ----------
   const contractNumber = pick(c, 'contractNumber', 'contract_number') || '';
-  const drawHeader = (pg: Any) => {
-    pg.drawRectangle({ x: 0, y: H - 62, width: W, height: 62, color: NAVY });
-    pg.drawText('SCIENCE OF SPORTS', { x: M, y: H - 38, size: 16, font: bold, color: rgb(1, 1, 1) });
+  const companyName0 = co.name || 'C.C. Science of Sports Ltd';
+  const clientName0 = pick(cl, 'companyName', 'company_name') || 'Client';
+  const sosLogo = await embedImage(pick(co, 'logo', 'logo_url', 'logoBase64'));
+  const clientLogo = await embedImage(pick(cl, 'logoBase64', 'logo_url', 'logo'));
+
+  // --- Rainbow strip helper (four coloured segments). -----------------------
+  const drawRainbow = (pg: Any, topY: number, h = 3) => {
+    const rsw = W / RAINBOW.length;
+    RAINBOW.forEach((col, i) => pg.drawRectangle({ x: i * rsw, y: topY - h, width: rsw, height: h, color: col }));
+  };
+
+  // --- Full navy header band with two-logo lockup + cyan contract number. ---
+  // Drawn on PAGE 1 only. pdf-lib is bottom-up: the band sits at the top edge.
+  const drawHeaderP1 = (pg: Any) => {
+    const bandTop = H;
+    const bandBottom = H - HEADER_BAND;
+    pg.drawRectangle({ x: 0, y: bandBottom, width: W, height: HEADER_BAND, color: NAVY });
+
+    // Two-logo lockup, vertically centred in the upper part of the band so the
+    // cyan contract number can sit below it.
+    const logoH = 30;
+    const lockCenterY = H - 34;         // baseline-ish centre for the lockup row
+    const gap = 22;
+    const crossW = font.widthOfTextAtSize('x', 14);
+
+    // Measure the SOS + client widths (image scaled to h=logoH, else wordmark).
+    const sosW = sosLogo ? sosLogo.scaleToFit(150, logoH).width : bold.widthOfTextAtSize('SCIENCE OF SPORTS', 13);
+    const cliW = clientLogo ? clientLogo.scaleToFit(150, logoH).width
+                            : bold.widthOfTextAtSize(clientName0.toUpperCase(), 12);
+    const totalW = sosW + gap + crossW + gap + cliW;
+    let cx = (W - totalW) / 2;
+
+    // SOS logo / wordmark.
+    if (sosLogo) {
+      try {
+        const s = sosLogo.scaleToFit(150, logoH);
+        pg.drawImage(sosLogo, { x: cx, y: lockCenterY - s.height / 2, width: s.width, height: s.height });
+      } catch (_) {
+        pg.drawText('SCIENCE OF SPORTS', { x: cx, y: lockCenterY - 5, size: 13, font: bold, color: WHITE });
+      }
+    } else {
+      pg.drawText('SCIENCE OF SPORTS', { x: cx, y: lockCenterY - 5, size: 13, font: bold, color: WHITE });
+    }
+    cx += sosW + gap;
+
+    // Cyan multiplication cross.
+    pg.drawText('x', { x: cx, y: lockCenterY - 5, size: 14, font, color: CYAN });
+    cx += crossW + gap;
+
+    // Client logo / name.
+    if (clientLogo) {
+      try {
+        const s = clientLogo.scaleToFit(150, logoH);
+        pg.drawImage(clientLogo, { x: cx, y: lockCenterY - s.height / 2, width: s.width, height: s.height });
+      } catch (_) {
+        pg.drawText(clientName0.toUpperCase(), { x: cx, y: lockCenterY - 5, size: 12, font: bold, color: WHITE });
+      }
+    } else {
+      pg.drawText(clientName0.toUpperCase(), { x: cx, y: lockCenterY - 5, size: 12, font: bold, color: WHITE });
+    }
+
+    // Cyan contract number, centred below the lockup.
+    if (contractNumber) {
+      const tw = bold.widthOfTextAtSize(contractNumber, 9);
+      pg.drawText(contractNumber, { x: (W - tw) / 2, y: bandBottom + 12, size: 9, font: bold, color: CYAN });
+    }
+
+    // Rainbow hairline directly under the band.
+    drawRainbow(pg, bandBottom, 3);
+  };
+
+  // --- Slim running header for pages 2+. ------------------------------------
+  const drawHeaderRest = (pg: Any) => {
+    pg.drawRectangle({ x: 0, y: H - 30, width: W, height: 30, color: NAVY });
+    pg.drawText('SCIENCE OF SPORTS', { x: M, y: H - 20, size: 10, font: bold, color: WHITE });
     if (contractNumber) {
       const tw = font.widthOfTextAtSize(contractNumber, 8);
-      pg.drawText(contractNumber, { x: W - M - tw, y: H - 38, size: 8, font, color: CYAN });
+      pg.drawText(contractNumber, { x: W - M - tw, y: H - 20, size: 8, font, color: CYAN });
     }
-    // Rainbow strip (four coloured segments), just under the band.
-    const rseg = [rgb(0.133, 0.780, 0.902), rgb(0.145, 0.388, 0.922), rgb(0.545, 0.361, 0.965), rgb(0.925, 0.282, 0.6)];
-    const rsw = W / rseg.length;
-    rseg.forEach((col, i) => pg.drawRectangle({ x: i * rsw, y: H - 65, width: rsw, height: 3, color: col }));
+    drawRainbow(pg, H - 30, 3);
   };
 
   // --- Footer band, drawn on every page. -----------------------------------
   const drawFooter = (pg: Any) => {
-    pg.drawRectangle({ x: 0, y: 0, width: W, height: 34, color: NAVY });
-    pg.drawText(co.name || 'C.C. Science of Sports Ltd', { x: M, y: 20, size: 7.5, font: bold, color: rgb(1, 1, 1) });
+    pg.drawRectangle({ x: 0, y: 0, width: W, height: 38, color: NAVY });
+    pg.drawText(companyName0, { x: M, y: 24, size: 7.5, font: bold, color: WHITE });
     const contactEmail = pick(co, 'contactEmail', 'contact_email') || 'info@scienceofsports.net';
     const reg = pick(co, 'registrationNumber', 'registration_number') || 'HE 449875';
-    pg.drawText(`${contactEmail} · +357 22 396997 · ${reg}`, { x: M, y: 10, size: 7, font, color: rgb(0.663, 0.714, 0.8) });
+    const vat = pick(co, 'vatNumber', 'vat_number');
+    const line2 = `${contactEmail} · +357 22 396997 · Reg. No. ${reg}${vat ? ' · VAT ' + vat : ''}`;
+    pg.drawText(line2, { x: M, y: 13, size: 7, font, color: FOOTER_GREY });
     const tag = 'Transforming matches into knowledge.';
-    const tw = italic.widthOfTextAtSize(tag, 8);
-    pg.drawText(tag, { x: W - M - tw, y: 14, size: 8, font: italic, color: CYAN });
+    const tw = italic.widthOfTextAtSize(tag, 8.5);
+    pg.drawText(tag, { x: W - M - tw, y: 16, size: 8.5, font: italic, color: CYAN });
   };
 
-  drawHeader(page);
+  drawHeaderP1(page);
 
   // The layout cursor `y` grows DOWNWARD from CONTENT_TOP (intuitive top-down).
   // pdf-lib's coordinate system is bottom-up, so every draw converts via py().
@@ -213,8 +299,8 @@ export async function buildContractPdf(input: {
   const newPage = () => {
     drawFooter(page);
     page = pdf.addPage([W, H]);
-    drawHeader(page);
-    y = CONTENT_TOP;
+    drawHeaderRest(page);
+    y = CONTENT_TOP_REST;
   };
   const ensure = (need: number) => { if (y + need > H - BOTTOM) newPage(); };
 
@@ -245,11 +331,38 @@ export async function buildContractPdf(input: {
 
   const rule = () => { ensure(12); page.drawLine({ start: { x: M, y: py(y) }, end: { x: W - M, y: py(y) }, thickness: 0.5, color: rgb(0.862, 0.878, 0.902) }); y += 12; };
 
-  // A numbered clause: navy bold heading + one or more body paragraphs.
-  const clause = (heading: string, ...paras: Any[]) => {
+  // --- Navy PILL section header. THE key visual change. ---------------------
+  // Draws a navy chip containing an optional cyan clause number + white title,
+  // then advances y below it. `num` is null for un-numbered headers.
+  const PILL_H = 22;
+  const PILL_PADX = 14;
+  const PILL_TEXT = 11;
+  const pillHeader = (num: number | null, title: string) => {
+    ensure(PILL_H + 10);
+    y += 4;                              // small breathing room above the pill
+    const numStr = num != null ? `${num}.` : '';
+    const numW = numStr ? bold.widthOfTextAtSize(numStr, PILL_TEXT) : 0;
+    const numGap = numStr ? 6 : 0;
+    const titleW = bold.widthOfTextAtSize(title, PILL_TEXT);
+    const pillW = PILL_PADX * 2 + numW + numGap + titleW;
+    const pillTop = y;                   // downward cursor at pill top
+    // Navy rounded-ish chip (pdf-lib has no native rounded corners → sharp navy rect).
+    page.drawRectangle({ x: M, y: py(pillTop + PILL_H), width: pillW, height: PILL_H, color: NAVY });
+    const textY = pillTop + PILL_H - 7;  // downward baseline for centred-ish text
+    let tx = M + PILL_PADX;
+    if (numStr) {
+      page.drawText(numStr, { x: tx, y: py(textY), size: PILL_TEXT, font: bold, color: CYAN });
+      tx += numW + numGap;
+    }
+    page.drawText(title, { x: tx, y: py(textY), size: PILL_TEXT, font: bold, color: WHITE });
+    y = pillTop + PILL_H + 8;
+  };
+
+  // A numbered clause: navy PILL heading + one or more body paragraphs.
+  const clause = (num: number | null, title: string, ...paras: Any[]) => {
     ensure(40);
-    text(heading, { size: 11, f: bold, color: NAVY, gap: 2 });
-    paras.forEach((p, i) => text(p, { size: 10, gap: i === paras.length - 1 ? 8 : 4 }));
+    pillHeader(num, title);
+    paras.forEach((p, i) => text(p, { size: 10, gap: i === paras.length - 1 ? 10 : 4 }));
   };
 
   // --- Data prep -----------------------------------------------------------
@@ -276,11 +389,18 @@ export async function buildContractPdf(input: {
   const clientReg = pick(cl, 'registrationNumber', 'registration_number');
   const clientAddr = cl.address || '[address]';
 
-  // --- Title (split on the dash like the client PDF). ----------------------
+  // --- Title (split on the dash like the client PDF), centred navy bold. ----
   {
     const parts = String(c.title || 'Service Agreement').split(/\s+[—–-]\s+/);
-    text((parts[0] || '').toUpperCase(), { size: 16, f: bold, color: NAVY, gap: parts.length > 1 ? 2 : 6 });
-    if (parts.length > 1) text(parts.slice(1).join(' - ').toUpperCase(), { size: 12, f: bold, color: NAVY, gap: 6 });
+    const centered = (str: string, size: number, gap: number) => {
+      const tw = bold.widthOfTextAtSize(str, size);
+      ensure(size + 6);
+      y += size;
+      page.drawText(str, { x: (W - tw) / 2, y: py(y), size, font: bold, color: NAVY });
+      y += gap;
+    };
+    centered((parts[0] || '').toUpperCase(), 18, parts.length > 1 ? 4 : 8);
+    if (parts.length > 1) centered(parts.slice(1).join(' - ').toUpperCase(), 13, 8);
   }
   rule();
 
@@ -289,9 +409,9 @@ export async function buildContractPdf(input: {
   text(`${companyName}, a company registered under the laws of the Republic of Cyprus with registration number ${companyReg}, VAT number ${companyVat}, having its registered office at ${companyAddr} (the "Service Provider"),`, { size: 10, gap: 2 });
   text('and', { size: 10, gap: 2 });
   text(`${clientName}, ${clientReg ? `a company registered with registration number ${clientReg}, ` : ''}having its registered office at ${clientAddr} (the "Client").`, { size: 10, gap: 2 });
-  text('The above are hereinafter jointly referred to as the "Parties".', { size: 10, gap: 8 });
+  text('The above are hereinafter jointly referred to as the "Parties".', { size: 10, gap: 10 });
 
-  // --- About the Service Provider (tinted, bordered box) -------------------
+  // --- About the Service Provider — navy pill header + intro + bullets. -----
   {
     const aboutIntro = "Science of Sports (C.C. Science of Sports Ltd, HE 449875) is Cyprus's leading football intelligence company. Built by UEFA-qualified analysts and engineers, it operates the first fully integrated football analytics platform originating from Cyprus, serving federations, academies, coaches, scouts and players.";
     const aboutBullets = [
@@ -302,34 +422,13 @@ export async function buildContractPdf(input: {
       'Founders of the Annual Youth Football Player & Coach Awards.',
       'Creators of "Youth Zone" with Cablenet — Cyprus\'s first TV show dedicated to youth football.',
     ];
-    // The box may span a page; draw a light tinted band behind the whole block
-    // by measuring first. Simpler + robust: render content, then draw a border
-    // rectangle around the used vertical span on THIS page only. To avoid
-    // page-split complexity, ensure enough room; if not, start on a new page.
-    ensure(160);
-    const boxTop = y;                   // downward-cursor value at box top
-    const boxPage = page;               // capture page in case content wraps
-    const innerX = M + 14;
-    const innerW = maxW - 28;
-    y += 12;
-    text('ABOUT THE SERVICE PROVIDER', { x: innerX, size: 9, f: bold, color: CYAN, gap: 4 });
-    text(aboutIntro, { x: innerX, width: innerW, size: 9.5, color: SOFT_GREY, gap: 4 });
+    pillHeader(null, 'About the Service Provider');
+    text(aboutIntro, { size: 9.5, color: SOFT_GREY, gap: 4 });
     for (const b of aboutBullets) {
-      text(`• ${b}`, { x: innerX, width: innerW, size: 9.5, color: SOFT_GREY, gap: 2 });
+      text(`•  ${b}`, { size: 9.5, color: SOFT_GREY, gap: 2, x: M + 6, width: maxW - 6 });
     }
-    y += 8;
-    const boxBottom = y;                // downward-cursor value at box bottom
-    // Border around the measured span — only if it stayed on the same page.
-    if (page === boxPage && boxBottom > boxTop) {
-      // Border only (drawn after content so it never paints over the text).
-      page.drawRectangle({
-        x: M, y: py(boxBottom), width: maxW, height: boxBottom - boxTop,
-        borderColor: rgb(0.82, 0.85, 0.89), borderWidth: 0.75,
-      });
-    }
-    y += 8;
+    y += 10;
   }
-  rule();
 
   // --- Clause numbering (identical logic to the client PDF). ---------------
   let n = 1;
@@ -346,35 +445,63 @@ export async function buildContractPdf(input: {
   const specialTermsNum = (specialTerms && String(specialTerms).trim()) ? n++ : null;
   const entireAgreementNum = n++;
 
+  // Draw a small cyan "Included"/"Complimentary" chip inline; returns advanced x.
+  const chip = (label: string, x: number, baselineY: number) => {
+    const size = 8;
+    const padX = 6;
+    const w = font.widthOfTextAtSize(label, size) + padX * 2;
+    const chipH = 13;
+    // baselineY is the downward baseline of the text line the chip sits on.
+    page.drawRectangle({ x, y: py(baselineY + 3), width: w, height: chipH, color: CHIP_BG });
+    page.drawText(label, { x: x + padX, y: py(baselineY - 1.5), size, font: bold, color: CYAN_DEEP });
+    return x + w;
+  };
+
   // --- Purpose — STRUCTURED by service group when services exist. ----------
-  ensure(40);
-  text(`${purposeNum}. Purpose`, { size: 11, f: bold, color: NAVY, gap: 4 });
+  pillHeader(purposeNum, 'Purpose');
   if (lineItems.length > 0) {
     text('The purpose of this Agreement is to define the terms of cooperation between the Parties, under which the Service Provider shall provide the Client with the following services:', { size: 10, gap: 6 });
     SERVICE_GROUPS.forEach((group) => {
       const groupItems = lineItems.filter((i) => i.group === group);
       if (!groupItems.length) return;
       ensure(30);
-      text(group, { size: 10, f: bold, color: CYAN, gap: 3 });
+      // Cyan bold service-group subheading.
+      text(group, { size: 10, f: bold, color: CYAN_DEEP, gap: 4 });
       groupItems.forEach((i) => {
         const qtyNote = i.unit === 'per_match' ? ` (${i.qty} matches)` : i.unit === 'per_unit' ? ` (${i.qty})` : '';
-        const statusNote = i.unit === 'included' ? '' : i.bundledIncluded ? ' (included in the core platform price)' : i.complimentary ? ' (complimentary)' : '';
-        text(`• ${i.label}${qtyNote}${statusNote} — ${i.detail}`, { size: 9.5, gap: 2, x: M + 10, width: maxW - 10 });
+        const chipLabel = i.bundledIncluded ? 'Included' : i.complimentary ? 'Complimentary' : i.unit === 'included' ? 'Included' : null;
+        const itemX = M + 12;
+        const itemW = maxW - 12;
+        // Label line: navy bold label + qty note + inline chip.
+        ensure(16);
+        y += 10;                         // baseline for the label line
+        const labelBaseline = y;
+        let lx = itemX;
+        page.drawText(i.label, { x: lx, y: py(labelBaseline), size: 9.5, font: bold, color: NAVY });
+        lx += bold.widthOfTextAtSize(i.label, 9.5);
+        if (qtyNote) {
+          page.drawText(qtyNote, { x: lx, y: py(labelBaseline), size: 9.5, font, color: GREY });
+          lx += font.widthOfTextAtSize(qtyNote, 9.5);
+        }
+        if (chipLabel) { lx += 6; chip(chipLabel, lx, labelBaseline); }
+        y += 3;
+        // Detail line(s) in grey, indented.
+        text(i.detail, { size: 9.5, color: SOFT_GREY, gap: 2, x: itemX, width: itemW });
         if (i.key === 'platform_access') {
           const seats = platformSeatsSummary(services?.platform_access);
-          if (seats) text(`Access: ${seats} (exact users to be confirmed with the client).`, { size: 9, color: GREY, gap: 2, x: M + 22, width: maxW - 22 });
+          if (seats) text(`Access: ${seats} (exact users to be confirmed with the client).`, { size: 9, color: GREY, gap: 2, x: itemX + 10, width: itemW - 10 });
         }
       });
-      y += 4;
+      y += 6;
     });
+    text(`${c.slaHours || 24}-hour SLA on delivery of key analytical outputs after each match.`, { size: 10, gap: 10 });
   } else {
-    text(c.description || 'The purpose of this Agreement is to define the terms of cooperation between the Parties for the provision of performance analysis and related services by the Service Provider to the Client.', { size: 10, gap: 8 });
+    text(c.description || 'The purpose of this Agreement is to define the terms of cooperation between the Parties for the provision of performance analysis and related services by the Service Provider to the Client.', { size: 10, gap: 10 });
   }
 
   // --- Scope of Services (only when there are line items). ------------------
   if (scopeNum) {
-    ensure(40);
-    text(`${scopeNum}. Scope of Services`, { size: 11, f: bold, color: NAVY, gap: 4 });
+    pillHeader(scopeNum, 'Scope of Services');
     lineItems.forEach((i) => {
       const qty = i.unit === 'flat' ? '—' : (i.unit === 'included' || i.complimentary || i.bundledIncluded) ? 'Included' : String(i.qty);
       let label = `• ${i.label}`;
@@ -383,11 +510,11 @@ export async function buildContractPdf(input: {
       }
       text(`${label}   [${qty}]`, { size: 10, x: M + 10, width: maxW - 10 });
     });
-    text(`Total Contract Value: ${fmtMoney(value, currency)}`, { size: 10, f: bold, gap: 8 });
+    text(`Total Contract Value: ${fmtMoney(value, currency)}`, { size: 10, f: bold, color: NAVY, gap: 10 });
   }
 
   // --- Fees & Payment ------------------------------------------------------
-  clause(`${feesNum}. Fees & Payment`,
+  clause(feesNum, 'Fees & Payment',
     `In consideration of the services provided under this Agreement, the Client shall pay the Service Provider a total of ${fmtMoney(value, currency)}, payable ${paymentType}, net ${paymentTermsDays} days from the date of a valid invoice.`,
     `All payments shall be made by bank transfer following the issuance of a valid invoice by the Service Provider, in accordance with applicable VAT regulations. A late payment penalty of ${latePaymentPenalty}% per month applies to overdue amounts.`);
   {
@@ -395,52 +522,64 @@ export async function buildContractPdf(input: {
     const bankIBAN = pick(co, 'bankIBAN', 'bank_iban');
     const bankSWIFT = pick(co, 'bankSWIFT', 'bank_swift');
     if (bankName || bankIBAN || bankSWIFT) {
-      const bankLine = ['Bank Details (Service Provider):',
+      // Tinted, bordered bank-details box. Measure the content span, then paint
+      // the box behind it on the same page (kept together to avoid a page split).
+      const bankLines = [
         bankName ? `Bank: ${bankName}` : null,
         bankIBAN ? `IBAN: ${bankIBAN}` : null,
         bankSWIFT ? `SWIFT/BIC: ${bankSWIFT}` : null,
-      ].filter(Boolean).join('   ');
-      text(bankLine, { size: 9, color: SOFT_GREY, gap: 8 });
+      ].filter(Boolean) as string[];
+      const boxNeed = 16 + 14 + bankLines.length * 13 + 12;
+      ensure(boxNeed);
+      const boxTop = y;
+      const innerX = M + 12;
+      // Paint the box first (behind), sized to the known content height.
+      const boxH = boxNeed;
+      page.drawRectangle({ x: M, y: py(boxTop + boxH), width: maxW, height: boxH, color: BOX_BG, borderColor: BOX_BORDER, borderWidth: 0.75 });
+      y = boxTop + 14;
+      text('BANK DETAILS (SERVICE PROVIDER)', { x: innerX, size: 8, f: bold, color: NAVY, gap: 4 });
+      for (const bl of bankLines) text(bl, { x: innerX, size: 9, color: SOFT_GREY, gap: 1 });
+      y = boxTop + boxH + 10;
     }
   }
 
   // --- Confidentiality & Data Protection -----------------------------------
-  clause(`${confidentialityNum}. Confidentiality & Data Protection`,
+  clause(confidentialityNum, 'Confidentiality & Data Protection',
     'The Service Provider shall process personal data strictly in accordance with the GDPR, the applicable Cyprus data protection legislation (Law 125(I)/2018), and Regulation (EU) 2016/679, and solely on documented instructions from the Client and exclusively for the purposes of this Agreement.',
     "All match analysis, reports, video clips, data outputs, and technical insights produced under this Agreement shall be treated as strictly confidential and used solely for the Client's internal purposes.");
 
   // --- Intellectual Property Rights ----------------------------------------
-  clause(`${ipNum}. Intellectual Property Rights`,
+  clause(ipNum, 'Intellectual Property Rights',
     'All match footage, training footage, video recordings, reports, analytics outputs, player data, databases, clips and any other materials produced, collected or generated by the Service Provider under this Agreement (collectively, the "Deliverables") shall be the exclusive property of the Client. The Client shall have unrestricted, irrevocable and royalty-free rights to use, reproduce, store, modify, distribute and archive the Deliverables for any internal purpose. The Service Provider shall not use, reproduce, disclose, commercialize or share any Deliverables with any third party without the Client\'s prior written consent.');
 
   // --- Duration ------------------------------------------------------------
-  clause(`${durationNum}. Duration`,
+  clause(durationNum, 'Duration',
     `This Agreement shall commence on ${fmtDate(startDate)} and shall remain in force until ${fmtDate(endDate)}${termYears ? ` (approximately ${termYears} year${termYears > 1 ? 's' : ''})` : ''}, unless terminated earlier in accordance with Section ${terminationNum}.`);
 
   // --- Termination ---------------------------------------------------------
-  clause(`${terminationNum}. Termination`,
+  clause(terminationNum, 'Termination',
     "Either Party may terminate this Agreement with three (3) months' written notice, or immediately in the event of a material breach not remedied within thirty (30) days.",
     'Upon termination or expiration of this Agreement for any reason, the Service Provider shall promptly deliver to the Client all Deliverables produced under this Agreement.');
 
   // --- Limitation of Liability ---------------------------------------------
-  clause(`${liabilityNum}. Limitation of Liability`,
+  clause(liabilityNum, 'Limitation of Liability',
     "The Service Provider shall not be responsible for sporting results, team selection decisions, or competition outcomes. Total liability under this Agreement shall not exceed the fees paid during the preceding twelve (12) months. This limitation shall not apply to breaches of confidentiality, data protection obligations, or unauthorized use of the Client's data or intellectual property.");
 
   // --- Force Majeure -------------------------------------------------------
-  clause(`${forceMajeureNum}. Force Majeure`,
+  clause(forceMajeureNum, 'Force Majeure',
     'Neither Party shall be liable for failure to perform due to events beyond reasonable control.');
 
   // --- Governing Law & Jurisdiction ----------------------------------------
-  clause(`${governingLawNum}. Governing Law & Jurisdiction`,
+  clause(governingLawNum, 'Governing Law & Jurisdiction',
     `This Agreement shall be governed by the laws of ${governingLaw}, with exclusive jurisdiction in ${jurisdiction}.`);
 
   // --- Special Terms (optional) --------------------------------------------
   if (specialTermsNum) {
-    clause(`${specialTermsNum}. Special Terms`, specialTerms);
+    clause(specialTermsNum, 'Special Terms', specialTerms);
   }
 
   // --- Entire Agreement ----------------------------------------------------
-  clause(`${entireAgreementNum}. Entire Agreement & Amendments`,
+  clause(entireAgreementNum, 'Entire Agreement & Amendments',
     'This Agreement constitutes the entire agreement between the Parties. Any amendment must be made in writing and signed by both Parties.');
 
   // --- Designated Contact block (if present on the snapshot contract). ------
@@ -452,36 +591,36 @@ export async function buildContractPdf(input: {
       const contactPhone = pick(c, 'contactPhone', 'contact_phone');
       const financeName = pick(c, 'financeName', 'finance_name');
       const financeEmail = pick(c, 'financeEmail', 'finance_email');
-      rule();
-      ensure(30);
-      text('DESIGNATED CONTACTS', { size: 10, f: bold, color: CYAN, gap: 4 });
+      pillHeader(null, 'Designated Contact');
       const opsBits = [contactName, contactRole].filter(Boolean).join(', ');
       const opsTail = [contactEmail, contactPhone].filter(Boolean).join(' · ');
       text(`Client's designated contact for operations & communication: ${opsBits}${opsTail ? ' · ' + opsTail : ''}.`, { size: 10, gap: 2 });
       if (financeName || financeEmail) {
         text(`Finance contact: ${[financeName, financeEmail].filter(Boolean).join(' · ')}.`, { size: 10, gap: 2 });
       }
+      y += 6;
     }
   }
 
-  rule();
-
-  // --- SIGNATURES — two columns. -------------------------------------------
-  ensure(200);
-  text('SIGNATURES', { size: 11, f: bold, color: NAVY, gap: 2 });
-  text('Executed by the duly authorised representatives of the Parties as of the dates set out below.', { size: 8, color: GREY, gap: 10 });
+  // --- SIGNATURES — two columns with real signature IMAGES. ----------------
+  // The whole block must fit; if not, push it to a fresh page so a signature
+  // never straddles the footer or a page break.
+  ensure(210);
+  pillHeader(null, 'Signatures');
+  text('Executed by the duly authorised representatives of the Parties as of the dates set out below.', { size: 8, color: GREY, gap: 12 });
 
   const colW = (maxW - 30) / 2;
   const colX = [M, M + colW + 30];
   const heads = [`For and on behalf of ${companyName}`, `For and on behalf of ${clientName}`];
   const signedAtFmt = fmtDate(signer.signedAt);
 
-  // Provider column: SOS authorised signatory image + name/title/date.
+  // Provider column: SOS authorised signatory image (accept snake OR camel) +
+  // name/title/date. This is the field that was previously blank.
   const providerSig = await embedImage(pick(co, 'signatorySignature', 'signatory_signature'));
   const providerName = pick(co, 'signatoryName', 'signatory_name') || '';
   const providerTitle = pick(co, 'signatoryTitle', 'signatory_title') || '';
 
-  // Client column: the actual drawn signature PNG passed in.
+  // Client column: the actual drawn signature PNG passed in (post-sign).
   const clientSig = await embedImageBytes(input.signatureImageBytes);
 
   const cols = [
@@ -489,31 +628,30 @@ export async function buildContractPdf(input: {
     { sig: clientSig, sigFallback: signer.name, name: signer.name, title: signer.title || '', date: signedAtFmt },
   ];
 
-  // The whole block must fit; if not, push it to a fresh page so a signature
-  // never straddles the footer or a page break.
   ensure(190);
   const blockTop = y;                   // downward cursor at block top
   let maxColBottom = y;
   cols.forEach((col, idx) => {
     const x = colX[idx];
     let yy = blockTop;
-    // Column header (downward baseline).
+    // Column header (downward baseline), navy uppercase.
     yy += 9;
     page.drawText(heads[idx].toUpperCase().slice(0, 60), { x, y: py(yy), size: 8.5, font: bold, color: NAVY });
-    yy += 13;
+    yy += 16;
 
     // Signature area: reserve a tall band; draw a LARGE image (scaleToFit
-    // ~180x70) sitting just above the signature line, else the italic name.
-    const sigLineY = yy + 62;           // downward position of the signature line
+    // ~180x64) sitting just above the signature line, else the italic name.
+    const sigLineY = yy + 64;           // downward position of the signature line
     if (col.sig) {
       try {
-        const scaled = col.sig.scaleToFit(180, 70);
-        page.drawImage(col.sig, { x: x + 2, y: py(sigLineY - 4), width: scaled.width, height: scaled.height });
+        const scaled = col.sig.scaleToFit(180, 62);
+        // Image bottom sits ~5pt above the ruled line; grows upward.
+        page.drawImage(col.sig, { x: x + 2, y: py(sigLineY - 5), width: scaled.width, height: scaled.height });
       } catch (_) {
-        page.drawText(col.sigFallback || '', { x: x + 2, y: py(sigLineY - 6), size: 14, font: italic, color: BLACK });
+        if (col.sigFallback) page.drawText(col.sigFallback, { x: x + 2, y: py(sigLineY - 6), size: 15, font: italic, color: BLACK });
       }
     } else if (col.sigFallback) {
-      page.drawText(col.sigFallback, { x: x + 2, y: py(sigLineY - 6), size: 14, font: italic, color: BLACK });
+      page.drawText(col.sigFallback, { x: x + 2, y: py(sigLineY - 6), size: 15, font: italic, color: BLACK });
     }
     // Signature line + label.
     page.drawLine({ start: { x, y: py(sigLineY) }, end: { x: x + colW, y: py(sigLineY) }, thickness: 0.75, color: rgb(0.588, 0.627, 0.667) });
