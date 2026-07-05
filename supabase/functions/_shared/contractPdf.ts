@@ -213,23 +213,29 @@ export async function buildContractPdf(input: {
 
     // Two-logo lockup, vertically centred in the upper part of the band so the
     // cyan contract number can sit below it.
-    const logoH = 30;
+    //
+    // The SOS wordmark PNG is WIDE (star + "SCIENCE OF SPORTS"), so a small
+    // height cap makes it render tiny. Give each logo a generous fit box
+    // (200w × 44h) and let width drive the scale — this matches the on-screen
+    // prominence and fixes the "shrunken SOS logo" seen on sent/signed PDFs.
+    const logoH = 44;
+    const logoMaxW = 200;
     const lockCenterY = H - 34;         // baseline-ish centre for the lockup row
     const gap = 22;
     const crossW = font.widthOfTextAtSize('x', 14);
 
-    // Measure the SOS + client widths (image scaled to h=logoH, else wordmark).
-    const sosW = sosLogo ? sosLogo.scaleToFit(150, logoH).width : bold.widthOfTextAtSize('SCIENCE OF SPORTS', 13);
-    const cliW = clientLogo ? clientLogo.scaleToFit(150, logoH).width
-                            : bold.widthOfTextAtSize(clientName0.toUpperCase(), 12);
+    // Measure the SOS + client widths (image scaled into logoMaxW×logoH, else wordmark).
+    const sosFit = sosLogo ? sosLogo.scaleToFit(logoMaxW, logoH) : null;
+    const cliFit = clientLogo ? clientLogo.scaleToFit(logoMaxW, logoH) : null;
+    const sosW = sosFit ? sosFit.width : bold.widthOfTextAtSize('SCIENCE OF SPORTS', 13);
+    const cliW = cliFit ? cliFit.width : bold.widthOfTextAtSize(clientName0.toUpperCase(), 12);
     const totalW = sosW + gap + crossW + gap + cliW;
     let cx = (W - totalW) / 2;
 
     // SOS logo / wordmark.
-    if (sosLogo) {
+    if (sosLogo && sosFit) {
       try {
-        const s = sosLogo.scaleToFit(150, logoH);
-        pg.drawImage(sosLogo, { x: cx, y: lockCenterY - s.height / 2, width: s.width, height: s.height });
+        pg.drawImage(sosLogo, { x: cx, y: lockCenterY - sosFit.height / 2, width: sosFit.width, height: sosFit.height });
       } catch (_) {
         pg.drawText('SCIENCE OF SPORTS', { x: cx, y: lockCenterY - 5, size: 13, font: bold, color: WHITE });
       }
@@ -243,10 +249,9 @@ export async function buildContractPdf(input: {
     cx += crossW + gap;
 
     // Client logo / name.
-    if (clientLogo) {
+    if (clientLogo && cliFit) {
       try {
-        const s = clientLogo.scaleToFit(150, logoH);
-        pg.drawImage(clientLogo, { x: cx, y: lockCenterY - s.height / 2, width: s.width, height: s.height });
+        pg.drawImage(clientLogo, { x: cx, y: lockCenterY - cliFit.height / 2, width: cliFit.width, height: cliFit.height });
       } catch (_) {
         pg.drawText(clientName0.toUpperCase(), { x: cx, y: lockCenterY - 5, size: 12, font: bold, color: WHITE });
       }
@@ -499,18 +504,78 @@ export async function buildContractPdf(input: {
     text(c.description || 'The purpose of this Agreement is to define the terms of cooperation between the Parties for the provision of performance analysis and related services by the Service Provider to the Client.', { size: 10, gap: 10 });
   }
 
-  // --- Scope of Services (only when there are line items). ------------------
+  // --- Scope of Services — premium ruled TABLE (SERVICE | QTY). -------------
   if (scopeNum) {
     pillHeader(scopeNum, 'Scope of Services');
-    lineItems.forEach((i) => {
-      const qty = i.unit === 'flat' ? '—' : (i.unit === 'included' || i.complimentary || i.bundledIncluded) ? 'Included' : String(i.qty);
-      let label = `• ${i.label}`;
-      if (i.key === 'platform_access' && platformSeatsSummary(services?.platform_access)) {
-        label += ` — Access: ${platformSeatsSummary(services.platform_access)} (exact users to be confirmed with the client)`;
+
+    const cellPadX = 10;
+    const qtyColW = 90;
+    const svcColW = maxW - qtyColW;
+
+    // Local word-wrap helper (pdf-lib has no splitText). Returns wrapped lines.
+    const wrap = (str: string, f: Any, size: number, width: number): string[] => {
+      const words = String(str ?? '').split(/\s+/);
+      const lines: string[] = [];
+      let line = '';
+      for (const w of words) {
+        const test = line ? line + ' ' + w : w;
+        if (f.widthOfTextAtSize(test, size) > width && line) { lines.push(line); line = w; }
+        else line = test;
       }
-      text(`${label}   [${qty}]`, { size: 10, x: M + 10, width: maxW - 10 });
+      if (line) lines.push(line);
+      return lines;
+    };
+
+    // Header row: navy band, white SERVICE / QTY.
+    const headH = 20;
+    ensure(headH + 4);
+    y += 4;
+    const headTop = y;
+    page.drawRectangle({ x: M, y: py(headTop + headH), width: maxW, height: headH, color: NAVY });
+    page.drawText('SERVICE', { x: M + cellPadX, y: py(headTop + 13), size: 8.5, font: bold, color: WHITE });
+    const qtyHeadW = bold.widthOfTextAtSize('QTY', 8.5);
+    page.drawText('QTY', { x: W - M - cellPadX - qtyHeadW, y: py(headTop + 13), size: 8.5, font: bold, color: WHITE });
+    y = headTop + headH;
+
+    // Body rows.
+    lineItems.forEach((i) => {
+      const qty = i.unit === 'flat' ? '—'
+        : (i.unit === 'included' || i.complimentary || i.bundledIncluded) ? 'Included'
+        : String(i.qty);
+      const seats = (i.key === 'platform_access') ? platformSeatsSummary(services?.platform_access) : '';
+      const subline = seats ? `Access: ${seats} (exact users to be confirmed with the client)` : '';
+
+      const labelLines = wrap(i.label, font, 9.5, svcColW - cellPadX * 2);
+      const subLines = subline ? wrap(subline, font, 8.5, svcColW - cellPadX * 2) : [];
+      const rowH = 10 + labelLines.length * 12 + (subLines.length ? subLines.length * 11 + 2 : 0);
+      ensure(rowH + 2);
+      const rowTop = y;
+
+      let ly = rowTop + 12;
+      for (const ln of labelLines) { page.drawText(ln, { x: M + cellPadX, y: py(ly), size: 9.5, font, color: BLACK }); ly += 12; }
+      if (subLines.length) {
+        ly += 1;
+        for (const ln of subLines) { page.drawText(ln, { x: M + cellPadX, y: py(ly), size: 8.5, font, color: GREY }); ly += 11; }
+      }
+      // QTY right-aligned (bold navy when "Included").
+      const qf = qty === 'Included' ? bold : font;
+      const qc = qty === 'Included' ? NAVY : BLACK;
+      const qw = qf.widthOfTextAtSize(qty, 9.5);
+      page.drawText(qty, { x: W - M - cellPadX - qw, y: py(rowTop + 12), size: 9.5, font: qf, color: qc });
+
+      y = rowTop + rowH;
+      page.drawLine({ start: { x: M, y: py(y) }, end: { x: W - M, y: py(y) }, thickness: 0.5, color: rgb(0.862, 0.878, 0.902) });
     });
-    text(`Total Contract Value: ${fmtMoney(value, currency)}`, { size: 10, f: bold, color: NAVY, gap: 10 });
+
+    // Total row.
+    ensure(24);
+    page.drawLine({ start: { x: M, y: py(y) }, end: { x: W - M, y: py(y) }, thickness: 1, color: NAVY });
+    y += 15;
+    page.drawText('Total Contract Value', { x: M + cellPadX, y: py(y), size: 10.5, font: bold, color: NAVY });
+    const totalStr = fmtMoney(value, currency);
+    const totalW2 = bold.widthOfTextAtSize(totalStr, 10.5);
+    page.drawText(totalStr, { x: W - M - cellPadX - totalW2, y: py(y), size: 10.5, font: bold, color: NAVY });
+    y += 12;
   }
 
   // --- Fees & Payment ------------------------------------------------------

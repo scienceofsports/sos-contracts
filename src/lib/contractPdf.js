@@ -86,7 +86,11 @@ export function generateContractPdf({ contract, client, company }) {
     doc.setFillColor(...NAVY);
     doc.rect(0, 0, W, HEADER_BAND, 'F');
 
-    const logoH = 30;
+    // The SOS wordmark PNG is WIDE (star + "SCIENCE OF SPORTS"); give each logo
+    // a generous fit box (200w × 44h) so it renders at full prominence and
+    // matches the server-generated (sent/signed) PDFs.
+    const logoH = 44;
+    const logoMaxW = 200;
     const lockCenterY = 30;   // vertical centre of the lockup row
     const gap = 22;
     const crossSize = 16;
@@ -97,8 +101,8 @@ export function generateContractPdf({ contract, client, company }) {
     // Resolve SOS + client lockup elements. Images preferred; text fallback.
     const sosLogo = company?.logo || null;
     const clientLogo = client?.logoBase64 || null;
-    const sosFit = sosLogo ? fitImage(sosLogo, 150, logoH) : null;
-    const cliFit = clientLogo ? fitImage(clientLogo, 150, logoH) : null;
+    const sosFit = sosLogo ? fitImage(sosLogo, logoMaxW, logoH) : null;
+    const cliFit = clientLogo ? fitImage(clientLogo, logoMaxW, logoH) : null;
 
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(13);
@@ -410,18 +414,86 @@ export function generateContractPdf({ contract, client, company }) {
     text(contract.description || 'The purpose of this Agreement is to define the terms of cooperation between the Parties for the provision of performance analysis and related services by the Service Provider to the Client.', { size: 10, gap: 10 });
   }
 
-  // --- Scope of Services (only when there are line items). ------------------
+  // --- Scope of Services — premium ruled TABLE (SERVICE | QTY). -------------
   if (scopeNum) {
     pillHeader(scopeNum, 'Scope of Services');
+
+    const qtyColW = 90;                       // right column width for QTY
+    const svcColW = maxW - qtyColW;
+    const cellPadX = 10;
+    const qtyX = M + svcColW;                 // left edge of the QTY column
+
+    // Header row: navy band, white "SERVICE" / "QTY".
+    const headH = 20;
+    ensure(headH + 4);
+    y += 4;
+    const headTop = y;
+    doc.setFillColor(...NAVY);
+    doc.rect(M, headTop, maxW, headH, 'F');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.5);
+    doc.setTextColor(...WHITE);
+    doc.text('SERVICE', M + cellPadX, headTop + 13);
+    doc.text('QTY', W - M - cellPadX, headTop + 13, { align: 'right' });
+    y = headTop + headH;
+
+    // Body rows: wrapped service label (+ optional seats subline) on the left,
+    // qty on the right, thin rule under each row.
+    doc.setFont('helvetica', 'normal');
     lineItems.forEach((i) => {
-      const qty = i.unit === 'flat' ? '—' : (i.unit === 'included' || i.complimentary || i.bundledIncluded) ? 'Included' : String(i.qty);
-      let label = `• ${i.label}`;
-      if (i.key === 'platform_access' && platformSeatsSummary(services?.platform_access)) {
-        label += ` — Access: ${platformSeatsSummary(services.platform_access)} (exact users to be confirmed with the client)`;
+      const qty = i.unit === 'flat' ? '—'
+        : (i.unit === 'included' || i.complimentary || i.bundledIncluded) ? 'Included'
+        : String(i.qty);
+      // Compose the service label; platform access carries a seats subline.
+      const seats = (i.key === 'platform_access') ? platformSeatsSummary(services?.platform_access) : '';
+      const subline = seats ? `Access: ${seats} (exact users to be confirmed with the client)` : '';
+
+      // Measure wrapped label height so the row + rule size correctly.
+      doc.setFontSize(9.5);
+      const labelLines = doc.splitTextToSize(i.label, svcColW - cellPadX * 2);
+      const subLines = subline ? doc.splitTextToSize(subline, svcColW - cellPadX * 2) : [];
+      const rowH = 10 + labelLines.length * 12 + (subLines.length ? subLines.length * 11 + 2 : 0);
+      ensure(rowH + 2);
+      const rowTop = y;
+
+      // Service label (navy).
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9.5);
+      doc.setTextColor(...BLACK);
+      let ly = rowTop + 12;
+      labelLines.forEach((ln) => { doc.text(ln, M + cellPadX, ly); ly += 12; });
+      // Seats subline (grey).
+      if (subLines.length) {
+        doc.setFontSize(8.5);
+        doc.setTextColor(...GREY);
+        ly += 1;
+        subLines.forEach((ln) => { doc.text(ln, M + cellPadX, ly); ly += 11; });
       }
-      text(`${label}   [${qty}]`, { size: 10, x: M + 10, width: maxW - 10 });
+      // QTY, right-aligned, vertically near the first label line.
+      doc.setFont('helvetica', (qty === 'Included' ? 'bold' : 'normal'));
+      doc.setFontSize(9.5);
+      doc.setTextColor(...(qty === 'Included' ? NAVY : BLACK));
+      doc.text(qty, W - M - cellPadX, rowTop + 12, { align: 'right' });
+
+      y = rowTop + rowH;
+      // Row separator rule.
+      doc.setDrawColor(220, 224, 230);
+      doc.setLineWidth(0.5);
+      doc.line(M, y, W - M, y);
     });
-    text(`Total Contract Value: ${fmtMoney(contract.value, contract.currency)}`, { size: 10, style: 'bold', color: NAVY, gap: 10 });
+
+    // Total row: heavier top rule + navy bold total.
+    ensure(24);
+    doc.setDrawColor(...NAVY);
+    doc.setLineWidth(1);
+    doc.line(M, y, W - M, y);
+    y += 15;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10.5);
+    doc.setTextColor(...NAVY);
+    doc.text('Total Contract Value', M + cellPadX, y);
+    doc.text(fmtMoney(contract.value, contract.currency), W - M - cellPadX, y, { align: 'right' });
+    y += 12;
   }
 
   // --- Fees & Payment ------------------------------------------------------
