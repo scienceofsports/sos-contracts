@@ -784,14 +784,15 @@ export async function buildContractPdf(input: {
     const sigLineY = yy + 64;           // downward position of the signature line
     if (col.sig) {
       try {
-        const scaled = col.sig.scaleToFit(180, 62);
+        // Larger signature: fit into a bigger box so it reads bold and prominent.
+        const scaled = col.sig.scaleToFit(190, 64);
         // Image bottom sits ~5pt above the ruled line; grows upward.
         page.drawImage(col.sig, { x: x + 2, y: py(sigLineY - 5), width: scaled.width, height: scaled.height });
       } catch (_) {
-        if (col.sigFallback) page.drawText(col.sigFallback, { x: x + 2, y: py(sigLineY - 6), size: 15, font: italic, color: BLACK });
+        if (col.sigFallback) page.drawText(col.sigFallback, { x: x + 2, y: py(sigLineY - 6), size: 20, font: italic, color: BLACK });
       }
     } else if (col.sigFallback) {
-      page.drawText(col.sigFallback, { x: x + 2, y: py(sigLineY - 6), size: 15, font: italic, color: BLACK });
+      page.drawText(col.sigFallback, { x: x + 2, y: py(sigLineY - 6), size: 20, font: italic, color: BLACK });
     }
     // Signature line + label.
     page.drawLine({ start: { x, y: py(sigLineY) }, end: { x: x + colW, y: py(sigLineY) }, thickness: 0.75, color: rgb(0.588, 0.627, 0.667) });

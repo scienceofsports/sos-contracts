@@ -676,10 +676,11 @@ export function generateContractPdf({ contract, client, company }) {
 
     // Signature area: reserve a tall band; draw a LARGE image just above the
     // signature line, else the italic name fallback.
-    const sigLineY = yy + 50;   // downward position of the ruled signature line
+    const sigLineY = yy + 64;   // downward position of the ruled signature line
     let drewImg = false;
     if (col.sigImg) {
-      const fit = fitImage(col.sigImg, 150, 45);
+      // Larger signature: fit into a bigger box so it reads bold and prominent.
+      const fit = fitImage(col.sigImg, 190, 64);
       if (fit) {
         try {
           doc.addImage(col.sigImg, imgFormat(col.sigImg), x + 2, sigLineY - fit.h - 3, fit.w, fit.h);
@@ -689,7 +690,7 @@ export function generateContractPdf({ contract, client, company }) {
     }
     if (!drewImg && col.sigFallback) {
       doc.setFont('helvetica', 'italic');
-      doc.setFontSize(15);
+      doc.setFontSize(20);
       doc.setTextColor(...BLACK);
       doc.text(col.sigFallback, x + 2, sigLineY - 6);
     }
