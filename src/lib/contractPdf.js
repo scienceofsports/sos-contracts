@@ -22,7 +22,7 @@
    ========================================================================= */
 import { jsPDF } from 'jspdf';
 import { fmtDate, fmtMoney, daysBetween } from './format.js';
-import { computeServiceLineItems, platformSeatsSummary, SERVICE_GROUPS, analysisScopeText, seasonLabelFromDates, commercialModelText, parseSpecialTerms, serviceLevelsLines } from './constants.js';
+import { computeServiceLineItems, platformSeatsSummary, SERVICE_GROUPS, analysisScopeText, seasonLabelFromDates, commercialModelText, parseSpecialTerms, serviceLevelsLines, vatSummary } from './constants.js';
 
 export function generateContractPdf({ contract, client, company }) {
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
@@ -542,17 +542,21 @@ export function generateContractPdf({ contract, client, company }) {
       const amtBaseline = rowTop + 12;
       const rightX = W - M - cellPadX;
       doc.setFontSize(9.5);
-      if (i.included) {
+      if (i.included && i.listPrice > 0) {
+        // Waived a real value: struck-through list price + "Incl."
         const inclW = doc.getTextWidth('Incl.');
         doc.setFont('helvetica', 'bold'); doc.setTextColor(16, 150, 105);
         doc.text('Incl.', rightX, amtBaseline, { align: 'right' });
         const priceX = rightX - inclW - 6;
         doc.setFont('helvetica', 'normal'); doc.setTextColor(150, 160, 170);
         doc.text(priceStr, priceX, amtBaseline, { align: 'right' });
-        // strike-through line across the price
         const pw = doc.getTextWidth(priceStr);
         doc.setDrawColor(150, 160, 170); doc.setLineWidth(0.6);
         doc.line(priceX - pw, amtBaseline - 3, priceX, amtBaseline - 3);
+      } else if (i.included) {
+        // No value to strike — just "Included".
+        doc.setFont('helvetica', 'bold'); doc.setTextColor(16, 150, 105);
+        doc.text('Included', rightX, amtBaseline, { align: 'right' });
       } else {
         doc.setFont('helvetica', 'normal'); doc.setTextColor(...BLACK);
         doc.text(priceStr, rightX, amtBaseline, { align: 'right' });
@@ -606,7 +610,9 @@ export function generateContractPdf({ contract, client, company }) {
       : (contract.paymentType || '').replace('_', ' ');
     ensure(40);
     pillHeader(feesNum, 'Fees & Payment');
-    text(`In consideration of the services provided under this Agreement, the Client shall pay the Service Provider a total of ${fmtMoney(contract.value, contract.currency)}, payable ${payWord}, net ${contract.paymentTermsDays} days from the date of a valid invoice.`, { size: 10, gap: 6 });
+    const vs = vatSummary(contract, (a) => fmtMoney(a, contract.currency));
+    text(`In consideration of the services provided under this Agreement, the Client shall pay the Service Provider a total of ${fmtMoney(contract.value, contract.currency)}${vs.applies ? ' (exclusive of VAT)' : ''}, payable ${payWord}, net ${contract.paymentTermsDays} days from the date of a valid invoice.`, { size: 10, gap: vs.sentence ? 3 : 6 });
+    if (vs.sentence) text(vs.sentence, { size: 10, gap: 6 });
     // Instalment schedule table (only when more than one payment).
     const pays = Array.isArray(contract.payments) ? contract.payments : [];
     if (pays.length > 1) {
@@ -617,7 +623,7 @@ export function generateContractPdf({ contract, client, company }) {
       doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(...NAVY);
       doc.text('PAYMENT', M + 6, y);
       doc.text('DUE DATE', dateX, y);
-      doc.text('AMOUNT', amtX, y, { align: 'right' });
+      doc.text((vs.amountLabel || 'Amount').toUpperCase(), amtX, y, { align: 'right' });
       y += 3;
       doc.setDrawColor(...NAVY); doc.setLineWidth(0.5); doc.line(M, y, W - M, y);
       pays.forEach((p, i) => {
@@ -638,6 +644,7 @@ export function generateContractPdf({ contract, client, company }) {
   // --- Tinted bank-details box. --------------------------------------------
   if (company?.bankName || company?.bankIBAN || company?.bankSWIFT) {
     const bankLines = [
+      company?.name ? `Account Name: ${company.name}` : null,
       company?.bankName ? `Bank: ${company.bankName}` : null,
       company?.bankIBAN ? `IBAN: ${company.bankIBAN}` : null,
       company?.bankSWIFT ? `SWIFT/BIC: ${company.bankSWIFT}` : null,
@@ -676,6 +683,7 @@ export function generateContractPdf({ contract, client, company }) {
   calloutClause(confidentialityNum, 'Confidentiality & Data Protection',
     'Confidentiality & GDPR.',
     'The Service Provider shall process personal data strictly in accordance with the GDPR, the applicable Cyprus data protection legislation (Law 125(I)/2018), and Regulation (EU) 2016/679, and solely on documented instructions from the Client and exclusively for the purposes of this Agreement.',
+    'In respect of personal data processed under this Agreement, the Client acts as data controller and the Service Provider as data processor. The Service Provider shall process such data only as needed to provide the services, keep it secure, not transfer it outside the EEA without safeguards, assist the Client with data-subject requests, and delete or return the data on termination. Where the data concerns minors, the Client is responsible for obtaining any necessary parental or guardian consent.',
     "All match analysis, reports, video clips, data outputs, and technical insights produced under this Agreement shall be treated as strictly confidential and used solely for the Client's internal purposes.");
 
   // --- Intellectual Property Rights ----------------------------------------

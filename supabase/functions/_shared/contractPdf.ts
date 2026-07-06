@@ -118,6 +118,37 @@ function computeServiceLineItems(services: Any): Array<Any> {
     });
 }
 
+// Port of vatSummary — derive net/VAT/gross from payment rows. Keep in sync
+// with src/lib/constants.js.
+function vatSummary(contract: Any, fm: (a: Any) => string): { applies: boolean; sentence: string; amountLabel: string; note: string } {
+  const pays = Array.isArray(contract?.payments) ? contract.payments : [];
+  const num = (v: Any) => Number(v) || 0;
+  let net = 0, vat = 0, gross = 0, rate = 0;
+  if (pays.length) {
+    for (const p of pays) {
+      const a = num(p.amount ?? p.total_amount);
+      const v = num(p.vatAmount ?? p.vat_amount);
+      net += a; vat += v; gross += (num(p.totalAmount ?? p.total_amount) || (a + v));
+      const r = num(p.vatRate ?? p.vat_rate); if (r) rate = r;
+    }
+  } else {
+    net = num(contract?.value); gross = net;
+  }
+  vat = Math.round(vat * 100) / 100; gross = Math.round(gross * 100) / 100;
+  const applies = vat > 0.005;
+  const ratePct = rate ? Math.round(rate * 100) : 19;
+  if (applies) {
+    return { applies: true, sentence: `The above amount is exclusive of VAT. VAT at ${ratePct}% (${fm(vat)}) applies, giving a total amount payable of ${fm(gross)}.`, amountLabel: 'Amount (incl. VAT)', note: '' };
+  }
+  const country = contract?.client?.country || contract?.clientCountry;
+  const hasVatNo = contract?.client?.vatNumber || contract?.clientVatNumber;
+  const EU = ['AT','BE','BG','HR','CY','CZ','DK','EE','FI','FR','DE','GR','HU','IE','IT','LV','LT','LU','MT','NL','PL','PT','RO','SK','SI','ES','SE'];
+  let noteText = '';
+  if (country && EU.includes(country) && country !== 'CY' && hasVatNo) noteText = 'The VAT reverse-charge mechanism applies (Article 196, EU VAT Directive); the Client shall self-account for VAT.';
+  else if (country && !EU.includes(country)) noteText = 'This supply is outside the scope of Cyprus VAT.';
+  return { applies: false, sentence: noteText, amountLabel: 'Amount', note: noteText };
+}
+
 const UNLIMITED_SEATS = -1;
 function seatLabel(count: Any, singular: string, plural: string): string {
   if (count === UNLIMITED_SEATS) return `Unlimited ${plural}`;
@@ -743,13 +774,18 @@ export async function buildContractPdf(input: {
       // + "Incl." so the value is visible but unbilled.
       const rightX = W - M - cellPadX;
       const amtBaseline = rowTop + 12;
-      if (i.included) {
+      if (i.included && i.listPrice > 0) {
+        // Waived a real value: struck-through list price + "Incl."
         const inclW = bold.widthOfTextAtSize('Incl.', 9.5);
         page.drawText('Incl.', { x: rightX - inclW, y: py(amtBaseline), size: 9.5, font: bold, color: rgb(0.063, 0.588, 0.412) });
         const pw = font.widthOfTextAtSize(priceStr, 9.5);
         const priceRight = rightX - inclW - 6;
         page.drawText(priceStr, { x: priceRight - pw, y: py(amtBaseline), size: 9.5, font, color: rgb(0.588, 0.627, 0.667) });
         page.drawLine({ start: { x: priceRight - pw, y: py(amtBaseline - 3) }, end: { x: priceRight, y: py(amtBaseline - 3) }, thickness: 0.6, color: rgb(0.588, 0.627, 0.667) });
+      } else if (i.included) {
+        // No value to strike — just "Included".
+        const w = bold.widthOfTextAtSize('Included', 9.5);
+        page.drawText('Included', { x: rightX - w, y: py(amtBaseline), size: 9.5, font: bold, color: rgb(0.063, 0.588, 0.412) });
       } else {
         const pw = font.widthOfTextAtSize(priceStr, 9.5);
         page.drawText(priceStr, { x: rightX - pw, y: py(amtBaseline), size: 9.5, font, color: BLACK });
@@ -790,16 +826,19 @@ export async function buildContractPdf(input: {
   {
     ensure(40);
     pillHeader(feesNum, 'Fees & Payment');
-    text(`In consideration of the services provided under this Agreement, the Client shall pay the Service Provider a total of ${fmtMoney(value, currency)}, payable ${paymentType}, net ${paymentTermsDays} days from the date of a valid invoice.`, { size: 10, gap: 6 });
+    const vs = vatSummary(c, (a: Any) => fmtMoney(a, currency));
+    text(`In consideration of the services provided under this Agreement, the Client shall pay the Service Provider a total of ${fmtMoney(value, currency)}${vs.applies ? ' (exclusive of VAT)' : ''}, payable ${paymentType}, net ${paymentTermsDays} days from the date of a valid invoice.`, { size: 10, gap: vs.sentence ? 3 : 6 });
+    if (vs.sentence) text(vs.sentence, { size: 10, gap: 6 });
     // Instalment schedule table (only when more than one payment).
     if (payments.length > 1) {
       const amtX = W - M - 12;
       const dateX = M + maxW * 0.5;
+      const amtHead = (vs.amountLabel || 'Amount').toUpperCase();
       ensure(16); y += 12;
       page.drawText('PAYMENT', { x: M + 6, y: py(y), size: 8, font: bold, color: NAVY });
       page.drawText('DUE DATE', { x: dateX, y: py(y), size: 8, font: bold, color: NAVY });
-      const ahW = bold.widthOfTextAtSize('AMOUNT', 8);
-      page.drawText('AMOUNT', { x: amtX - ahW, y: py(y), size: 8, font: bold, color: NAVY });
+      const ahW = bold.widthOfTextAtSize(amtHead, 8);
+      page.drawText(amtHead, { x: amtX - ahW, y: py(y), size: 8, font: bold, color: NAVY });
       y += 3;
       page.drawLine({ start: { x: M, y: py(y) }, end: { x: W - M, y: py(y) }, thickness: 0.5, color: NAVY });
       for (let i = 0; i < payments.length; i++) {
@@ -828,6 +867,7 @@ export async function buildContractPdf(input: {
       // Tinted, bordered bank-details box. Measure the content span, then paint
       // the box behind it on the same page (kept together to avoid a page split).
       const bankLines = [
+        `Account Name: ${companyName0}`,
         bankName ? `Bank: ${bankName}` : null,
         bankIBAN ? `IBAN: ${bankIBAN}` : null,
         bankSWIFT ? `SWIFT/BIC: ${bankSWIFT}` : null,
@@ -865,6 +905,7 @@ export async function buildContractPdf(input: {
   calloutClause(confidentialityNum, 'Confidentiality & Data Protection',
     'Confidentiality & GDPR.',
     'The Service Provider shall process personal data strictly in accordance with the GDPR, the applicable Cyprus data protection legislation (Law 125(I)/2018), and Regulation (EU) 2016/679, and solely on documented instructions from the Client and exclusively for the purposes of this Agreement.',
+    'In respect of personal data processed under this Agreement, the Client acts as data controller and the Service Provider as data processor. The Service Provider shall process such data only as needed to provide the services, keep it secure, not transfer it outside the EEA without safeguards, assist the Client with data-subject requests, and delete or return the data on termination. Where the data concerns minors, the Client is responsible for obtaining any necessary parental or guardian consent.',
     "All match analysis, reports, video clips, data outputs, and technical insights produced under this Agreement shall be treated as strictly confidential and used solely for the Client's internal purposes.");
 
   // --- Intellectual Property Rights ----------------------------------------

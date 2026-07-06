@@ -237,6 +237,50 @@ export function serviceLevelsLines(contract) {
   ];
 }
 
+// VAT summary for the Fees clause. Derives net / VAT / gross from the payment
+// rows (which carry the real per-instalment VAT), with a fallback to the
+// contract value. Returns:
+//   { applies, sentence, amountLabel, note }
+// - applies: true when VAT is charged (>0).
+// - sentence: the VAT line to show after the "total of X" sentence.
+// - amountLabel: header/label for the instalment Amount column.
+// - note: reverse-charge / out-of-scope note (from the payment rows), or ''.
+// `fm(amount)` formats money. NOTE: ported into both PDF generators.
+export function vatSummary(contract, fm) {
+  const pays = Array.isArray(contract?.payments) ? contract.payments : [];
+  const num = (v) => Number(v) || 0;
+  let net = 0, vat = 0, gross = 0, rate = 0, note = '';
+  if (pays.length) {
+    pays.forEach(p => {
+      const a = num(p.amount ?? p.total_amount);
+      const v = num(p.vatAmount ?? p.vat_amount);
+      net += a; vat += v; gross += (num(p.totalAmount ?? p.total_amount) || (a + v));
+      const r = num(p.vatRate ?? p.vat_rate); if (r) rate = r;
+    });
+  } else {
+    net = num(contract?.value); gross = net;
+  }
+  net = Math.round(net * 100) / 100; vat = Math.round(vat * 100) / 100; gross = Math.round(gross * 100) / 100;
+  const applies = vat > 0.005;
+  const ratePct = rate ? Math.round(rate * 100) : 19;
+  if (applies) {
+    return {
+      applies: true,
+      sentence: `The above amount is exclusive of VAT. VAT at ${ratePct}% (${fm(vat)}) applies, giving a total amount payable of ${fm(gross)}.`,
+      amountLabel: 'Amount (incl. VAT)',
+      note: '',
+    };
+  }
+  // No VAT charged — note why (reverse charge or out of scope), if we can tell.
+  const country = contract?.client?.country || contract?.clientCountry;
+  const hasVatNo = contract?.client?.vatNumber || contract?.clientVatNumber;
+  const EU = ['AT','BE','BG','HR','CY','CZ','DK','EE','FI','FR','DE','GR','HU','IE','IT','LV','LT','LU','MT','NL','PL','PT','RO','SK','SI','ES','SE'];
+  let noteText = '';
+  if (country && EU.includes(country) && country !== 'CY' && hasVatNo) noteText = 'The VAT reverse-charge mechanism applies (Article 196, EU VAT Directive); the Client shall self-account for VAT.';
+  else if (country && !EU.includes(country)) noteText = 'This supply is outside the scope of Cyprus VAT.';
+  return { applies: false, sentence: noteText, amountLabel: 'Amount', note: noteText };
+}
+
 export function generateDescriptionFromServices(services, slaHours) {
   const items = computeServiceLineItems(services);
   if (!items.length) return '';

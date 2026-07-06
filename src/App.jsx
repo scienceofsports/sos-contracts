@@ -17,6 +17,7 @@ import {
   SPECIAL_TERM_CLAUSES,
   parseSpecialTerms,
   serviceLevelsLines,
+  vatSummary,
 } from './lib/constants.js';
 import {
   nowISO,
@@ -932,13 +933,15 @@ function ContractForm({ navigate, editContractId }) {
                           <input type="number" min="0" step="0.01" value={svc.rate} onChange={e=>toggleService(s.key, { rate: Number(e.target.value) })} className="w-20 px-2 py-1 text-sm border border-[var(--border)] rounded-lg text-right" placeholder="Rate" />
                         </div>
                       )}
-                      {svc.selected && s.unit !== 'included' && (
+                      {svc.selected && s.unit !== 'included' && (() => { const lp = s.unit==='flat'?svc.rate:svc.rate*svc.qty; return (
                         <div className="w-28 text-right text-sm font-data">
                           {svc.included
-                            ? <><span className="line-through text-slate-400">{fmtMoney(s.unit==='flat'?svc.rate:svc.rate*svc.qty, form.currency)}</span> <span className="text-emerald-600">Incl.</span></>
-                            : fmtMoney(s.unit==='flat'?svc.rate:svc.rate*svc.qty, form.currency)}
+                            ? (lp > 0
+                                ? <><span className="line-through text-slate-400">{fmtMoney(lp, form.currency)}</span> <span className="text-emerald-600">Incl.</span></>
+                                : <span className="text-emerald-600">Included</span>)
+                            : fmtMoney(lp, form.currency)}
                         </div>
-                      )}
+                      ); })()}
                     </div>
                     {s.key === 'platform_access' && svc.selected && (
                       <div className="flex flex-wrap items-center gap-5 mt-2 ml-7 pl-2 border-l-2 border-slate-100">
@@ -1166,14 +1169,9 @@ function ContractForm({ navigate, editContractId }) {
         )}
         </CollapsibleSection>
 
-        <CollapsibleSection title="Description & Special Terms" open={openSections.text} onToggle={()=>toggleSection('text')} summary={specialTermsList.filter(t=>t.text&&t.text.trim()).length ? `${specialTermsList.filter(t=>t.text&&t.text.trim()).length} special term(s)` : 'Auto-generated description'}>
-        <Field label="Description">
-          <textarea value={form.description} onChange={e=>set('description',e.target.value)} rows={18} className={inputCls(false) + ' font-data text-xs'} placeholder="Scope of work, deliverables, terms…" />
-        </Field>
-
+        <CollapsibleSection title="Special Terms" open={openSections.text} onToggle={()=>toggleSection('text')} summary={specialTermsList.filter(t=>t.text&&t.text.trim()).length ? `${specialTermsList.filter(t=>t.text&&t.text.trim()).length} special term(s)` : 'None'}>
         <div className="mb-2">
-          <div className="text-sm font-medium text-slate-600 mb-1">Special Terms / Additional Agreements (optional)</div>
-          <p className="text-xs text-slate-400 mb-3">Add one-off terms specific to this club. Link a term to the clause it modifies (e.g. Fees &amp; Payment) so it reads clearly in the signed contract, or leave it "General".</p>
+          <p className="text-xs text-slate-400 mb-3">Add one-off terms specific to this club (optional). Link a term to the clause it modifies (e.g. Fees &amp; Payment) so it reads clearly in the signed contract, or leave it "General".</p>
           <div className="space-y-3">
             {specialTermsList.map((term, i) => (
               <div key={i} className="rounded-lg border border-[var(--border)] p-3 bg-slate-50/60">
@@ -1707,7 +1705,9 @@ function ContractDocumentBody({ contract, client, company }) {
                           </td>
                           <td className="py-2 px-3 text-right font-data whitespace-nowrap">
                             {i.included
-                              ? <><span className="line-through text-slate-400">{fmtMoney(i.listPrice, contract.currency)}</span> <span className="text-emerald-600">Incl.</span></>
+                              ? (i.listPrice > 0
+                                  ? <><span className="line-through text-slate-400">{fmtMoney(i.listPrice, contract.currency)}</span> <span className="text-emerald-600">Incl.</span></>
+                                  : <span className="text-emerald-600">Included</span>)
                               : fmtMoney(i.listPrice, contract.currency)}
                           </td>
                         </tr>
@@ -1735,15 +1735,18 @@ function ContractDocumentBody({ contract, client, company }) {
                 </React.Fragment>
               )}
 
+              {(() => { const vs = vatSummary(contract, (a) => fmtMoney(a, contract.currency)); return (
+              <React.Fragment>
               <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{feesNum}.</span> Fees & Payment</div>
-              <p className="text-sm text-slate-700 mb-2">In consideration of the services provided under this Agreement, the Client shall pay the Service Provider a total of <strong>{fmtMoney(contract.value, contract.currency)}</strong>, payable <strong>{contract.paymentType === 'one_time' ? 'in a single payment' : contract.paymentType === 'milestone' ? 'in instalments' : contract.paymentType.replace('_',' ')}</strong>, net {contract.paymentTermsDays} days from the date of a valid invoice.</p>
+              <p className="text-sm text-slate-700 mb-2">In consideration of the services provided under this Agreement, the Client shall pay the Service Provider a total of <strong>{fmtMoney(contract.value, contract.currency)}</strong>{vs.applies ? ' (exclusive of VAT)' : ''}, payable <strong>{contract.paymentType === 'one_time' ? 'in a single payment' : contract.paymentType === 'milestone' ? 'in instalments' : contract.paymentType.replace('_',' ')}</strong>, net {contract.paymentTermsDays} days from the date of a valid invoice.</p>
+              {vs.sentence && <p className="text-sm text-slate-700 mb-2">{vs.sentence}</p>}
               {Array.isArray(contract.payments) && contract.payments.length > 1 && (
                 <table className="w-full text-sm mb-4 border-collapse">
                   <thead>
                     <tr className="text-left text-xs uppercase tracking-wide" style={{ background:'rgba(10,26,63,0.05)', color:'var(--navy-deep)' }}>
                       <th className="py-2 px-3 rounded-l-md">Payment</th>
                       <th className="py-2 px-3">Due Date</th>
-                      <th className="py-2 px-3 text-right rounded-r-md">Amount</th>
+                      <th className="py-2 px-3 text-right rounded-r-md">{vs.amountLabel}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1757,10 +1760,13 @@ function ContractDocumentBody({ contract, client, company }) {
                   </tbody>
                 </table>
               )}
+              </React.Fragment>
+              ); })()}
               <p className="text-sm text-slate-700 mb-4">All payments shall be made by bank transfer following the issuance of a valid invoice by the Service Provider, in accordance with applicable VAT regulations. A late payment penalty of {contract.latePaymentPenalty}% per month applies to overdue amounts.</p>
               {(company.bankName || company.bankIBAN || company.bankSWIFT) && (
                 <div className="text-sm text-slate-700 mb-8 rounded-lg p-4" style={{ background:'rgba(10,26,63,0.04)', border:'1px solid var(--border)' }}>
                   <div className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color:'var(--navy-deep)' }}>Bank Details (Service Provider)</div>
+                  <div>Account Name: <strong>{company.name}</strong></div>
                   {company.bankName && <div>Bank: <strong>{company.bankName}</strong></div>}
                   {company.bankIBAN && <div>IBAN: <strong>{company.bankIBAN}</strong></div>}
                   {company.bankSWIFT && <div>SWIFT/BIC: <strong>{company.bankSWIFT}</strong></div>}
@@ -1784,6 +1790,7 @@ function ContractDocumentBody({ contract, client, company }) {
               <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{confidentialityNum}.</span> Confidentiality & Data Protection</div>
               <div className="mb-8 pl-4 pr-5 py-4 rounded-r-lg" style={{ background:'#EEF0FB', borderLeft:'3px solid var(--navy-deep)', WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}>
                 <p className="text-sm text-slate-700 mb-2"><span className="font-semibold" style={{ color:'var(--navy-deep)' }}>Confidentiality & GDPR.</span> The Service Provider shall process personal data strictly in accordance with the GDPR, the applicable Cyprus data protection legislation (Law 125(I)/2018), and Regulation (EU) 2016/679, and solely on documented instructions from the Client and exclusively for the purposes of this Agreement.</p>
+                <p className="text-sm text-slate-700 mb-2">In respect of personal data processed under this Agreement, the Client acts as data controller and the Service Provider as data processor. The Service Provider shall process such data only as needed to provide the services, keep it secure, not transfer it outside the EEA without safeguards, assist the Client with data-subject requests, and delete or return the data on termination. Where the data concerns minors, the Client is responsible for obtaining any necessary parental or guardian consent.</p>
                 <p className="text-sm text-slate-700">All match analysis, reports, video clips, data outputs, and technical insights produced under this Agreement shall be treated as strictly confidential and used solely for the Client's internal purposes.</p>
               </div>
 
