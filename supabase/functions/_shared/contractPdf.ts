@@ -207,18 +207,6 @@ function serviceLevelsLines(c: Any): string[] {
   return [`The Service Provider shall use reasonable endeavours to deliver the key analytical outputs for each covered match within the following timeframes, measured from receipt of usable match footage and applicable match data: ${lines.join(' ')}${restLine}`];
 }
 
-// Port of computeKickback — keep in sync with src/lib/constants.js.
-function computeKickback(o: Any): Any {
-  const n = Number(o?.playerCount) || 0;
-  const fee = Number(o?.playerMonthlyFee) || 0;
-  const months = Number(o?.playerMonths) || 0;
-  const pct = Number(o?.kickbackPct) || 0;
-  const gross = Math.round(n * fee * months * 100) / 100;
-  const kickback = Math.round(gross * (pct / 100) * 100) / 100;
-  const net = Math.round((gross - kickback) * 100) / 100;
-  return { gross, kickback, net, pct, playerCount: n, playerMonthlyFee: fee, playerMonths: months };
-}
-
 const PAYMENT_MODEL_LABELS: Record<string, string> = {
   club_all: 'Club-funded — the Client pays the full fee',
   club_players: 'Shared — a fixed amount is agreed with the Client; players fund the remainder',

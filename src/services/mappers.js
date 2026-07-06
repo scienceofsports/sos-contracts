@@ -180,6 +180,7 @@ export function contractFromRow(row, payments = [], events = []) {
     kickbackPct: row.kickback_pct ?? null,
     minPlayers: row.min_players ?? null,
     slaBands: row.sla_bands ?? [],
+    slaHours: row.sla_hours ?? 24,
     createdBy: row.created_by ?? null,
     createdAt: row.created_at ?? null,
     sentAt: sentEvent?.server_timestamp ?? null,
@@ -256,6 +257,7 @@ export function contractToRow(obj) {
   if ('kickbackPct' in obj) row.kickback_pct = obj.kickbackPct === '' ? null : obj.kickbackPct;
   if ('minPlayers' in obj) row.min_players = obj.minPlayers === '' ? null : obj.minPlayers;
   if ('slaBands' in obj) row.sla_bands = Array.isArray(obj.slaBands) ? obj.slaBands : [];
+  if ('slaHours' in obj) row.sla_hours = obj.slaHours === '' || obj.slaHours == null ? 24 : obj.slaHours;
   if ('createdBy' in obj) row.created_by = obj.createdBy;
   return row;
 }

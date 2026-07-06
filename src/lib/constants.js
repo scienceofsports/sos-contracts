@@ -175,21 +175,6 @@ export function seasonLabelFromDates(startDate, endDate) {
   return '';
 }
 
-// Commercial Model — kickback calculator. Pure math, no formatting.
-// gross = players × monthlyFee × months; kickback = gross × pct/100;
-// net = gross − kickback. Returns numbers rounded to 2 dp.
-// NOTE: ported verbatim into both PDF generators — keep in sync.
-export function computeKickback({ playerCount, playerMonthlyFee, playerMonths, kickbackPct }) {
-  const n = Number(playerCount) || 0;
-  const fee = Number(playerMonthlyFee) || 0;
-  const months = Number(playerMonths) || 0;
-  const pct = Number(kickbackPct) || 0;
-  const gross = Math.round(n * fee * months * 100) / 100;
-  const kickback = Math.round(gross * (pct / 100) * 100) / 100;
-  const net = Math.round((gross - kickback) * 100) / 100;
-  return { gross, kickback, net, pct, playerCount: n, playerMonthlyFee: fee, playerMonths: months };
-}
-
 // Human labels for the payment models.
 export const PAYMENT_MODEL_LABELS = {
   club_all: 'Club-funded — the Client pays the full fee',

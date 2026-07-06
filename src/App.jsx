@@ -590,7 +590,7 @@ function ContractForm({ navigate, editContractId }) {
     startDate:'', endDate:'', paymentType:'one_time', paymentTermsDays:30, latePaymentPenalty:1.5,
     governingLaw:'Republic of Cyprus', jurisdiction:'Nicosia, Cyprus', description:'', slaHours:24, specialTerms:'',
     analysisTeams:[], oppMatchFootage:false, oppTeamAnalysis:false, oppPlayerAnalysis:false,
-    billingBasis:'services', paymentModel:'', playerCount:'', playerMonthlyFee:'', playerMonths:'', kickbackPct:'', minPlayers:'', slaBands:[],
+    billingBasis:'services', paymentModel:'club_all', playerMonthlyFee:'', playerMonths:'', kickbackPct:'', minPlayers:'', slaBands:[],
   });
   const [titleEdited, setTitleEdited] = useState(isEdit);
   // Which service groups are expanded in the form (collapsible sections).
@@ -635,8 +635,7 @@ function ContractForm({ navigate, editContractId }) {
         oppTeamAnalysis: !!existing.oppTeamAnalysis,
         oppPlayerAnalysis: !!existing.oppPlayerAnalysis,
         billingBasis: existing.billingBasis || 'services',
-        paymentModel: existing.paymentModel || '',
-        playerCount: existing.playerCount ?? '',
+        paymentModel: existing.paymentModel || 'club_all',
         playerMonthlyFee: existing.playerMonthlyFee ?? '',
         playerMonths: existing.playerMonths ?? '',
         kickbackPct: existing.kickbackPct ?? '',
@@ -729,10 +728,11 @@ function ContractForm({ navigate, editContractId }) {
   const setPaymentModel = (model) => {
     setForm(f => {
       const billingBasis = model === 'club_all' ? 'services' : 'player_funded';
-      // Player-funded value is entered manually — clear any value carried over
-      // from a previous model so a stale figure can't slip through. Club-funded
-      // and Shared re-derive their value automatically via the sync effect.
-      const value = model === 'players_all' ? '' : f.value;
+      // Shared and Player-funded both take a MANUALLY entered value, so clear any
+      // value carried over from a previous model (e.g. the services total from
+      // Club-funded) — a stale figure must never slip through as the agreed fee.
+      // Club-funded re-derives its value from the services total via the effect.
+      const value = (model === 'club_players' || model === 'players_all') ? '' : f.value;
       return { ...f, paymentModel: model, billingBasis, value };
     });
   };
@@ -791,7 +791,10 @@ function ContractForm({ navigate, editContractId }) {
     const e = {};
     if (!form.title.trim()) e.title = 'Title is required.';
     if (!form.clientId) e.clientId = 'Select a client.';
-    if (!form.value || Number(form.value) <= 0) e.value = 'Enter a positive value.';
+    // Player-funded deals may have no Client-payable value (players pay SOS
+    // directly), so allow 0 there; every other model requires a positive value.
+    const allowZeroValue = form.paymentModel === 'players_all';
+    if (allowZeroValue ? (form.value === '' || Number(form.value) < 0) : (!form.value || Number(form.value) <= 0)) e.value = allowZeroValue ? 'Enter a value (0 or more).' : 'Enter a positive value.';
     if (!/^\d+(\.\d{1,2})?$/.test(String(form.value))) e.value = 'Max 2 decimal places.';
     if (form.startDate && form.endDate && new Date(form.endDate) <= new Date(form.startDate)) e.endDate = 'End date must be after start date.';
     if (form.paymentType === 'one_time' && !oneTimeDate) e.oneTimeDate = 'Payment date is required.';
@@ -887,7 +890,7 @@ function ContractForm({ navigate, editContractId }) {
         </Field>
 
         <CollapsibleSection title="Services Included" open={openSections.services} onToggle={()=>toggleSection('services')} summary={`${lineItems.length} selected · ${fmtMoney(lineItemsTotal, form.currency)}`}>
-        <p className="text-xs text-slate-500 mb-4">Tick each service this client is getting, set quantity and price. Mark a service "Included" to bundle it into the core platform price (shown to the client as part of the value they're getting), or "Comp" to waive it as a one-off free favor. Prices here are for your reference only — the contract sent to the client lists services and the total, not per-line prices. The description and value below update automatically — review both before saving.</p>
+        <p className="text-xs text-slate-500 mb-4">Tick each service this client is getting, set quantity and price. Mark a service "Included" to provide it at no charge — its value is still shown to the client (struck through) but isn't added to the total. The contract sent to the client lists services with their amounts and the total. The description and value below update automatically — review both before saving.</p>
         {SERVICE_GROUPS.map(group => {
           const groupServices = SERVICE_CATALOG.filter(s => s.group === group);
           const selectedCount = groupServices.filter(s => services[s.key]?.selected).length;
@@ -994,7 +997,7 @@ function ContractForm({ navigate, editContractId }) {
         </CollapsibleSection>
 
         {/* --- Commercial Model: how the deal is funded. --------------------- */}
-        <CollapsibleSection title="Commercial Model" open={openSections.commercial} onToggle={()=>toggleSection('commercial')} summary={form.paymentModel ? (PAYMENT_MODEL_LABELS[form.paymentModel] || '').split(' — ')[0] : 'Club-funded (default)'}>
+        <CollapsibleSection title="Commercial Model" open={openSections.commercial} onToggle={()=>toggleSection('commercial')} summary={(PAYMENT_MODEL_LABELS[form.paymentModel] || 'Club-funded').split(' — ')[0]}>
         <p className="text-xs text-slate-400 mb-3">How is this deal funded? The services above describe what the Client gets; this sets who pays. For Shared and Player-funded deals, the contract value is entered manually below (the player numbers aren't known in advance, so they're stated as terms, not computed).</p>
         <div className="space-y-1.5 mb-3">
           {[['club_all','Club-funded — the Client pays the full fee'],['club_players','Shared — a fixed amount is agreed with the Client; players fund the remainder'],['players_all','Player-funded — fees are collected directly from players']].map(([val,label]) => (
@@ -1084,7 +1087,9 @@ function ContractForm({ navigate, editContractId }) {
               </div>
             </div>
           ))}
-          <button type="button" onClick={addSlaBand} className="text-sm text-[var(--blue-primary)] hover:underline">+ Add a different SLA for specific teams</button>
+          {(form.analysisTeams && form.analysisTeams.length)
+            ? <button type="button" onClick={addSlaBand} className="text-sm text-[var(--blue-primary)] hover:underline">+ Add a different SLA for specific teams</button>
+            : <span className="text-xs text-slate-400">Select the covered teams above to set a different SLA for specific teams.</span>}
         </div>
         </CollapsibleSection>
 
@@ -1645,7 +1650,7 @@ function ContractDocumentBody({ contract, client, company }) {
               <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{purposeNum}.</span> Purpose</div>
               {lineItems.length > 0 ? (
                 <div className="mb-8">
-                  <p className="text-sm text-slate-700 mb-4">The Service Provider will provide the Client with the following services:</p>
+                  <p className="text-sm text-slate-700 mb-4">The purpose of this Agreement is to define the terms of cooperation between the Parties, under which the Service Provider shall provide the Client with the following services:</p>
                   {SERVICE_GROUPS.map(group => {
                     const groupItems = lineItems.filter(i => i.group === group);
                     if (!groupItems.length) return null;
