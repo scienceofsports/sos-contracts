@@ -1568,7 +1568,7 @@ function ContractDocumentBody({ contract, client, company }) {
         </p>
         <p className="text-sm text-slate-700 mb-6">and</p>
         <p className="text-sm text-slate-700 mb-8">
-          <strong>{client.companyName}</strong>, {client.registrationNumber ? `a company registered with registration number ${client.registrationNumber}, ` : ''}having its registered office at {client.address || '[address]'} (the "Client").
+          <strong>{client.companyName}</strong>, {client.registrationNumber ? `a company registered with registration number ${client.registrationNumber}, ` : ''}having its registered office at {client.address || 'the address confirmed by the Client on signing'} (the "Client").
         </p>
         <p className="text-sm text-slate-700 mb-8">The above are hereinafter jointly referred to as the "Parties".</p>
 

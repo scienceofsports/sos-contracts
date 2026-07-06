@@ -385,7 +385,7 @@ export function generateContractPdf({ contract, client, company }) {
   text(`This Agreement is made on ${fmtDate(contract.createdAt || contract.sentAt || new Date().toISOString())} between:`, { size: 10, gap: 4 });
   text(`${company?.name || '—'}, a company registered under the laws of the Republic of Cyprus with registration number ${company?.registrationNumber || '—'}, VAT number ${company?.vatNumber || '—'}, having its registered office at ${company?.registeredAddress || '—'} (the "Service Provider"),`, { size: 10, gap: 2 });
   text('and', { size: 10, gap: 2 });
-  text(`${client?.companyName || '—'}, ${client?.registrationNumber ? `a company registered with registration number ${client.registrationNumber}, ` : ''}having its registered office at ${client?.address || '[address]'} (the "Client").`, { size: 10, gap: 2 });
+  text(`${client?.companyName || '—'}, ${client?.registrationNumber ? `a company registered with registration number ${client.registrationNumber}, ` : ''}having its registered office at ${client?.address || 'the address confirmed by the Client on signing'} (the "Client").`, { size: 10, gap: 2 });
   text('The above are hereinafter jointly referred to as the "Parties".', { size: 10, gap: 10 });
 
   // --- About the Service Provider — navy pill + intro + credential bullets. --

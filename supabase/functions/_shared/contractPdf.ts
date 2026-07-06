@@ -550,7 +550,7 @@ export async function buildContractPdf(input: {
   const companyAddr = pick(co, 'registeredAddress', 'registered_address') || '—';
   const clientName = pick(cl, 'companyName', 'company_name') || '—';
   const clientReg = pick(cl, 'registrationNumber', 'registration_number');
-  const clientAddr = cl.address || '[address]';
+  const clientAddr = cl.address || 'the address confirmed by the Client on signing';
 
   // --- Title (split on the dash like the client PDF), centred navy bold. ----
   {
