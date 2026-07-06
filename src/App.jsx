@@ -712,11 +712,11 @@ function ContractForm({ navigate, editContractId }) {
     setForm(f => ({ ...f, [k]: v }));
   };
 
-  // Payment model is the primary funding choice. All three models are
-  // player-pool based (they collect player fees); billingBasis flags that the
-  // Commercial Terms clause + value logic should use the player pool.
+  // Payment model is the primary funding choice. Club-funded = a plain services
+  // deal (value = services total). Shared / Player-funded involve player fees
+  // (billingBasis 'player_funded'), which the value + clause logic then use.
   const setPaymentModel = (model) => {
-    setForm(f => ({ ...f, paymentModel: model, billingBasis: 'player_funded' }));
+    setForm(f => ({ ...f, paymentModel: model, billingBasis: model === 'club_all' ? 'services' : 'player_funded' }));
   };
 
   const setClient = (clientId) => {
@@ -749,9 +749,9 @@ function ContractForm({ navigate, editContractId }) {
 
   // Commercial Model — live kickback calc for the form's player-funded basis.
   const kb = computeKickback({ playerCount: form.playerCount, playerMonthlyFee: form.playerMonthlyFee, playerMonths: form.playerMonths, kickbackPct: form.kickbackPct });
-  // Club-funded & Shared compute a net value that drives the contract value;
-  // Player-funded shows the pool but leaves the value manual (players pay SOS).
-  const isCalcModel = form.paymentModel === 'club_all' || form.paymentModel === 'club_players';
+  // Only Shared computes a net value that drives the contract value. Club-funded
+  // uses the services total; Player-funded leaves the value manual (players pay SOS).
+  const isCalcModel = form.paymentModel === 'club_players';
   // When services drive value, keep value synced to the catalog total; when a
   // calculated player-funded model is active, sync value to the net figure.
   useEffect(() => {
@@ -979,7 +979,7 @@ function ContractForm({ navigate, editContractId }) {
             </label>
           ))}
         </div>
-        {(form.paymentModel === 'club_all' || form.paymentModel === 'club_players' || form.paymentModel === 'players_all') && (
+        {(form.paymentModel === 'club_players' || form.paymentModel === 'players_all') && (
           <div className="rounded-lg border border-[var(--border)] p-4 mb-2 bg-slate-50/60">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <Field label="Players"><input type="number" min="0" value={form.playerCount} onChange={e=>set('playerCount', e.target.value)} className={inputCls(false)} placeholder="100" /></Field>
@@ -987,7 +987,7 @@ function ContractForm({ navigate, editContractId }) {
               <Field label="Months"><input type="number" min="0" value={form.playerMonths} onChange={e=>set('playerMonths', e.target.value)} className={inputCls(false)} placeholder="10" /></Field>
               <Field label="Club kickback %"><input type="number" min="0" max="100" step="0.1" value={form.kickbackPct} onChange={e=>set('kickbackPct', e.target.value)} className={inputCls(false)} placeholder="20" /></Field>
             </div>
-            {(form.paymentModel === 'club_all' || form.paymentModel === 'club_players') && kb.gross > 0 && (
+            {form.paymentModel === 'club_players' && kb.gross > 0 && (
               <div className="mt-3 pt-3 border-t border-[var(--border)] text-sm space-y-1">
                 <div className="flex justify-between text-slate-600"><span>Gross player fees</span><span className="font-data">{fmtMoney(kb.gross, form.currency)}</span></div>
                 <div className="flex justify-between text-slate-600"><span>Club kickback ({kb.pct}%)</span><span className="font-data text-emerald-600">− {fmtMoney(kb.kickback, form.currency)}</span></div>
