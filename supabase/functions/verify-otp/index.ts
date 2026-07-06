@@ -32,20 +32,36 @@ Deno.serve(async (req) => {
       throw new Error('This signing link has expired.');
     }
 
-    // 2. Attempt lockout.
+    // 2. Absolute (cross-request) lockout — bounds brute-force even if the
+    //    signer keeps re-requesting fresh codes. Requires a new link from staff.
+    if ((request.otp_total_attempts ?? 0) >= 25) {
+      throw new Error('Too many attempts on this request. Please ask for a new signing link.');
+    }
+    // Per-code attempt lockout.
     if ((request.otp_attempts ?? 0) >= 5) {
       throw new Error('Too many attempts. Please request a new code.');
     }
     if (!request.otp_code_hash) {
       throw new Error('Please request a verification code first.');
     }
+    // Per-code expiry: the code is only valid for 10 minutes after it was sent
+    // (matches the wording in the OTP email). After that a fresh code is needed.
+    if (request.otp_sent_at) {
+      const ageMs = Date.now() - new Date(request.otp_sent_at).getTime();
+      if (ageMs > 10 * 60 * 1000) {
+        throw new Error('This code has expired. Please request a new one.');
+      }
+    }
 
-    // 3. Compare hashes. On mismatch, increment attempts and reject.
+    // 3. Compare hashes. On mismatch, increment both counters and reject.
     const candidateHash = await sha256Hex(String(code));
     if (candidateHash !== request.otp_code_hash) {
       await admin
         .from('signing_requests')
-        .update({ otp_attempts: (request.otp_attempts ?? 0) + 1 })
+        .update({
+          otp_attempts: (request.otp_attempts ?? 0) + 1,
+          otp_total_attempts: (request.otp_total_attempts ?? 0) + 1,
+        })
         .eq('id', request.id);
       throw new Error('Incorrect code.');
     }

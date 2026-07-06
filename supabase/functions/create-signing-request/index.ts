@@ -1,11 +1,10 @@
 // ============================================================================
-// create-signing-request  (ADMIN-triggered)
+// create-signing-request  (ADMIN only)
 //
 // The logged-in admin app calls this when a user clicks "Send for signature".
-// The admin app passes the user's auth JWT in the Authorization header, but for
-// simplicity this function uses the ADMIN (service-role) client to do the work.
-// It trusts the caller since only the admin app knows the function URL + anon
-// key — acceptable for now. Tighten later by verifying the JWT / is_admin().
+// The caller MUST be an authenticated admin — we verify their JWT and check the
+// app_users role before doing anything (same pattern as invite-user). The
+// signing-link origin is whitelisted, never trusted from the request body.
 //
 // Freezes a full {contract, client, company} snapshot + its hash into a new
 // signing_requests row, marks the contract 'sent', logs a 'sent' audit event,
@@ -16,16 +15,38 @@ import { getAdminClient } from '../_shared/supabaseAdmin.ts';
 import { hashDocument } from '../_shared/evidence.ts';
 import { sendEmail, signRequestEmail } from '../_shared/email.ts';
 import { appendEvent } from '../_shared/audit.ts';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+// Allowed origins for the signing link — the request body is NOT trusted.
+const ALLOWED_ORIGINS = [
+  'https://contracts.scienceofsports.net',
+  'http://localhost:5173',
+  'http://localhost:5174',
+];
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return handleOptions();
   try {
-    const body = await req.json();
-    const { contractId, appOrigin } = body;
-    if (!contractId) throw new Error('contractId is required');
-    if (!appOrigin) throw new Error('appOrigin is required');
+    // --- Authorise: caller must be an authenticated ADMIN. ------------------
+    const authHeader = req.headers.get('Authorization') || '';
+    const jwt = authHeader.replace(/^Bearer\s+/i, '');
+    if (!jwt) throw new Error('Not authorised.');
+    const url = Deno.env.get('SUPABASE_URL')!;
+    const anon = Deno.env.get('SUPABASE_ANON_KEY')!;
+    const caller = createClient(url, anon, { global: { headers: { Authorization: `Bearer ${jwt}` } } });
+    const { data: userData, error: userErr } = await caller.auth.getUser();
+    if (userErr || !userData?.user) throw new Error('Not authorised.');
 
     const admin = getAdminClient();
+    const { data: profile } = await admin.from('app_users').select('role').eq('id', userData.user.id).maybeSingle();
+    if (!profile || profile.role !== 'admin') throw new Error('Only admins can send contracts for signature.');
+
+    const body = await req.json();
+    const { contractId } = body;
+    if (!contractId) throw new Error('contractId is required');
+    // Whitelist the signing-link origin; never trust it from the request body.
+    const requested = (body.appOrigin || '').replace(/\/$/, '');
+    const appOrigin = ALLOWED_ORIGINS.includes(requested) ? requested : ALLOWED_ORIGINS[0];
 
     // 1/2. Load the contract.
     const { data: contract, error: contractErr } = await admin
