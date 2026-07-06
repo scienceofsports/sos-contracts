@@ -229,10 +229,14 @@ export function generateContractPdf({ contract, client, company }) {
   // Layout cursor + page management. `y` grows downward (jsPDF native top-down).
   // -------------------------------------------------------------------------
   let y = CONTENT_TOP_P1;
+  // Track the y where the current page's body content started, so we can detect
+  // and drop a trailing page that ended up with no real content (chrome only).
+  let pageContentStart = CONTENT_TOP_P1;
   const newPage = () => {
     doc.addPage();
     drawHeaderRest();
     y = CONTENT_TOP_REST;
+    pageContentStart = CONTENT_TOP_REST;
   };
   const ensure = (need) => { if (y + need > H - BOTTOM) newPage(); };
 
@@ -499,7 +503,7 @@ export function generateContractPdf({ contract, client, company }) {
     doc.setFontSize(8.5);
     doc.setTextColor(...WHITE);
     doc.text('SERVICE', M + cellPadX, headTop + 13);
-    doc.text('QTY', W - M - cellPadX, headTop + 13, { align: 'right' });
+    doc.text('AMOUNT', W - M - cellPadX, headTop + 13, { align: 'right' });
     y = headTop + headH;
 
     // Body rows: wrapped service label (+ optional seats subline) on the left,
@@ -770,6 +774,12 @@ export function generateContractPdf({ contract, client, company }) {
 
   // --- Signature note. -----------------------------------------------------
   text('This document is provided for review. To execute it, the Client signs electronically through the secure signing link. Upon signing, a Certificate of Completion containing the full signature evidence is issued to both parties.', { size: 9, color: GREY });
+
+  // Drop a trailing page that ended up with no body content (a page-break
+  // artifact where the last block spilled but drew nothing meaningful).
+  if (doc.getNumberOfPages() > 1 && y <= pageContentStart + 1) {
+    doc.deletePage(doc.getNumberOfPages());
+  }
 
   // --- Footer band on every page. ------------------------------------------
   const pages = doc.getNumberOfPages();

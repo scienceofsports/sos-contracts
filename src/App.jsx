@@ -1655,7 +1655,7 @@ function ContractDocumentBody({ contract, client, company }) {
                     <thead>
                       <tr className="text-left text-xs uppercase tracking-wide" style={{ background:'rgba(10,26,63,0.05)', color:'var(--navy-deep)' }}>
                         <th className="py-2.5 px-3 rounded-l-md">Service</th>
-                        <th className="py-2.5 px-3 text-right rounded-r-md">Qty</th>
+                        <th className="py-2.5 px-3 text-right rounded-r-md">Amount</th>
                       </tr>
                     </thead>
                     <tbody>

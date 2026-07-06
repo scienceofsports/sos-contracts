@@ -125,24 +125,33 @@ export const SPECIAL_TERM_CLAUSES = [
   'Limitation of Liability', 'Force Majeure', 'Governing Law & Jurisdiction',
 ];
 
+// Strip markdown emphasis (**bold**, *italic*, __, _) from authored text so it
+// never leaks literal asterisks/underscores into the rendered contract.
+export function stripMarkdown(s) {
+  return String(s ?? '').replace(/\*\*/g, '').replace(/__/g, '').replace(/(^|\s)[*_](\S)/g, '$1$2').replace(/(\S)[*_](\s|$)/g, '$1$2');
+}
+
 // Normalize the special_terms value into a list of { relatesTo, text } rows.
 // Backward compatible: a plain string (legacy contracts) becomes one General
-// term. A JSON array is parsed as-is. NOTE: ported into both PDF generators.
+// term. A JSON array is parsed as-is. Markdown emphasis is stripped from text.
+// NOTE: ported into both PDF generators — keep in sync.
 export function parseSpecialTerms(raw) {
+  const clean = (arr) => arr
+    .filter(t => t && t.text && String(t.text).trim())
+    .map(t => ({ relatesTo: t.relatesTo || 'General', text: stripMarkdown(t.text).trim() }));
   if (!raw) return [];
-  if (Array.isArray(raw)) return raw.filter(t => t && t.text && t.text.trim());
-  if (typeof raw === 'object') return [raw].filter(t => t && t.text && t.text.trim());
+  if (Array.isArray(raw)) return clean(raw);
+  if (typeof raw === 'object') return clean([raw]);
   const s = String(raw).trim();
   if (!s) return [];
   // Try JSON (new format); fall back to legacy plain text as one General term.
   if (s[0] === '[' || s[0] === '{') {
     try {
       const parsed = JSON.parse(s);
-      const arr = Array.isArray(parsed) ? parsed : [parsed];
-      return arr.filter(t => t && t.text && t.text.trim());
+      return clean(Array.isArray(parsed) ? parsed : [parsed]);
     } catch { /* not JSON — treat as plain text below */ }
   }
-  return [{ relatesTo: 'General', text: s }];
+  return [{ relatesTo: 'General', text: stripMarkdown(s) }];
 }
 
 // One-line rendering of a special term: "(Re: Fees & Payment) text" or "text".

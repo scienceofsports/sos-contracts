@@ -151,23 +151,31 @@ function analysisScopeText(c: Any, seasonLabel: string): { teams: string; covera
   return { teams, coverage, opponent };
 }
 
+// Port of stripMarkdown — remove **bold**/*italic*/__/_ so authored text never
+// leaks literal markdown into the rendered contract. Keep in sync w/ constants.js.
+function stripMarkdown(s: Any): string {
+  return String(s ?? '').replace(/\*\*/g, '').replace(/__/g, '').replace(/(^|\s)[*_](\S)/g, '$1$2').replace(/(\S)[*_](\s|$)/g, '$1$2');
+}
+
 // Port of parseSpecialTerms — normalize special_terms into [{relatesTo,text}].
 // Backward compatible: plain string (legacy) → one General term; JSON array →
-// parsed. Keep in sync with src/lib/constants.js.
-function parseSpecialTerms(raw: Any): Array<{ relatesTo?: string; text: string }> {
+// parsed. Markdown stripped. Keep in sync with src/lib/constants.js.
+function parseSpecialTerms(raw: Any): Array<{ relatesTo: string; text: string }> {
+  const clean = (arr: Any[]) => arr
+    .filter((t: Any) => t && t.text && String(t.text).trim())
+    .map((t: Any) => ({ relatesTo: t.relatesTo || 'General', text: stripMarkdown(t.text).trim() }));
   if (!raw) return [];
-  if (Array.isArray(raw)) return raw.filter((t: Any) => t && t.text && String(t.text).trim());
-  if (typeof raw === 'object') return [raw].filter((t: Any) => t && t.text && String(t.text).trim());
+  if (Array.isArray(raw)) return clean(raw);
+  if (typeof raw === 'object') return clean([raw]);
   const s = String(raw).trim();
   if (!s) return [];
   if (s[0] === '[' || s[0] === '{') {
     try {
       const parsed = JSON.parse(s);
-      const arr = Array.isArray(parsed) ? parsed : [parsed];
-      return arr.filter((t: Any) => t && t.text && String(t.text).trim());
+      return clean(Array.isArray(parsed) ? parsed : [parsed]);
     } catch { /* not JSON — treat as plain text below */ }
   }
-  return [{ relatesTo: 'General', text: s }];
+  return [{ relatesTo: 'General', text: stripMarkdown(s) }];
 }
 
 // Port of seasonLabelFromDates — "2026/2027" from ISO start/end dates.
@@ -405,12 +413,16 @@ export async function buildContractPdf(input: {
   // pdf-lib's coordinate system is bottom-up, so every draw converts via py().
   const py = (yy: number) => H - yy;
 
+  // Track where the current page's body content started, to detect a trailing
+  // page that ended up empty (chrome only) and drop it before finalizing.
+  let pageContentStart = y;
   // Move to a fresh page when the cursor would collide with the footer.
   const newPage = () => {
     drawFooter(page);
     page = pdf.addPage([W, H]);
     drawHeaderRest(page);
     y = CONTENT_TOP_REST;
+    pageContentStart = CONTENT_TOP_REST;
   };
   const ensure = (need: number) => { if (y + need > H - BOTTOM) newPage(); };
 
@@ -686,8 +698,8 @@ export async function buildContractPdf(input: {
     const headTop = y;
     page.drawRectangle({ x: M, y: py(headTop + headH), width: maxW, height: headH, color: NAVY });
     page.drawText('SERVICE', { x: M + cellPadX, y: py(headTop + 13), size: 8.5, font: bold, color: WHITE });
-    const qtyHeadW = bold.widthOfTextAtSize('QTY', 8.5);
-    page.drawText('QTY', { x: W - M - cellPadX - qtyHeadW, y: py(headTop + 13), size: 8.5, font: bold, color: WHITE });
+    const qtyHeadW = bold.widthOfTextAtSize('AMOUNT', 8.5);
+    page.drawText('AMOUNT', { x: W - M - cellPadX - qtyHeadW, y: py(headTop + 13), size: 8.5, font: bold, color: WHITE });
     y = headTop + headH;
 
     // Body rows.
@@ -944,8 +956,15 @@ export async function buildContractPdf(input: {
   // --- Closing note. -------------------------------------------------------
   text('This is the executed agreement. A Certificate of Completion containing the full electronic-signature evidence (identity verification, timestamps, IP and document integrity hash) has been issued separately to both parties.', { size: 9, color: GREY });
 
-  // Footer on the final page.
-  drawFooter(page);
+  // If the final page ended up with no body content (a page-break artifact),
+  // drop it — the previous page already got its footer in newPage(). Otherwise
+  // footer the final page normally.
+  const pageCount = pdf.getPageCount();
+  if (pageCount > 1 && y <= pageContentStart + 1) {
+    pdf.removePage(pageCount - 1);
+  } else {
+    drawFooter(page);
+  }
 
   const bytes = await pdf.save();
   const hex = await sha256Hex(Array.from(bytes).map((b) => String.fromCharCode(b)).join(''));
