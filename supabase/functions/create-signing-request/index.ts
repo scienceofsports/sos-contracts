@@ -53,8 +53,15 @@ Deno.serve(async (req) => {
     if (companyErr) throw new Error(companyErr.message);
     if (!company) throw new Error('Company profile not found');
 
+    // Load the payment schedule so it is frozen into the signed document too.
+    const { data: payments } = await admin
+      .from('payments')
+      .select('*')
+      .eq('contract_id', contractId)
+      .order('due_date', { ascending: true });
+
     // 4/5. Build the frozen snapshot AS-IS and hash it.
-    const snapshot = { contract, client, company };
+    const snapshot = { contract: { ...contract, payments: payments || [] }, client, company };
     const document_hash_before = await hashDocument(snapshot);
 
     // 6. Insert the signing request; DB defaults token, expires_at, status.

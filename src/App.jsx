@@ -1597,6 +1597,7 @@ function ContractDocumentBody({ contract, client, company }) {
           const feesNum = n++;
           const commercial = commercialModelText(contract, (a) => fmtMoney(a, contract.currency));
           const commercialNum = commercial.intro ? n++ : null;
+          const serviceLevelsNum = n++;
           const confidentialityNum = n++;
           const ipNum = n++;
           const durationNum = n++;
@@ -1642,7 +1643,7 @@ function ContractDocumentBody({ contract, client, company }) {
                       </div>
                     );
                   })}
-                  <p className="text-sm text-slate-700 mt-4">{contract.slaHours || 24}-hour SLA on delivery of key analytical outputs after each match.</p>
+                  <p className="text-sm text-slate-700 mt-4">Key analytical outputs are delivered after each match in accordance with the Service Levels set out below.</p>
                 </div>
               ) : (
                 <p className="text-sm text-slate-700 mb-8 whitespace-pre-line">{contract.description || 'The purpose of this Agreement is to define the terms of cooperation between the Parties for the provision of performance analysis and related services by the Service Provider to the Client.'}</p>
@@ -1694,7 +1695,27 @@ function ContractDocumentBody({ contract, client, company }) {
               )}
 
               <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{feesNum}.</span> Fees & Payment</div>
-              <p className="text-sm text-slate-700 mb-2">In consideration of the services provided under this Agreement, the Client shall pay the Service Provider a total of <strong>{fmtMoney(contract.value, contract.currency)}</strong>, payable <strong>{contract.paymentType.replace('_',' ')}</strong>, net {contract.paymentTermsDays} days from the date of a valid invoice.</p>
+              <p className="text-sm text-slate-700 mb-2">In consideration of the services provided under this Agreement, the Client shall pay the Service Provider a total of <strong>{fmtMoney(contract.value, contract.currency)}</strong>, payable <strong>{contract.paymentType === 'one_time' ? 'in a single payment' : contract.paymentType === 'milestone' ? 'in instalments' : contract.paymentType.replace('_',' ')}</strong>, net {contract.paymentTermsDays} days from the date of a valid invoice.</p>
+              {Array.isArray(contract.payments) && contract.payments.length > 1 && (
+                <table className="w-full text-sm mb-4 border-collapse">
+                  <thead>
+                    <tr className="text-left text-xs uppercase tracking-wide" style={{ background:'rgba(10,26,63,0.05)', color:'var(--navy-deep)' }}>
+                      <th className="py-2 px-3 rounded-l-md">Payment</th>
+                      <th className="py-2 px-3">Due Date</th>
+                      <th className="py-2 px-3 text-right rounded-r-md">Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {contract.payments.map((p, i) => (
+                      <tr key={i} className="border-b border-[var(--border)]">
+                        <td className="py-2 px-3">Instalment {i + 1}</td>
+                        <td className="py-2 px-3">{p.dueDate ? fmtDate(p.dueDate) : '—'}</td>
+                        <td className="py-2 px-3 text-right font-data">{fmtMoney(p.totalAmount != null ? p.totalAmount : p.amount, contract.currency)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
               <p className="text-sm text-slate-700 mb-4">All payments shall be made by bank transfer following the issuance of a valid invoice by the Service Provider, in accordance with applicable VAT regulations. A late payment penalty of {contract.latePaymentPenalty}% per month applies to overdue amounts.</p>
               {(company.bankName || company.bankIBAN || company.bankSWIFT) && (
                 <div className="text-sm text-slate-700 mb-8 rounded-lg p-4" style={{ background:'rgba(10,26,63,0.04)', border:'1px solid var(--border)' }}>
@@ -1713,6 +1734,10 @@ function ContractDocumentBody({ contract, client, company }) {
                 </React.Fragment>
               )}
 
+              <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{serviceLevelsNum}.</span> Service Levels</div>
+              <p className="text-sm text-slate-700 mb-2">The Service Provider shall use reasonable endeavours to deliver the key analytical outputs for each covered match within <strong>{contract.slaHours || 24} hours</strong>. This service level runs from the Service Provider's receipt of usable match footage and applicable match data, and excludes weekends, public holidays and any delay caused by the Client, third parties or events beyond the Service Provider's reasonable control.</p>
+              <p className="text-sm text-slate-700 mb-8">Where the Service Provider fails to meet this service level for a given match, it shall remedy the delay within a reasonable cure period. The Client's sole and exclusive remedy for a service-level failure shall be a proportionate service credit against the fees for the affected deliverables; a service-level failure shall not, of itself, entitle the Client to terminate this Agreement, save in the case of repeated and material failures not remedied following written notice.</p>
+
               <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{confidentialityNum}.</span> Confidentiality & Data Protection</div>
               <div className="mb-8 pl-4 pr-5 py-4 rounded-r-lg" style={{ background:'#EEF0FB', borderLeft:'3px solid var(--navy-deep)', WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}>
                 <p className="text-sm text-slate-700 mb-2"><span className="font-semibold" style={{ color:'var(--navy-deep)' }}>Confidentiality & GDPR.</span> The Service Provider shall process personal data strictly in accordance with the GDPR, the applicable Cyprus data protection legislation (Law 125(I)/2018), and Regulation (EU) 2016/679, and solely on documented instructions from the Client and exclusively for the purposes of this Agreement.</p>
@@ -1720,7 +1745,8 @@ function ContractDocumentBody({ contract, client, company }) {
               </div>
 
               <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{ipNum}.</span> Intellectual Property Rights</div>
-              <p className="text-sm text-slate-700 mb-8">All match footage, training footage, video recordings, reports, analytics outputs, player data, databases, clips and any other materials produced, collected or generated by the Service Provider under this Agreement (collectively, the "Deliverables") shall be the exclusive property of the Client. The Client shall have unrestricted, irrevocable and royalty-free rights to use, reproduce, store, modify, distribute and archive the Deliverables for any internal purpose. The Service Provider shall not use, reproduce, disclose, commercialize or share any Deliverables with any third party without the Client's prior written consent.</p>
+              <p className="text-sm text-slate-700 mb-3">The match footage, video recordings, reports, analytics outputs, clips and other deliverables produced for the Client under this Agreement (the "Deliverables") are provided for the Client's use. The Service Provider grants the Client a perpetual, irrevocable, royalty-free licence to use, reproduce, store and archive the Deliverables for the Client's own internal football and operational purposes. The Service Provider shall not disclose or share the Client's Deliverables with any third party without the Client's prior written consent, save as required by law.</p>
+              <p className="text-sm text-slate-700 mb-8">The Service Provider retains all right, title and interest in its platform, software, systems, methodologies, know-how, models and templates, and in any pre-existing or independently developed materials (the "Service Provider IP"), which are licensed to the Client only as necessary to receive the services. The Service Provider may retain internal copies of the Deliverables and may use anonymised and aggregated data derived from the services for benchmarking, research and the improvement and provision of its products and services, provided that no such use identifies the Client, its players or its teams without the Client's consent.</p>
 
               <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{durationNum}.</span> Duration</div>
               <p className="text-sm text-slate-700 mb-8">This Agreement shall commence on <strong>{fmtDate(contract.startDate)}</strong> and shall remain in force until <strong>{fmtDate(contract.endDate)}</strong>{termYears ? ` (approximately ${termYears} year${termYears>1?'s':''})` : ''}, unless terminated earlier in accordance with Section {terminationNum}.</p>
@@ -2819,6 +2845,12 @@ function normalizeSnapshot(snapshot) {
     documentHashBefore: pick(c, 'documentHashBefore', 'document_hash_before'),
     createdAt: pick(c, 'createdAt', 'created_at'),
     sentAt: pick(c, 'sentAt', 'sent_at'),
+    // Frozen payment schedule (snake or camel), mapped for the Fees table.
+    payments: (Array.isArray(c?.payments) ? c.payments : []).map(p => ({
+      dueDate: pick(p, 'dueDate', 'due_date'),
+      amount: pick(p, 'amount'),
+      totalAmount: pick(p, 'totalAmount', 'total_amount'),
+    })),
     // status intentionally read from the request row, not the snapshot
     status: pick(c, 'status'),
   };

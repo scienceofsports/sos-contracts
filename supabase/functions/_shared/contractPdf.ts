@@ -532,7 +532,11 @@ export async function buildContractPdf(input: {
   const startDate = pick(c, 'startDate', 'start_date');
   const endDate = pick(c, 'endDate', 'end_date');
   const termYears = startDate && endDate ? Math.max(1, Math.round(daysBetween(startDate, endDate) / 365)) : null;
-  const paymentType = (pick(c, 'paymentType', 'payment_type') || '').replace('_', ' ');
+  const paymentTypeRaw = pick(c, 'paymentType', 'payment_type') || '';
+  const paymentType = paymentTypeRaw === 'one_time' ? 'in a single payment'
+    : paymentTypeRaw === 'milestone' ? 'in instalments'
+    : paymentTypeRaw.replace('_', ' ');
+  const payments = Array.isArray(c?.payments) ? c.payments : [];
   const paymentTermsDays = pick(c, 'paymentTermsDays', 'payment_terms_days');
   const latePaymentPenalty = pick(c, 'latePaymentPenalty', 'late_payment_penalty');
   const governingLaw = pick(c, 'governingLaw', 'governing_law');
@@ -598,6 +602,7 @@ export async function buildContractPdf(input: {
   const feesNum = n++;
   const commercial = commercialModelText(c, (a: Any) => fmtMoney(a, currency));
   const commercialNum = commercial.intro ? n++ : null;
+  const serviceLevelsNum = n++;
   const confidentialityNum = n++;
   const ipNum = n++;
   const durationNum = n++;
@@ -664,7 +669,7 @@ export async function buildContractPdf(input: {
       });
       y += 6;
     });
-    text(`${c.slaHours || 24}-hour SLA on delivery of key analytical outputs after each match.`, { size: 10, gap: 10 });
+    text('Key analytical outputs are delivered after each match in accordance with the Service Levels set out below.', { size: 10, gap: 10 });
   } else {
     text(c.description || 'The purpose of this Agreement is to define the terms of cooperation between the Parties for the provision of performance analysis and related services by the Service Provider to the Client.', { size: 10, gap: 10 });
   }
@@ -760,9 +765,39 @@ export async function buildContractPdf(input: {
   }
 
   // --- Fees & Payment ------------------------------------------------------
-  clause(feesNum, 'Fees & Payment',
-    `In consideration of the services provided under this Agreement, the Client shall pay the Service Provider a total of ${fmtMoney(value, currency)}, payable ${paymentType}, net ${paymentTermsDays} days from the date of a valid invoice.`,
-    `All payments shall be made by bank transfer following the issuance of a valid invoice by the Service Provider, in accordance with applicable VAT regulations. A late payment penalty of ${latePaymentPenalty}% per month applies to overdue amounts.`);
+  {
+    ensure(40);
+    pillHeader(feesNum, 'Fees & Payment');
+    text(`In consideration of the services provided under this Agreement, the Client shall pay the Service Provider a total of ${fmtMoney(value, currency)}, payable ${paymentType}, net ${paymentTermsDays} days from the date of a valid invoice.`, { size: 10, gap: 6 });
+    // Instalment schedule table (only when more than one payment).
+    if (payments.length > 1) {
+      const amtX = W - M - 12;
+      const dateX = M + maxW * 0.5;
+      ensure(16); y += 12;
+      page.drawText('PAYMENT', { x: M + 6, y: py(y), size: 8, font: bold, color: NAVY });
+      page.drawText('DUE DATE', { x: dateX, y: py(y), size: 8, font: bold, color: NAVY });
+      const ahW = bold.widthOfTextAtSize('AMOUNT', 8);
+      page.drawText('AMOUNT', { x: amtX - ahW, y: py(y), size: 8, font: bold, color: NAVY });
+      y += 3;
+      page.drawLine({ start: { x: M, y: py(y) }, end: { x: W - M, y: py(y) }, thickness: 0.5, color: NAVY });
+      for (let i = 0; i < payments.length; i++) {
+        const p = payments[i];
+        ensure(16); y += 13;
+        const due = pick(p, 'dueDate', 'due_date');
+        const amt = pick(p, 'totalAmount', 'total_amount');
+        const amt2 = amt != null ? amt : pick(p, 'amount');
+        page.drawText(`Instalment ${i + 1}`, { x: M + 6, y: py(y), size: 9.5, font, color: BLACK });
+        page.drawText(due ? fmtDate(due) : '—', { x: dateX, y: py(y), size: 9.5, font, color: BLACK });
+        const amtStr = fmtMoney(amt2, currency);
+        const aW = bold.widthOfTextAtSize(amtStr, 9.5);
+        page.drawText(amtStr, { x: amtX - aW, y: py(y), size: 9.5, font: bold, color: BLACK });
+        y += 3;
+        page.drawLine({ start: { x: M, y: py(y) }, end: { x: W - M, y: py(y) }, thickness: 0.4, color: rgb(0.862, 0.878, 0.902) });
+      }
+      y += 8;
+    }
+    text(`All payments shall be made by bank transfer following the issuance of a valid invoice by the Service Provider, in accordance with applicable VAT regulations. A late payment penalty of ${latePaymentPenalty}% per month applies to overdue amounts.`, { size: 10, gap: 10 });
+  }
   {
     const bankName = pick(co, 'bankName', 'bank_name');
     const bankIBAN = pick(co, 'bankIBAN', 'bank_iban');
@@ -796,6 +831,11 @@ export async function buildContractPdf(input: {
     clause(commercialNum, 'Commercial Terms & Club Commission', ...paras);
   }
 
+  // --- Service Levels ------------------------------------------------------
+  clause(serviceLevelsNum, 'Service Levels',
+    `The Service Provider shall use reasonable endeavours to deliver the key analytical outputs for each covered match within ${c.slaHours || 24} hours. This service level runs from the Service Provider's receipt of usable match footage and applicable match data, and excludes weekends, public holidays and any delay caused by the Client, third parties or events beyond the Service Provider's reasonable control.`,
+    "Where the Service Provider fails to meet this service level for a given match, it shall remedy the delay within a reasonable cure period. The Client's sole and exclusive remedy for a service-level failure shall be a proportionate service credit against the fees for the affected deliverables; a service-level failure shall not, of itself, entitle the Client to terminate this Agreement, save in the case of repeated and material failures not remedied following written notice.");
+
   // --- Confidentiality & Data Protection (lilac callout) -------------------
   calloutClause(confidentialityNum, 'Confidentiality & Data Protection',
     'Confidentiality & GDPR.',
@@ -804,7 +844,8 @@ export async function buildContractPdf(input: {
 
   // --- Intellectual Property Rights ----------------------------------------
   clause(ipNum, 'Intellectual Property Rights',
-    'All match footage, training footage, video recordings, reports, analytics outputs, player data, databases, clips and any other materials produced, collected or generated by the Service Provider under this Agreement (collectively, the "Deliverables") shall be the exclusive property of the Client. The Client shall have unrestricted, irrevocable and royalty-free rights to use, reproduce, store, modify, distribute and archive the Deliverables for any internal purpose. The Service Provider shall not use, reproduce, disclose, commercialize or share any Deliverables with any third party without the Client\'s prior written consent.');
+    'The match footage, video recordings, reports, analytics outputs, clips and other deliverables produced for the Client under this Agreement (the "Deliverables") are provided for the Client\'s use. The Service Provider grants the Client a perpetual, irrevocable, royalty-free licence to use, reproduce, store and archive the Deliverables for the Client\'s own internal football and operational purposes. The Service Provider shall not disclose or share the Client\'s Deliverables with any third party without the Client\'s prior written consent, save as required by law.',
+    'The Service Provider retains all right, title and interest in its platform, software, systems, methodologies, know-how, models and templates, and in any pre-existing or independently developed materials (the "Service Provider IP"), which are licensed to the Client only as necessary to receive the services. The Service Provider may retain internal copies of the Deliverables and may use anonymised and aggregated data derived from the services for benchmarking, research and the improvement and provision of its products and services, provided that no such use identifies the Client, its players or its teams without the Client\'s consent.');
 
   // --- Duration ------------------------------------------------------------
   clause(durationNum, 'Duration',
