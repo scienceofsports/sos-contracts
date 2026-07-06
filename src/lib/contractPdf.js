@@ -22,7 +22,7 @@
    ========================================================================= */
 import { jsPDF } from 'jspdf';
 import { fmtDate, fmtMoney, daysBetween } from './format.js';
-import { computeServiceLineItems, platformSeatsSummary, SERVICE_GROUPS, analysisScopeText, seasonLabelFromDates, commercialModelText, parseSpecialTerms } from './constants.js';
+import { computeServiceLineItems, platformSeatsSummary, SERVICE_GROUPS, analysisScopeText, seasonLabelFromDates, commercialModelText, parseSpecialTerms, serviceLevelsLines } from './constants.js';
 
 export function generateContractPdf({ contract, client, company }) {
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
@@ -449,7 +449,7 @@ export function generateContractPdf({ contract, client, company }) {
       y += 4;
       groupItems.forEach((i) => {
         const qtyNote = i.unit === 'per_match' ? ` (${i.qty} matches)` : i.unit === 'per_unit' ? ` (${i.qty})` : '';
-        const chipLabel = i.bundledIncluded ? 'Included' : i.complimentary ? 'Complimentary' : i.unit === 'included' ? 'Included' : null;
+        const chipLabel = i.included ? 'Included' : null;
         const itemX = M + 12;
         const itemW = maxW - 12;
         // Label line: navy bold label + grey qty note + inline chip.
@@ -511,9 +511,7 @@ export function generateContractPdf({ contract, client, company }) {
     // qty on the right, thin rule under each row.
     doc.setFont('helvetica', 'normal');
     lineItems.forEach((i) => {
-      const qty = i.unit === 'flat' ? fmtMoney(i.amount, contract.currency)
-        : (i.unit === 'included' || i.complimentary || i.bundledIncluded) ? 'Included'
-        : String(i.qty);
+      const priceStr = fmtMoney(i.listPrice, contract.currency);
       // Compose the service label; platform access carries a seats subline.
       const seats = (i.key === 'platform_access') ? platformSeatsSummary(services?.platform_access) : '';
       const subline = seats ? `Access: ${seats} (exact users to be confirmed with the client)` : '';
@@ -539,11 +537,26 @@ export function generateContractPdf({ contract, client, company }) {
         ly += 1;
         subLines.forEach((ln) => { doc.text(ln, M + cellPadX, ly); ly += 11; });
       }
-      // QTY, right-aligned, vertically near the first label line.
-      doc.setFont('helvetica', (qty === 'Included' ? 'bold' : 'normal'));
+      // Amount, right-aligned near the first label line. Included lines show the
+      // list price struck through + "Incl." so the value is visible but unbilled.
+      const amtBaseline = rowTop + 12;
+      const rightX = W - M - cellPadX;
       doc.setFontSize(9.5);
-      doc.setTextColor(...(qty === 'Included' ? NAVY : BLACK));
-      doc.text(qty, W - M - cellPadX, rowTop + 12, { align: 'right' });
+      if (i.included) {
+        const inclW = doc.getTextWidth('Incl.');
+        doc.setFont('helvetica', 'bold'); doc.setTextColor(16, 150, 105);
+        doc.text('Incl.', rightX, amtBaseline, { align: 'right' });
+        const priceX = rightX - inclW - 6;
+        doc.setFont('helvetica', 'normal'); doc.setTextColor(150, 160, 170);
+        doc.text(priceStr, priceX, amtBaseline, { align: 'right' });
+        // strike-through line across the price
+        const pw = doc.getTextWidth(priceStr);
+        doc.setDrawColor(150, 160, 170); doc.setLineWidth(0.6);
+        doc.line(priceX - pw, amtBaseline - 3, priceX, amtBaseline - 3);
+      } else {
+        doc.setFont('helvetica', 'normal'); doc.setTextColor(...BLACK);
+        doc.text(priceStr, rightX, amtBaseline, { align: 'right' });
+      }
 
       y = rowTop + rowH;
       // Row separator rule.
@@ -652,9 +665,12 @@ export function generateContractPdf({ contract, client, company }) {
   }
 
   // --- Service Levels ------------------------------------------------------
-  clause(serviceLevelsNum, 'Service Levels',
-    `The Service Provider shall use reasonable endeavours to deliver the key analytical outputs for each covered match within ${contract.slaHours || 24} hours. This service level runs from the Service Provider's receipt of usable match footage and applicable match data, and excludes weekends, public holidays and any delay caused by the Client, third parties or events beyond the Service Provider's reasonable control.`,
-    "Where the Service Provider fails to meet this service level for a given match, it shall remedy the delay within a reasonable cure period. The Client's sole and exclusive remedy for a service-level failure shall be a proportionate service credit against the fees for the affected deliverables; a service-level failure shall not, of itself, entitle the Client to terminate this Agreement, save in the case of repeated and material failures not remedied following written notice.");
+  {
+    const slLines = serviceLevelsLines(contract);
+    const excl = " These timeframes exclude weekends, public holidays and any delay caused by the Client, third parties or events beyond the Service Provider's reasonable control.";
+    const remedy = "Where the Service Provider fails to meet the applicable service level for a given match, it shall remedy the delay within a reasonable cure period. The Client's sole and exclusive remedy for a service-level failure shall be a proportionate service credit against the fees for the affected deliverables; a service-level failure shall not, of itself, entitle the Client to terminate this Agreement, save in the case of repeated and material failures not remedied following written notice.";
+    clause(serviceLevelsNum, 'Service Levels', slLines[0] + excl, remedy);
+  }
 
   // --- Confidentiality & Data Protection (lilac callout) -------------------
   calloutClause(confidentialityNum, 'Confidentiality & Data Protection',

@@ -107,14 +107,14 @@ function computeServiceLineItems(services: Any): Array<Any> {
   return SERVICE_CATALOG
     .filter((s) => services[s.key] && services[s.key].selected)
     .map((s) => {
-      const qty = Number(services[s.key].qty) || 0;
-      const complimentary = !!services[s.key].complimentary;
-      const bundledIncluded = !!services[s.key].bundledIncluded;
-      const rate = (complimentary || bundledIncluded)
-        ? 0
-        : Number(services[s.key].rate != null ? services[s.key].rate : s.defaultRate);
-      const amount = s.unit === 'flat' ? rate : (s.unit === 'included' ? 0 : rate * qty);
-      return { ...s, qty, rate, complimentary, bundledIncluded, amount };
+      const svc = services[s.key];
+      const qty = Number(svc.qty) || 0;
+      // Single "included" concept (merges old complimentary + bundledIncluded).
+      const included = s.unit === 'included' || !!svc.included || !!svc.complimentary || !!svc.bundledIncluded;
+      const rate = Number(svc.rate != null ? svc.rate : s.defaultRate);
+      const listPrice = s.unit === 'flat' ? rate : rate * qty;
+      const amount = included ? 0 : listPrice;
+      return { ...s, qty, rate, included, listPrice, amount };
     });
 }
 
@@ -187,6 +187,26 @@ function seasonLabelFromDates(startDate: Any, endDate: Any): string {
   return '';
 }
 
+// Port of serviceLevelsLines — default SLA + optional per-team bands. Accepts
+// snake_case or camelCase. Keep in sync with src/lib/constants.js.
+function serviceLevelsLines(c: Any): string[] {
+  const defHours = Number(c?.slaHours ?? c?.sla_hours) || 24;
+  const rawBands = c?.slaBands ?? c?.sla_bands;
+  const bands = Array.isArray(rawBands) ? rawBands.filter((b: Any) => b && Array.isArray(b.teams) && b.teams.length && Number(b.hours)) : [];
+  if (!bands.length) {
+    return [`The Service Provider shall use reasonable endeavours to deliver the key analytical outputs for each covered match within ${defHours} hours of receipt of usable match footage and applicable match data.`];
+  }
+  const banded = new Set<string>();
+  const lines = bands.map((b: Any) => {
+    b.teams.forEach((t: string) => banded.add(t));
+    return `For ${b.teams.join(', ')}: within ${Number(b.hours)} hours.`;
+  });
+  const allTeams = Array.isArray(c?.analysisTeams) ? c.analysisTeams : (Array.isArray(c?.analysis_teams) ? c.analysis_teams : []);
+  const rest = allTeams.filter((t: string) => !banded.has(t));
+  const restLine = rest.length ? ` For all other covered teams: within ${defHours} hours.` : '';
+  return [`The Service Provider shall use reasonable endeavours to deliver the key analytical outputs for each covered match within the following timeframes, measured from receipt of usable match footage and applicable match data: ${lines.join(' ')}${restLine}`];
+}
+
 // Port of computeKickback — keep in sync with src/lib/constants.js.
 function computeKickback(o: Any): Any {
   const n = Number(o?.playerCount) || 0;
@@ -201,30 +221,36 @@ function computeKickback(o: Any): Any {
 
 const PAYMENT_MODEL_LABELS: Record<string, string> = {
   club_all: 'Club-funded — the Client pays the full fee',
-  club_players: 'Shared — the Client and its players jointly fund the fee',
+  club_players: 'Shared — a fixed amount is agreed with the Client; players fund the remainder',
   players_all: 'Player-funded — fees are collected directly from players',
 };
 
-// Port of commercialModelText. Accepts snake_case or camelCase via pick-style
-// reads. `fm(amount)` formats money. Keep in sync with src/lib/constants.js.
+// Port of commercialModelText. Accepts snake_case or camelCase. `fm` formats
+// money. Shared/Player-funded state player funding as TERMS — nothing computed
+// into the value. Keep in sync with src/lib/constants.js.
 function commercialModelText(c: Any, fm: (a: Any) => string): { intro: string; breakdown: string; commission: string } {
   const basis = (c?.billingBasis ?? c?.billing_basis) || 'services';
   const model = (c?.paymentModel ?? c?.payment_model) || null;
   if (basis !== 'player_funded' || !model) return { intro: '', breakdown: '', commission: '' };
-  const k = computeKickback({
-    playerCount: c?.playerCount ?? c?.player_count,
-    playerMonthlyFee: c?.playerMonthlyFee ?? c?.player_monthly_fee,
-    playerMonths: c?.playerMonths ?? c?.player_months,
-    kickbackPct: c?.kickbackPct ?? c?.kickback_pct,
-  });
-  const feeLine = `${k.playerCount} players at ${fm(k.playerMonthlyFee)} per player per month over ${k.playerMonths} months`;
+  const fee = Number(c?.playerMonthlyFee ?? c?.player_monthly_fee) || 0;
+  const months = Number(c?.playerMonths ?? c?.player_months) || 0;
+  const pct = Number(c?.kickbackPct ?? c?.kickback_pct) || 0;
+  const minP = Number(c?.minPlayers ?? c?.min_players) || 0;
+  const value = c?.value;
   const intro = PAYMENT_MODEL_LABELS[model] || '';
-  if (model === 'players_all') {
-    const commission = k.pct ? `The Service Provider shall pay the Client a commission of ${k.pct}% of the fees actually collected from players enrolled through the Client, reconciled and settled per football season.` : '';
-    return { intro, breakdown: `Access fees are collected by the Service Provider directly from participating players (${feeLine}).`, commission };
+  const feeBits: string[] = [];
+  if (fee) feeBits.push(`${fm(fee)} per player per month`);
+  if (months) feeBits.push(`over ${months} months`);
+  const feeStr = feeBits.join(' ');
+  const minStr = minP ? ` The Client undertakes to enrol a minimum of ${minP} players.` : '';
+
+  if (model === 'club_players') {
+    const breakdown = `The Client shall pay the Service Provider a fixed fee of ${fm(value)} as set out in the Fees & Payment section. Participating players shall fund the remainder of the programme, contributing${feeStr ? ` ${feeStr}` : ' a monthly fee agreed with the Client'}, collected by the Service Provider.${minStr}`;
+    const commission = pct ? `The Service Provider shall pay the Client a commission of ${pct}% of the player fees actually collected, reconciled and settled per football season.` : '';
+    return { intro, breakdown, commission };
   }
-  const breakdown = `Gross player fees (${feeLine}) total ${fm(k.gross)}. A club kickback of ${k.pct}% (${fm(k.kickback)}) is applied, resulting in a net contract value of ${fm(k.net)} payable by the Client.`;
-  const commission = 'The kickback is applied as a discount against the fees payable by the Client and is reflected in the total contract value and payment schedule above.';
+  const breakdown = `Access fees are collected by the Service Provider directly from participating players${feeStr ? `, at ${feeStr}` : ''}.${minStr}`;
+  const commission = pct ? `The Service Provider shall pay the Client a commission of ${pct}% of the fees actually collected from players enrolled through the Client, reconciled and settled per football season.` : '';
   return { intro, breakdown, commission };
 }
 
@@ -644,7 +670,7 @@ export async function buildContractPdf(input: {
       y += 4;
       groupItems.forEach((i) => {
         const qtyNote = i.unit === 'per_match' ? ` (${i.qty} matches)` : i.unit === 'per_unit' ? ` (${i.qty})` : '';
-        const chipLabel = i.bundledIncluded ? 'Included' : i.complimentary ? 'Complimentary' : i.unit === 'included' ? 'Included' : null;
+        const chipLabel = i.included ? 'Included' : null;
         const itemX = M + 12;
         const itemW = maxW - 12;
         // Label line: navy bold label + qty note + inline chip.
@@ -709,9 +735,7 @@ export async function buildContractPdf(input: {
 
     // Body rows.
     lineItems.forEach((i) => {
-      const qty = i.unit === 'flat' ? fmtMoney(i.amount, currency)
-        : (i.unit === 'included' || i.complimentary || i.bundledIncluded) ? 'Included'
-        : String(i.qty);
+      const priceStr = fmtMoney(i.listPrice, currency);
       const seats = (i.key === 'platform_access') ? platformSeatsSummary(services?.platform_access) : '';
       const subline = seats ? `Access: ${seats} (exact users to be confirmed with the client)` : '';
 
@@ -727,11 +751,21 @@ export async function buildContractPdf(input: {
         ly += 1;
         for (const ln of subLines) { page.drawText(ln, { x: M + cellPadX, y: py(ly), size: 8.5, font, color: SOFT_GREY }); ly += 11; }
       }
-      // QTY right-aligned (bold navy when "Included").
-      const qf = qty === 'Included' ? bold : font;
-      const qc = qty === 'Included' ? NAVY : BLACK;
-      const qw = qf.widthOfTextAtSize(qty, 9.5);
-      page.drawText(qty, { x: W - M - cellPadX - qw, y: py(rowTop + 12), size: 9.5, font: qf, color: qc });
+      // Amount right-aligned. Included lines show the list price struck through
+      // + "Incl." so the value is visible but unbilled.
+      const rightX = W - M - cellPadX;
+      const amtBaseline = rowTop + 12;
+      if (i.included) {
+        const inclW = bold.widthOfTextAtSize('Incl.', 9.5);
+        page.drawText('Incl.', { x: rightX - inclW, y: py(amtBaseline), size: 9.5, font: bold, color: rgb(0.063, 0.588, 0.412) });
+        const pw = font.widthOfTextAtSize(priceStr, 9.5);
+        const priceRight = rightX - inclW - 6;
+        page.drawText(priceStr, { x: priceRight - pw, y: py(amtBaseline), size: 9.5, font, color: rgb(0.588, 0.627, 0.667) });
+        page.drawLine({ start: { x: priceRight - pw, y: py(amtBaseline - 3) }, end: { x: priceRight, y: py(amtBaseline - 3) }, thickness: 0.6, color: rgb(0.588, 0.627, 0.667) });
+      } else {
+        const pw = font.widthOfTextAtSize(priceStr, 9.5);
+        page.drawText(priceStr, { x: rightX - pw, y: py(amtBaseline), size: 9.5, font, color: BLACK });
+      }
 
       y = rowTop + rowH;
       page.drawLine({ start: { x: M, y: py(y) }, end: { x: W - M, y: py(y) }, thickness: 0.5, color: rgb(0.862, 0.878, 0.902) });
@@ -832,9 +866,12 @@ export async function buildContractPdf(input: {
   }
 
   // --- Service Levels ------------------------------------------------------
-  clause(serviceLevelsNum, 'Service Levels',
-    `The Service Provider shall use reasonable endeavours to deliver the key analytical outputs for each covered match within ${c.slaHours || 24} hours. This service level runs from the Service Provider's receipt of usable match footage and applicable match data, and excludes weekends, public holidays and any delay caused by the Client, third parties or events beyond the Service Provider's reasonable control.`,
-    "Where the Service Provider fails to meet this service level for a given match, it shall remedy the delay within a reasonable cure period. The Client's sole and exclusive remedy for a service-level failure shall be a proportionate service credit against the fees for the affected deliverables; a service-level failure shall not, of itself, entitle the Client to terminate this Agreement, save in the case of repeated and material failures not remedied following written notice.");
+  {
+    const slLines = serviceLevelsLines(c);
+    const excl = " These timeframes exclude weekends, public holidays and any delay caused by the Client, third parties or events beyond the Service Provider's reasonable control.";
+    const remedy = "Where the Service Provider fails to meet the applicable service level for a given match, it shall remedy the delay within a reasonable cure period. The Client's sole and exclusive remedy for a service-level failure shall be a proportionate service credit against the fees for the affected deliverables; a service-level failure shall not, of itself, entitle the Client to terminate this Agreement, save in the case of repeated and material failures not remedied following written notice.";
+    clause(serviceLevelsNum, 'Service Levels', slLines[0] + excl, remedy);
+  }
 
   // --- Confidentiality & Data Protection (lilac callout) -------------------
   calloutClause(confidentialityNum, 'Confidentiality & Data Protection',

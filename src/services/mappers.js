@@ -178,6 +178,8 @@ export function contractFromRow(row, payments = [], events = []) {
     playerMonthlyFee: row.player_monthly_fee ?? null,
     playerMonths: row.player_months ?? null,
     kickbackPct: row.kickback_pct ?? null,
+    minPlayers: row.min_players ?? null,
+    slaBands: row.sla_bands ?? [],
     createdBy: row.created_by ?? null,
     createdAt: row.created_at ?? null,
     sentAt: sentEvent?.server_timestamp ?? null,
@@ -252,6 +254,8 @@ export function contractToRow(obj) {
   if ('playerMonthlyFee' in obj) row.player_monthly_fee = obj.playerMonthlyFee === '' ? null : obj.playerMonthlyFee;
   if ('playerMonths' in obj) row.player_months = obj.playerMonths === '' ? null : obj.playerMonths;
   if ('kickbackPct' in obj) row.kickback_pct = obj.kickbackPct === '' ? null : obj.kickbackPct;
+  if ('minPlayers' in obj) row.min_players = obj.minPlayers === '' ? null : obj.minPlayers;
+  if ('slaBands' in obj) row.sla_bands = Array.isArray(obj.slaBands) ? obj.slaBands : [];
   if ('createdBy' in obj) row.created_by = obj.createdBy;
   return row;
 }

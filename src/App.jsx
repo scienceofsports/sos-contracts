@@ -12,11 +12,11 @@ import {
   generateDescriptionFromServices,
   analysisScopeText,
   seasonLabelFromDates,
-  computeKickback,
   commercialModelText,
   PAYMENT_MODEL_LABELS,
   SPECIAL_TERM_CLAUSES,
   parseSpecialTerms,
+  serviceLevelsLines,
 } from './lib/constants.js';
 import {
   nowISO,
@@ -558,7 +558,7 @@ function ContractsList({ navigate, filterStatus }) {
 }
 
 function defaultServicesState() {
-  return Object.fromEntries(SERVICE_CATALOG.map(s => [s.key, { selected:false, qty:s.defaultQty, rate:s.defaultRate, complimentary:false, bundledIncluded:false, ...(s.key === 'platform_access' ? { directorSeats:0, coachSeats:0, playerSeats:0 } : {}) }]));
+  return Object.fromEntries(SERVICE_CATALOG.map(s => [s.key, { selected:false, qty:s.defaultQty, rate:s.defaultRate, included:false, ...(s.key === 'platform_access' ? { directorSeats:0, coachSeats:0, playerSeats:0 } : {}) }]));
 }
 
 // Collapsible form section: a bordered card with a clickable header (title +
@@ -590,7 +590,7 @@ function ContractForm({ navigate, editContractId }) {
     startDate:'', endDate:'', paymentType:'one_time', paymentTermsDays:30, latePaymentPenalty:1.5,
     governingLaw:'Republic of Cyprus', jurisdiction:'Nicosia, Cyprus', description:'', slaHours:24, specialTerms:'',
     analysisTeams:[], oppMatchFootage:false, oppTeamAnalysis:false, oppPlayerAnalysis:false,
-    billingBasis:'services', paymentModel:'', playerCount:'', playerMonthlyFee:'', playerMonths:'', kickbackPct:'',
+    billingBasis:'services', paymentModel:'', playerCount:'', playerMonthlyFee:'', playerMonths:'', kickbackPct:'', minPlayers:'', slaBands:[],
   });
   const [titleEdited, setTitleEdited] = useState(isEdit);
   // Which service groups are expanded in the form (collapsible sections).
@@ -640,6 +640,8 @@ function ContractForm({ navigate, editContractId }) {
         playerMonthlyFee: existing.playerMonthlyFee ?? '',
         playerMonths: existing.playerMonths ?? '',
         kickbackPct: existing.kickbackPct ?? '',
+        minPlayers: existing.minPlayers ?? '',
+        slaBands: Array.isArray(existing.slaBands) ? existing.slaBands : [],
       });
       setServices(existing.services ? { ...defaultServicesState(), ...existing.services } : defaultServicesState());
       setSpecialTermsList(parseSpecialTerms(existing.specialTerms));
@@ -762,27 +764,28 @@ function ContractForm({ navigate, editContractId }) {
   const setSlaHours = (hours) => {
     setForm(f => ({ ...f, slaHours: hours, description: generateDescriptionFromServices(services, hours) }));
   };
+  // Optional per-team SLA bands: [{ teams:[...], hours }].
+  const addSlaBand = () => setForm(f => ({ ...f, slaBands: [...(f.slaBands||[]), { teams: [], hours: 24 }] }));
+  const updateSlaBand = (i, patch) => setForm(f => ({ ...f, slaBands: (f.slaBands||[]).map((b, idx) => idx === i ? { ...b, ...patch } : b) }));
+  const removeSlaBand = (i) => setForm(f => ({ ...f, slaBands: (f.slaBands||[]).filter((_, idx) => idx !== i) }));
+  const toggleBandTeam = (i, team) => setForm(f => ({ ...f, slaBands: (f.slaBands||[]).map((b, idx) => idx === i ? { ...b, teams: b.teams.includes(team) ? b.teams.filter(t=>t!==team) : [...b.teams, team] } : b) }));
 
   const lineItems = computeServiceLineItems(services);
   const lineItemsTotal = lineItems.reduce((s,i)=>s+i.amount,0);
 
-  // Commercial Model — live kickback calc for the form's player-funded basis.
-  const kb = computeKickback({ playerCount: form.playerCount, playerMonthlyFee: form.playerMonthlyFee, playerMonths: form.playerMonths, kickbackPct: form.kickbackPct });
-  // Only Shared computes a net value that drives the contract value. Club-funded
-  // uses the services total; Player-funded leaves the value manual (players pay SOS).
-  const isCalcModel = form.paymentModel === 'club_players';
-  // When services drive value, keep value synced to the catalog total; when a
-  // calculated player-funded model is active, sync value to the net figure.
+  // Commercial Model. Value sources per model:
+  //  - Club-funded (services basis): value = services catalog total (auto).
+  //  - Shared: value = the FIXED amount agreed with the club (manual). Players
+  //    fund the remainder at a monthly fee — stated as terms, never computed
+  //    into the value (player numbers aren't known in advance).
+  //  - Player-funded: players pay SOS directly; value is manual.
   useEffect(() => {
-    if (isCalcModel) {
-      const net = String(kb.net || 0);
-      setForm(f => (f.value === net ? f : { ...f, value: net }));
-    } else if (form.billingBasis === 'services') {
+    if (form.billingBasis === 'services') {
       const total = String(lineItemsTotal);
       setForm(f => (f.value === total ? f : { ...f, value: total }));
     }
-    // players_all: value not auto-driven (terms-only kickback).
-  }, [isCalcModel, kb.net, form.billingBasis, lineItemsTotal]);
+    // Shared / Player-funded: value is entered manually, not auto-driven.
+  }, [form.billingBasis, lineItemsTotal]);
 
   const validate = () => {
     const e = {};
@@ -915,25 +918,23 @@ function ContractForm({ navigate, editContractId }) {
                         <input type="number" min="0" value={svc.qty} onChange={e=>toggleService(s.key, { qty: Number(e.target.value) })} className="w-20 px-2 py-1 text-sm border border-[var(--border)] rounded-lg" placeholder="Qty" />
                       )}
                       {svc.selected && s.unit !== 'included' && (
-                        <label className="flex items-center gap-1 text-xs text-slate-500 shrink-0 cursor-pointer">
-                          <input type="checkbox" checked={svc.bundledIncluded} onChange={e=>toggleService(s.key, { bundledIncluded: e.target.checked, complimentary: e.target.checked ? false : svc.complimentary })} />
+                        <label className="flex items-center gap-1 text-xs text-slate-500 shrink-0 cursor-pointer" title="Include this service at no charge (its value is still shown to the client, struck through)">
+                          <input type="checkbox" checked={!!svc.included} onChange={e=>toggleService(s.key, { included: e.target.checked })} />
                           Included
-                        </label>
-                      )}
-                      {svc.selected && s.unit !== 'included' && (
-                        <label className="flex items-center gap-1 text-xs text-slate-500 shrink-0 cursor-pointer">
-                          <input type="checkbox" checked={svc.complimentary} onChange={e=>toggleService(s.key, { complimentary: e.target.checked, bundledIncluded: e.target.checked ? false : svc.bundledIncluded })} />
-                          Comp
                         </label>
                       )}
                       {svc.selected && s.unit !== 'included' && (
                         <div className="flex items-center gap-1 shrink-0">
                           <span className="text-xs text-slate-400">{CURRENCY_SYMBOL[form.currency]}</span>
-                          <input disabled={svc.complimentary || svc.bundledIncluded} type="number" min="0" step="0.01" value={svc.rate} onChange={e=>toggleService(s.key, { rate: Number(e.target.value) })} className="w-20 px-2 py-1 text-sm border border-[var(--border)] rounded-lg text-right disabled:bg-slate-100 disabled:text-slate-400" placeholder="Rate" />
+                          <input type="number" min="0" step="0.01" value={svc.rate} onChange={e=>toggleService(s.key, { rate: Number(e.target.value) })} className="w-20 px-2 py-1 text-sm border border-[var(--border)] rounded-lg text-right" placeholder="Rate" />
                         </div>
                       )}
                       {svc.selected && s.unit !== 'included' && (
-                        <div className="w-24 text-right text-sm font-data">{(svc.complimentary || svc.bundledIncluded) ? 'Included' : fmtMoney(s.unit==='flat'?svc.rate:svc.rate*svc.qty, form.currency)}</div>
+                        <div className="w-28 text-right text-sm font-data">
+                          {svc.included
+                            ? <><span className="line-through text-slate-400">{fmtMoney(s.unit==='flat'?svc.rate:svc.rate*svc.qty, form.currency)}</span> <span className="text-emerald-600">Incl.</span></>
+                            : fmtMoney(s.unit==='flat'?svc.rate:svc.rate*svc.qty, form.currency)}
+                        </div>
                       )}
                     </div>
                     {s.key === 'platform_access' && svc.selected && (
@@ -994,34 +995,35 @@ function ContractForm({ navigate, editContractId }) {
 
         {/* --- Commercial Model: how the deal is funded. --------------------- */}
         <CollapsibleSection title="Commercial Model" open={openSections.commercial} onToggle={()=>toggleSection('commercial')} summary={form.paymentModel ? (PAYMENT_MODEL_LABELS[form.paymentModel] || '').split(' — ')[0] : 'Club-funded (default)'}>
-        <p className="text-xs text-slate-400 mb-3">How is this deal funded? The services above describe what the Client gets; this sets who pays. Player-funded and Shared deals compute the value from player fees, net of the club kickback.</p>
+        <p className="text-xs text-slate-400 mb-3">How is this deal funded? The services above describe what the Client gets; this sets who pays. For Shared and Player-funded deals, the contract value is entered manually below (the player numbers aren't known in advance, so they're stated as terms, not computed).</p>
         <div className="space-y-1.5 mb-3">
-          {[['club_all','Club-funded — the Client pays the full fee'],['club_players','Shared — the Client and its players jointly fund the fee'],['players_all','Player-funded — fees are collected directly from players']].map(([val,label]) => (
+          {[['club_all','Club-funded — the Client pays the full fee'],['club_players','Shared — a fixed amount is agreed with the Client; players fund the remainder'],['players_all','Player-funded — fees are collected directly from players']].map(([val,label]) => (
             <label key={val} className="flex items-start gap-2.5 text-sm text-slate-700 cursor-pointer">
               <input type="radio" name="paymentModel" checked={form.paymentModel===val} onChange={()=>setPaymentModel(val)} className="mt-0.5" />
               <span>{label}</span>
             </label>
           ))}
         </div>
-        {(form.paymentModel === 'club_players' || form.paymentModel === 'players_all') && (
+        {form.paymentModel === 'club_players' && (
+          <div className="rounded-lg border border-[var(--border)] p-4 mb-2 bg-slate-50/60">
+            <p className="text-xs text-slate-500 mb-3">The <strong>fixed amount agreed with the Client</strong> is the contract value (enter it under Contract Details below). The player contribution is stated as a term — it is not added to the value.</p>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <Field label={`Player fee / month (${CURRENCY_SYMBOL[form.currency]})`}><input type="number" min="0" step="0.01" value={form.playerMonthlyFee} onChange={e=>set('playerMonthlyFee', e.target.value)} className={inputCls(false)} placeholder="15" /></Field>
+              <Field label="Months"><input type="number" min="0" value={form.playerMonths} onChange={e=>set('playerMonths', e.target.value)} className={inputCls(false)} placeholder="10" /></Field>
+              <Field label="Minimum players"><input type="number" min="0" value={form.minPlayers} onChange={e=>set('minPlayers', e.target.value)} className={inputCls(false)} placeholder="optional" /></Field>
+              <Field label="Club kickback %"><input type="number" min="0" max="100" step="0.1" value={form.kickbackPct} onChange={e=>set('kickbackPct', e.target.value)} className={inputCls(false)} placeholder="optional" /></Field>
+            </div>
+          </div>
+        )}
+        {form.paymentModel === 'players_all' && (
           <div className="rounded-lg border border-[var(--border)] p-4 mb-2 bg-slate-50/60">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <Field label="Players"><input type="number" min="0" value={form.playerCount} onChange={e=>set('playerCount', e.target.value)} className={inputCls(false)} placeholder="100" /></Field>
-              <Field label={`Fee / player / month (${CURRENCY_SYMBOL[form.currency]})`}><input type="number" min="0" step="0.01" value={form.playerMonthlyFee} onChange={e=>set('playerMonthlyFee', e.target.value)} className={inputCls(false)} placeholder="15" /></Field>
+              <Field label={`Player fee / month (${CURRENCY_SYMBOL[form.currency]})`}><input type="number" min="0" step="0.01" value={form.playerMonthlyFee} onChange={e=>set('playerMonthlyFee', e.target.value)} className={inputCls(false)} placeholder="15" /></Field>
               <Field label="Months"><input type="number" min="0" value={form.playerMonths} onChange={e=>set('playerMonths', e.target.value)} className={inputCls(false)} placeholder="10" /></Field>
-              <Field label="Club kickback %"><input type="number" min="0" max="100" step="0.1" value={form.kickbackPct} onChange={e=>set('kickbackPct', e.target.value)} className={inputCls(false)} placeholder="20" /></Field>
+              <Field label="Minimum players"><input type="number" min="0" value={form.minPlayers} onChange={e=>set('minPlayers', e.target.value)} className={inputCls(false)} placeholder="optional" /></Field>
+              <Field label="Club commission %"><input type="number" min="0" max="100" step="0.1" value={form.kickbackPct} onChange={e=>set('kickbackPct', e.target.value)} className={inputCls(false)} placeholder="optional" /></Field>
             </div>
-            {form.paymentModel === 'club_players' && kb.gross > 0 && (
-              <div className="mt-3 pt-3 border-t border-[var(--border)] text-sm space-y-1">
-                <div className="flex justify-between text-slate-600"><span>Gross player fees</span><span className="font-data">{fmtMoney(kb.gross, form.currency)}</span></div>
-                <div className="flex justify-between text-slate-600"><span>Club kickback ({kb.pct}%)</span><span className="font-data text-emerald-600">− {fmtMoney(kb.kickback, form.currency)}</span></div>
-                <div className="flex justify-between font-heading text-[var(--navy-deep)] pt-1 border-t border-[var(--border)]"><span>Net contract value</span><span className="font-data">{fmtMoney(kb.net, form.currency)}</span></div>
-                <p className="text-xs text-slate-400 pt-1">This net value auto-fills the contract value below; build the installment schedule to match.</p>
-              </div>
-            )}
-            {form.paymentModel === 'players_all' && (
-              <p className="text-xs text-slate-500 mt-3 pt-3 border-t border-[var(--border)]">Players pay the Service Provider directly. The club commission ({form.kickbackPct || 0}% of fees actually collected, settled per season) is stated as a term — it does not drive the contract value or installments.</p>
-            )}
+            <p className="text-xs text-slate-500 mt-3 pt-3 border-t border-[var(--border)]">Players pay the Service Provider directly. The club commission ({form.kickbackPct || 0}% of fees actually collected, settled per season) is stated as a term — it does not drive the contract value or installments.</p>
           </div>
         )}
         </CollapsibleSection>
@@ -1054,12 +1056,42 @@ function ContractForm({ navigate, editContractId }) {
             ))}
           </div>
         </div>
+        {/* Per-team SLA bands (optional). Default SLA applies to all other teams. */}
+        <div className="mt-5 pt-4 border-t border-[var(--border)]">
+          <div className="text-sm font-medium text-slate-600 mb-1">Delivery SLA</div>
+          <p className="text-xs text-slate-400 mb-2">Default: <strong>{form.slaHours || 24} hours</strong> for all covered teams (set under Core Services). Optionally give specific teams a different SLA below.</p>
+          {(form.slaBands || []).map((band, i) => (
+            <div key={i} className="rounded-lg border border-[var(--border)] p-3 mb-2 bg-slate-50/60">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs text-slate-500">These teams:</span>
+                <div className="flex items-center gap-2">
+                  <select value={band.hours} onChange={e=>updateSlaBand(i, { hours: Number(e.target.value) })} className="px-2 py-1 text-sm border border-[var(--border)] rounded-lg bg-white">
+                    {[24,48,72].map(h => <option key={h} value={h}>{h} hours</option>)}
+                  </select>
+                  <button type="button" onClick={()=>removeSlaBand(i)} className="text-slate-400 hover:text-red-500 px-1" title="Remove band">✕</button>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {(form.analysisTeams && form.analysisTeams.length ? form.analysisTeams : ['U14','U15','U16','U17','U19',"Men's"]).map(team => {
+                  const on = band.teams.includes(team);
+                  return (
+                    <button type="button" key={team} onClick={()=>toggleBandTeam(i, team)}
+                      className={`px-2.5 py-1 rounded-lg text-xs border transition ${on ? 'bg-[var(--navy-deep)] text-white border-[var(--navy-deep)]' : 'bg-white text-slate-600 border-[var(--border)] hover:border-blue-300'}`}>
+                      {on ? '✓ ' : ''}{team}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+          <button type="button" onClick={addSlaBand} className="text-sm text-[var(--blue-primary)] hover:underline">+ Add a different SLA for specific teams</button>
+        </div>
         </CollapsibleSection>
 
         <CollapsibleSection title="Contract Details" open={openSections.details} onToggle={()=>toggleSection('details')} summary={`${fmtMoney(form.value || 0, form.currency)}${form.startDate && form.endDate ? ` · ${fmtDate(form.startDate)}–${fmtDate(form.endDate)}` : ''}`}>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Field label="Value" required error={errors.value}>
-            <input disabled={form.billingBasis !== 'player_funded' || form.paymentModel !== 'players_all'} type="number" step="0.01" value={form.value} onChange={e=>set('value',e.target.value)} className={inputCls(errors.value)} placeholder="12000.00" />
+            <input disabled={form.billingBasis !== 'player_funded'} type="number" step="0.01" value={form.value} onChange={e=>set('value',e.target.value)} className={inputCls(errors.value)} placeholder="12000.00" />
           </Field>
           <Field label="Currency">
             <select value={form.currency} onChange={e=>set('currency',e.target.value)} className={inputCls(false)}>
@@ -1067,7 +1099,7 @@ function ContractForm({ navigate, editContractId }) {
             </select>
           </Field>
         </div>
-        <p className="text-xs text-slate-400 -mt-3 mb-4">{form.billingBasis === 'player_funded' ? (form.paymentModel === 'players_all' ? 'Players pay directly — enter the Client-payable value (if any) manually.' : 'Value is the net player-funded figure (gross − kickback) from the Commercial Model above.') : 'Value is computed automatically from the services above.'}</p>
+        <p className="text-xs text-slate-400 -mt-3 mb-4">{form.paymentModel === 'club_players' ? 'Enter the fixed amount agreed with the Client. Players fund the remainder (stated as terms in the Commercial Model — not added here).' : form.paymentModel === 'players_all' ? 'Players pay directly — enter the Client-payable value (if any) manually.' : 'Value is computed automatically from the services above.'}</p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Field label="Start Date">
             <input type="date" value={form.startDate} onChange={e=>set('startDate',e.target.value)} className={inputCls(false)} />
@@ -1626,12 +1658,12 @@ function ContractDocumentBody({ contract, client, company }) {
                         <div className="space-y-2">
                           {groupItems.map(i => {
                             const qtyNote = i.unit === 'per_match' ? ` (${i.qty} matches)` : i.unit === 'per_unit' ? ` (${i.qty})` : '';
-                            const chip = i.bundledIncluded ? 'Included' : i.complimentary ? 'Complimentary' : i.unit === 'included' ? 'Included' : null;
+                            const chip = i.included ? 'Included' : null;
                             return (
                               <div key={i.key} className="text-sm text-slate-700">
                                 <span className="font-medium" style={{ color:'var(--navy-deep)' }}>{i.label}</span>
                                 {qtyNote && <span className="text-slate-500">{qtyNote}</span>}
-                                {chip && <span className={`sos-chip ${chip === 'Complimentary' ? 'sos-chip-green' : 'sos-chip-cyan'} ml-2 align-middle`} style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}>{chip}</span>}
+                                {chip && <span className="sos-chip sos-chip-green ml-2 align-middle" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}>{chip}</span>}
                                 <span className="text-slate-500"> — {i.detail}</span>
                                 {i.key === 'platform_access' && platformSeatsSummary(contract.services.platform_access) && (
                                   <div className="text-xs text-slate-600 mt-0.5">Access: {platformSeatsSummary(contract.services.platform_access)} (exact users to be confirmed with the client)</div>
@@ -1668,7 +1700,11 @@ function ContractDocumentBody({ contract, client, company }) {
                               <div className="text-xs text-slate-600">Access: {platformSeatsSummary(contract.services.platform_access)} (exact users to be confirmed with the client)</div>
                             )}
                           </td>
-                          <td className="py-2 px-3 text-right font-data">{i.unit === 'flat' ? fmtMoney(i.amount, contract.currency) : (i.unit === 'included' || i.complimentary || i.bundledIncluded) ? 'Included' : i.qty}</td>
+                          <td className="py-2 px-3 text-right font-data whitespace-nowrap">
+                            {i.included
+                              ? <><span className="line-through text-slate-400">{fmtMoney(i.listPrice, contract.currency)}</span> <span className="text-emerald-600">Incl.</span></>
+                              : fmtMoney(i.listPrice, contract.currency)}
+                          </td>
                         </tr>
                       ))}
                       <tr style={{ borderTop:'2px solid var(--navy-deep)' }}>
@@ -1735,8 +1771,10 @@ function ContractDocumentBody({ contract, client, company }) {
               )}
 
               <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{serviceLevelsNum}.</span> Service Levels</div>
-              <p className="text-sm text-slate-700 mb-2">The Service Provider shall use reasonable endeavours to deliver the key analytical outputs for each covered match within <strong>{contract.slaHours || 24} hours</strong>. This service level runs from the Service Provider's receipt of usable match footage and applicable match data, and excludes weekends, public holidays and any delay caused by the Client, third parties or events beyond the Service Provider's reasonable control.</p>
-              <p className="text-sm text-slate-700 mb-8">Where the Service Provider fails to meet this service level for a given match, it shall remedy the delay within a reasonable cure period. The Client's sole and exclusive remedy for a service-level failure shall be a proportionate service credit against the fees for the affected deliverables; a service-level failure shall not, of itself, entitle the Client to terminate this Agreement, save in the case of repeated and material failures not remedied following written notice.</p>
+              {serviceLevelsLines(contract).map((ln, i) => (
+                <p key={i} className="text-sm text-slate-700 mb-2">{ln} These timeframes exclude weekends, public holidays and any delay caused by the Client, third parties or events beyond the Service Provider's reasonable control.</p>
+              ))}
+              <p className="text-sm text-slate-700 mb-8">Where the Service Provider fails to meet the applicable service level for a given match, it shall remedy the delay within a reasonable cure period. The Client's sole and exclusive remedy for a service-level failure shall be a proportionate service credit against the fees for the affected deliverables; a service-level failure shall not, of itself, entitle the Client to terminate this Agreement, save in the case of repeated and material failures not remedied following written notice.</p>
 
               <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{confidentialityNum}.</span> Confidentiality & Data Protection</div>
               <div className="mb-8 pl-4 pr-5 py-4 rounded-r-lg" style={{ background:'#EEF0FB', borderLeft:'3px solid var(--navy-deep)', WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}>
@@ -2842,6 +2880,9 @@ function normalizeSnapshot(snapshot) {
     playerMonthlyFee: pick(c, 'playerMonthlyFee', 'player_monthly_fee'),
     playerMonths: pick(c, 'playerMonths', 'player_months'),
     kickbackPct: pick(c, 'kickbackPct', 'kickback_pct'),
+    minPlayers: pick(c, 'minPlayers', 'min_players'),
+    slaBands: pick(c, 'slaBands', 'sla_bands') || [],
+    slaHours: pick(c, 'slaHours', 'sla_hours'),
     documentHashBefore: pick(c, 'documentHashBefore', 'document_hash_before'),
     createdAt: pick(c, 'createdAt', 'created_at'),
     sentAt: pick(c, 'sentAt', 'sent_at'),

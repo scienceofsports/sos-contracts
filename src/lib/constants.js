@@ -71,12 +71,17 @@ export function computeServiceLineItems(services) {
   return SERVICE_CATALOG
     .filter(s => services[s.key] && services[s.key].selected)
     .map(s => {
-      const qty = Number(services[s.key].qty) || 0;
-      const complimentary = !!services[s.key].complimentary;
-      const bundledIncluded = !!services[s.key].bundledIncluded;
-      const rate = (complimentary || bundledIncluded) ? 0 : Number(services[s.key].rate != null ? services[s.key].rate : s.defaultRate);
-      const amount = s.unit === 'flat' ? rate : (s.unit === 'included' ? 0 : rate * qty);
-      return { ...s, qty, rate, complimentary, bundledIncluded, amount };
+      const svc = services[s.key];
+      const qty = Number(svc.qty) || 0;
+      // Single "included" concept (merges the old complimentary + bundledIncluded).
+      // Catalog items with unit 'included' are inherently included.
+      const included = s.unit === 'included' || !!svc.included || !!svc.complimentary || !!svc.bundledIncluded;
+      // Keep the REAL rate even when included, so the list price can be shown
+      // struck-through. `amount` is what's actually charged (0 when included).
+      const rate = Number(svc.rate != null ? svc.rate : s.defaultRate);
+      const listPrice = s.unit === 'flat' ? rate : rate * qty;   // full value of the line
+      const amount = included ? 0 : listPrice;                    // what's added to the total
+      return { ...s, qty, rate, included, listPrice, amount };
     });
 }
 
@@ -188,32 +193,63 @@ export function computeKickback({ playerCount, playerMonthlyFee, playerMonths, k
 // Human labels for the payment models.
 export const PAYMENT_MODEL_LABELS = {
   club_all: 'Club-funded — the Client pays the full fee',
-  club_players: 'Shared — the Client and its players jointly fund the fee',
+  club_players: 'Shared — a fixed amount is agreed with the Client; players fund the remainder',
   players_all: 'Player-funded — fees are collected directly from players',
 };
 
 // Build the Commercial Terms clause parts from a contract + a money formatter
 // `fm(amount)`. Returns { intro, breakdown, commission } (any may be '').
+// Shared/Player-funded state player funding as TERMS — player numbers aren't
+// known in advance, so nothing is computed into the contract value.
 // NOTE: ported verbatim into both PDF generators — keep in sync.
 export function commercialModelText(contract, fm) {
   const basis = contract?.billingBasis || 'services';
   const model = contract?.paymentModel || null;
   if (basis !== 'player_funded' || !model) return { intro: '', breakdown: '', commission: '' };
-  const k = computeKickback({
-    playerCount: contract.playerCount, playerMonthlyFee: contract.playerMonthlyFee,
-    playerMonths: contract.playerMonths, kickbackPct: contract.kickbackPct,
-  });
-  const feeLine = `${k.playerCount} players at ${fm(k.playerMonthlyFee)} per player per month over ${k.playerMonths} months`;
+  const fee = Number(contract.playerMonthlyFee) || 0;
+  const months = Number(contract.playerMonths) || 0;
+  const pct = Number(contract.kickbackPct) || 0;
+  const minP = Number(contract.minPlayers) || 0;
   const intro = PAYMENT_MODEL_LABELS[model] || '';
-  if (model === 'players_all') {
-    // Terms only — no netted value; commission on amounts actually collected.
-    const commission = k.pct ? `The Service Provider shall pay the Client a commission of ${k.pct}% of the fees actually collected from players enrolled through the Client, reconciled and settled per football season.` : '';
-    return { intro, breakdown: `Access fees are collected by the Service Provider directly from participating players (${feeLine}).`, commission };
+  // Describe the player contribution (fee per player per month, optional minimum).
+  const feeBits = [];
+  if (fee) feeBits.push(`${fm(fee)} per player per month`);
+  if (months) feeBits.push(`over ${months} months`);
+  const feeStr = feeBits.join(' ');
+  const minStr = minP ? ` The Client undertakes to enrol a minimum of ${minP} players.` : '';
+
+  if (model === 'club_players') {
+    const breakdown = `The Client shall pay the Service Provider a fixed fee of ${fm(contract.value)} as set out in the Fees & Payment section. Participating players shall fund the remainder of the programme, contributing${feeStr ? ` ${feeStr}` : ' a monthly fee agreed with the Client'}, collected by the Service Provider.${minStr}`;
+    const commission = pct ? `The Service Provider shall pay the Client a commission of ${pct}% of the player fees actually collected, reconciled and settled per football season.` : '';
+    return { intro, breakdown, commission };
   }
-  // club_all / club_players — calculated net, kickback shown as a breakdown.
-  const breakdown = `Gross player fees (${feeLine}) total ${fm(k.gross)}. A club kickback of ${k.pct}% (${fm(k.kickback)}) is applied, resulting in a net contract value of ${fm(k.net)} payable by the Client.`;
-  const commission = 'The kickback is applied as a discount against the fees payable by the Client and is reflected in the total contract value and payment schedule above.';
+  // players_all — players pay SOS directly; commission on amounts collected.
+  const breakdown = `Access fees are collected by the Service Provider directly from participating players${feeStr ? `, at ${feeStr}` : ''}.${minStr}`;
+  const commission = pct ? `The Service Provider shall pay the Client a commission of ${pct}% of the fees actually collected from players enrolled through the Client, reconciled and settled per football season.` : '';
   return { intro, breakdown, commission };
+}
+
+// Build the Service Levels delivery sentence(s) from the default SLA + optional
+// per-team bands. Returns an array of sentences. NOTE: ported into both PDF
+// generators — keep in sync.
+export function serviceLevelsLines(contract) {
+  const defHours = Number(contract?.slaHours) || 24;
+  const bands = Array.isArray(contract?.slaBands) ? contract.slaBands.filter(b => b && Array.isArray(b.teams) && b.teams.length && Number(b.hours)) : [];
+  if (!bands.length) {
+    return [`The Service Provider shall use reasonable endeavours to deliver the key analytical outputs for each covered match within ${defHours} hours of receipt of usable match footage and applicable match data.`];
+  }
+  // Teams explicitly banded; the rest fall under the default.
+  const banded = new Set();
+  const lines = bands.map(b => {
+    b.teams.forEach(t => banded.add(t));
+    return `For ${b.teams.join(', ')}: within ${Number(b.hours)} hours.`;
+  });
+  const allTeams = Array.isArray(contract?.analysisTeams) ? contract.analysisTeams : [];
+  const rest = allTeams.filter(t => !banded.has(t));
+  const restLine = rest.length ? ` For all other covered teams: within ${defHours} hours.` : '';
+  return [
+    `The Service Provider shall use reasonable endeavours to deliver the key analytical outputs for each covered match within the following timeframes, measured from receipt of usable match footage and applicable match data: ${lines.join(' ')}${restLine}`,
+  ];
 }
 
 export function generateDescriptionFromServices(services, slaHours) {
@@ -227,7 +263,7 @@ export function generateDescriptionFromServices(services, slaHours) {
     lines.push(group);
     groupItems.forEach(i => {
       const qtyNote = i.unit === 'per_match' ? ` (${i.qty} matches)` : i.unit === 'per_unit' ? ` (${i.qty})` : '';
-      const statusNote = i.unit === 'included' ? '' : i.bundledIncluded ? ' (included in the core platform price)' : i.complimentary ? ' (complimentary)' : '';
+      const statusNote = (i.included && i.unit !== 'included') ? ' (included)' : '';
       lines.push(`- ${i.label}${qtyNote}${statusNote} — ${i.detail}`);
       if (i.key === 'platform_access') {
         const seats = platformSeatsSummary(services.platform_access);
