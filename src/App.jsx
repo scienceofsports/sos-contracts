@@ -144,10 +144,10 @@ function Sidebar({ route, navigate, mobileOpen, setMobileOpen }) {
       {mobileOpen && <div className="fixed inset-0 bg-black/40 z-30 md:hidden no-print" onClick={()=>setMobileOpen(false)}></div>}
       <div className={`fixed md:static z-40 top-0 left-0 h-full w-64 bg-[var(--navy-deep)] flex flex-col transition-transform no-print ${mobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
         <div className="sos-rainbow" />
-        <div className="px-5 py-6 border-b border-white/10 flex flex-col items-start gap-2">
+        <button type="button" onClick={() => { navigate('dashboard'); setMobileOpen(false); }} className="px-5 py-6 border-b border-white/10 flex flex-col items-start gap-2 hover:bg-white/5 transition text-left w-full" title="Go to Dashboard">
           <img src="Logo-scios-dark.png" alt="SCIOS" className="h-12 w-auto object-contain" />
           <div className="text-white font-heading">SCIOS Contracts</div>
-        </div>
+        </button>
         <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-1">
           {NAV.map(item => (
             <div key={item.key}>
@@ -558,8 +558,25 @@ function ContractsList({ navigate, filterStatus }) {
   );
 }
 
+// Services pre-ticked on a NEW contract.
+const DEFAULT_SELECTED_SERVICES = ['platform_access', 'match_reports', 'coach_support'];
+// The service groups split across the two form sections.
+const PLATFORM_GROUPS = ['Core Services', 'Analysis Services'];
+const ADDON_GROUPS = ['Recording Services', 'Reporting Services', 'Coaching Support'];
+
+// A/B/C quick-pick packages. Each sets the covered teams + per-team SLA + price.
+// Everything remains fully editable after a package is applied.
+const ALL_TEAMS = ['U14','U15','U16','U17','U19',"Men's"];
+const CONTRACT_PACKAGES = [
+  { key:'premium',   label:'Premium',   icon:'🥇', price:15000,
+    teamSla: Object.fromEntries(ALL_TEAMS.map(t => [t, 24])) },
+  { key:'smart',     label:'Smart',     icon:'🥈', price:12500,
+    teamSla: { U14:72, U15:72, U16:72, U17:24, U19:24, "Men's":24 } },
+  { key:'essential', label:'Essential', icon:'🥉', price:10000,
+    teamSla: Object.fromEntries(ALL_TEAMS.map(t => [t, 72])) },
+];
 function defaultServicesState() {
-  return Object.fromEntries(SERVICE_CATALOG.map(s => [s.key, { selected:false, qty:s.defaultQty, rate:s.defaultRate, included:false, ...(s.key === 'platform_access' ? { directorSeats:0, coachSeats:0, playerSeats:0 } : {}) }]));
+  return Object.fromEntries(SERVICE_CATALOG.map(s => [s.key, { selected: DEFAULT_SELECTED_SERVICES.includes(s.key), qty:s.defaultQty, rate:s.defaultRate, included:false, ...(s.key === 'platform_access' ? { directorSeats:0, coachSeats:0, playerSeats:0 } : {}) }]));
 }
 
 // Collapsible form section: a bordered card with a clickable header (title +
@@ -591,7 +608,8 @@ function ContractForm({ navigate, editContractId }) {
     startDate:'', endDate:'', paymentType:'one_time', paymentTermsDays:30, latePaymentPenalty:1.5,
     governingLaw:'Republic of Cyprus', jurisdiction:'Nicosia, Cyprus', description:'', slaHours:24, specialTerms:'',
     analysisTeams:[], oppMatchFootage:false, oppTeamAnalysis:false, oppPlayerAnalysis:false,
-    billingBasis:'services', paymentModel:'club_all', playerMonthlyFee:'', playerMonths:'', kickbackPct:'', minPlayers:'', slaBands:[],
+    billingBasis:'services', paymentModel:'club_all', playerMonthlyFee:'', playerMonths:'', kickbackPct:'', minPlayers:'', slaBands:[], teamSla:{},
+    packageKey:'', packageEdited:false,
   });
   const [titleEdited, setTitleEdited] = useState(isEdit);
   // Which service groups are expanded in the form (collapsible sections).
@@ -642,6 +660,16 @@ function ContractForm({ navigate, editContractId }) {
         kickbackPct: existing.kickbackPct ?? '',
         minPlayers: existing.minPlayers ?? '',
         slaBands: Array.isArray(existing.slaBands) ? existing.slaBands : [],
+        // Expand stored slaBands into the per-team SLA map; fall back to the old
+        // single slaHours for teams not covered by a band (legacy contracts).
+        teamSla: (() => {
+          const map = {};
+          (Array.isArray(existing.slaBands) ? existing.slaBands : []).forEach(b => {
+            if (b && Array.isArray(b.teams)) b.teams.forEach(t => { map[t] = Number(b.hours) || 72; });
+          });
+          (existing.analysisTeams || []).forEach(t => { if (!map[t]) map[t] = Number(existing.slaHours) || 72; });
+          return map;
+        })(),
       });
       setServices(existing.services ? { ...defaultServicesState(), ...existing.services } : defaultServicesState());
       setSpecialTermsList(parseSpecialTerms(existing.specialTerms));
@@ -659,10 +687,8 @@ function ContractForm({ navigate, editContractId }) {
       const svc = existing.services || {};
       setOpenSections({
         services: true,
-        commercial: !!existing.paymentModel,
-        analysis: (existing.analysisTeams && existing.analysisTeams.length) || existing.oppMatchFootage || existing.oppTeamAnalysis || existing.oppPlayerAnalysis,
-        details: true,
-        schedule: !!(existing.payments && existing.payments.length),
+        addons: SERVICE_CATALOG.some(s => ADDON_GROUPS.includes(s.group) && svc[s.key]?.selected),
+        money: true,
         text: !!(existing.specialTerms && existing.specialTerms.trim()),
       });
       const groupsWithSel = {};
@@ -762,14 +788,31 @@ function ContractForm({ navigate, editContractId }) {
     });
   };
 
-  const setSlaHours = (hours) => {
-    setForm(f => ({ ...f, slaHours: hours, description: generateDescriptionFromServices(services, hours) }));
+  // Per-team SLA. `analysisTeams` = covered teams; `teamSla` maps team -> hours.
+  // Ticking a team adds it at 72h by default; unticking removes it + its SLA.
+  const DEFAULT_TEAM_SLA = 72;
+  const toggleTeam = (team) => setForm(f => {
+    const on = (f.analysisTeams || []).includes(team);
+    const teams = on ? (f.analysisTeams || []).filter(t => t !== team) : [...(f.analysisTeams || []), team];
+    const teamSla = { ...(f.teamSla || {}) };
+    if (on) delete teamSla[team]; else teamSla[team] = teamSla[team] || DEFAULT_TEAM_SLA;
+    return { ...f, analysisTeams: teams, teamSla, packageEdited: f.packageKey ? true : f.packageEdited };
+  });
+  const setTeamSla = (team, hours) => setForm(f => ({ ...f, teamSla: { ...(f.teamSla || {}), [team]: hours }, packageEdited: f.packageKey ? true : f.packageEdited }));
+  // Apply an A/B/C package: set teams + per-team SLA, and the price (via the
+  // platform-access flat rate, so it flows into the value). Fully editable after.
+  const applyPackage = (pkg) => {
+    const teams = Object.keys(pkg.teamSla);
+    setServices(s => ({ ...s, platform_access: { ...s.platform_access, selected: true, included: false, rate: pkg.price } }));
+    setForm(f => ({ ...f, analysisTeams: teams, teamSla: { ...pkg.teamSla }, packageKey: pkg.key, packageEdited: false }));
   };
-  // Optional per-team SLA bands: [{ teams:[...], hours }].
-  const addSlaBand = () => setForm(f => ({ ...f, slaBands: [...(f.slaBands||[]), { teams: [], hours: 24 }] }));
-  const updateSlaBand = (i, patch) => setForm(f => ({ ...f, slaBands: (f.slaBands||[]).map((b, idx) => idx === i ? { ...b, ...patch } : b) }));
-  const removeSlaBand = (i) => setForm(f => ({ ...f, slaBands: (f.slaBands||[]).filter((_, idx) => idx !== i) }));
-  const toggleBandTeam = (i, team) => setForm(f => ({ ...f, slaBands: (f.slaBands||[]).map((b, idx) => idx === i ? { ...b, teams: b.teams.includes(team) ? b.teams.filter(t=>t!==team) : [...b.teams, team] } : b) }));
+  // Build the slaBands storage [{teams,hours}] from the per-team map, grouping
+  // teams that share the same SLA (drives serviceLevelsLines identically).
+  const buildSlaBands = (teams, teamSla) => {
+    const byHours = {};
+    (teams || []).forEach(t => { const h = (teamSla || {})[t] || DEFAULT_TEAM_SLA; (byHours[h] = byHours[h] || []).push(t); });
+    return Object.entries(byHours).map(([hours, ts]) => ({ teams: ts, hours: Number(hours) }));
+  };
 
   const lineItems = computeServiceLineItems(services);
   const lineItemsTotal = lineItems.reduce((s,i)=>s+i.amount,0);
@@ -817,6 +860,8 @@ function ContractForm({ navigate, editContractId }) {
       // Serialize the structured special terms (drop empty rows) to JSON, or ''.
       const cleanTerms = specialTermsList.filter(t => t.text && t.text.trim());
       const specialTerms = cleanTerms.length ? JSON.stringify(cleanTerms) : '';
+      // Derive the stored SLA bands from the per-team SLA map.
+      const slaBands = buildSlaBands(form.analysisTeams, form.teamSla);
       const schedule = form.paymentType === 'one_time'
         ? [{ date: oneTimeDate, amount: Number(form.value) }]
         : form.paymentType === 'milestone'
@@ -828,6 +873,7 @@ function ContractForm({ navigate, editContractId }) {
         contract = await contractService.update(editContractId, {
           ...form,
           specialTerms,
+          slaBands,
           value: Number(form.value),
           startDate: form.startDate ? new Date(form.startDate).toISOString() : '',
           endDate: form.endDate ? new Date(form.endDate).toISOString() : '',
@@ -847,6 +893,7 @@ function ContractForm({ navigate, editContractId }) {
         contract = await contractService.create({
           ...form,
           specialTerms,
+          slaBands,
           value: Number(form.value),
           status: 'draft',
           startDate: form.startDate ? new Date(form.startDate).toISOString() : '',
@@ -875,6 +922,164 @@ function ContractForm({ navigate, editContractId }) {
 
   if (!clients || loadingExisting) return <div className="p-6"><Skeleton className="h-96 w-full" /></div>;
 
+  // Render one service group (collapsible) + its group-specific extras
+  // (teams/SLA under Core Services, opponent access under Analysis Services).
+  const renderServiceGroup = (group) => {
+    const groupServices = SERVICE_CATALOG.filter(s => s.group === group);
+    const selectedCount = groupServices.filter(s => services[s.key]?.selected).length;
+    const open = !!openGroups[group];
+    return (
+      <div key={group} className="mb-2 last:mb-0 border border-[var(--border)] rounded-lg overflow-hidden">
+        <button type="button" onClick={()=>toggleGroup(group)} className="w-full flex items-center justify-between px-3 py-2.5 bg-slate-50 hover:bg-slate-100 transition text-left">
+          <span className="text-xs font-semibold text-[var(--navy-deep)] uppercase tracking-wide">{group}</span>
+          <span className="flex items-center gap-2">
+            {selectedCount > 0 && <span className="text-[11px] font-medium text-white bg-[var(--navy-deep)] rounded-full px-2 py-0.5">{selectedCount} selected</span>}
+            <span className={`text-slate-400 transition-transform ${open ? 'rotate-180' : ''}`}>▾</span>
+          </span>
+        </button>
+        {open && (
+        <div className="p-3">
+        <div className="space-y-2">
+          {groupServices.map(s => {
+            const svc = services[s.key];
+            return (
+              <div key={s.key} className="py-1.5 border-b border-[var(--border)] last:border-0">
+                <div className="flex items-center gap-3">
+                  <input type="checkbox" checked={svc.selected} onChange={e=>toggleService(s.key, { selected: e.target.checked })} className="shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm">{s.label}</div>
+                    <div className="text-xs text-slate-400">{SERVICE_UNIT_LABELS[s.unit]}</div>
+                  </div>
+                  {(s.unit === 'per_match' || s.unit === 'per_unit') && svc.selected && (() => { const needsQty = !svc.included && (Number(svc.qty) || 0) <= 0; return (
+                    <div className="shrink-0 text-right">
+                      <input type="number" min="0" value={svc.qty} onChange={e=>toggleService(s.key, { qty: Number(e.target.value) })} className={`w-20 px-2 py-1 text-sm border rounded-lg ${needsQty ? 'border-amber-400 bg-amber-50' : 'border-[var(--border)]'}`} placeholder="Qty" />
+                      {needsQty && <div className="text-[10px] text-amber-600 mt-0.5">set a quantity</div>}
+                    </div>
+                  ); })()}
+                  {svc.selected && s.unit !== 'included' && (
+                    <label className="flex items-center gap-1 text-xs text-slate-500 shrink-0 cursor-pointer" title="Include this service at no charge (its value is still shown to the client, struck through)">
+                      <input type="checkbox" checked={!!svc.included} onChange={e=>toggleService(s.key, { included: e.target.checked })} />
+                      Included
+                    </label>
+                  )}
+                  {svc.selected && s.unit !== 'included' && (
+                    <div className="flex items-center gap-1 shrink-0">
+                      <span className="text-xs text-slate-400">{CURRENCY_SYMBOL[form.currency]}</span>
+                      <input type="number" min="0" step="0.01" value={svc.rate} onChange={e=>toggleService(s.key, { rate: Number(e.target.value) })} className="w-20 px-2 py-1 text-sm border border-[var(--border)] rounded-lg text-right" placeholder="Rate" />
+                    </div>
+                  )}
+                  {svc.selected && s.unit !== 'included' && (() => { const lp = s.unit==='flat'?svc.rate:svc.rate*svc.qty; return (
+                    <div className="w-28 text-right text-sm font-data">
+                      {svc.included
+                        ? (lp > 0
+                            ? <><span className="line-through text-slate-400">{fmtMoney(lp, form.currency)}</span> <span className="text-emerald-600">Incl.</span></>
+                            : <span className="text-emerald-600">Included</span>)
+                        : fmtMoney(lp, form.currency)}
+                    </div>
+                  ); })()}
+                </div>
+                {s.key === 'platform_access' && svc.selected && (
+                  <div className="mt-3 ml-7 rounded-lg border border-[var(--navy-deep)] overflow-hidden">
+                    <div className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-white" style={{ background:'var(--navy-deep)' }}>Platform Access</div>
+                    <div className="flex flex-wrap gap-3 p-3 bg-slate-50/60">
+                      {[
+                        { field:'directorSeats', label:'Directors' },
+                        { field:'coachSeats', label:'Coaches' },
+                        { field:'playerSeats', label:'Players' },
+                      ].map(({ field, label }) => {
+                        const isUnlimited = svc[field] === UNLIMITED_SEATS;
+                        return (
+                          <div key={field} className="flex flex-col gap-1 bg-white border border-[var(--border)] rounded-lg px-3 py-2 min-w-[110px]">
+                            <span className="text-xs font-medium text-[var(--navy-deep)]">{label}</span>
+                            <input
+                              type="number" min="0" disabled={isUnlimited}
+                              value={isUnlimited ? '' : svc[field]}
+                              onChange={e=>toggleService(s.key, { [field]: Number(e.target.value) })}
+                              className="w-full px-2 py-1 text-sm border border-[var(--border)] rounded-lg disabled:bg-slate-100 disabled:text-slate-400"
+                              placeholder={isUnlimited ? '∞ Unlimited' : '0'}
+                            />
+                            <label className="flex items-center gap-1 text-[11px] text-slate-500 cursor-pointer">
+                              <input type="checkbox" checked={isUnlimited} onChange={e=>toggleService(s.key, { [field]: e.target.checked ? UNLIMITED_SEATS : 0 })} />
+                              Unlimited
+                            </label>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        {group === 'Core Services' && (
+          <div className="mt-4 pt-4 border-t border-[var(--border)] space-y-4">
+            {/* A/B/C package quick-pick — fills teams + SLA + price in one click. */}
+            <div>
+              <div className="text-sm font-medium text-slate-600 mb-1">Quick package {form.packageKey && <span className="text-xs font-normal text-slate-400">— {CONTRACT_PACKAGES.find(p=>p.key===form.packageKey)?.label}{form.packageEdited ? ' (edited)' : ''} selected</span>}</div>
+              <p className="text-xs text-slate-400 mb-2">Pick a package to fill the teams, SLAs and price in one click — then edit anything below.</p>
+              <div className="flex flex-wrap gap-2">
+                {CONTRACT_PACKAGES.map(pkg => {
+                  const active = form.packageKey === pkg.key && !form.packageEdited;
+                  return (
+                    <button type="button" key={pkg.key} onClick={()=>applyPackage(pkg)}
+                      className={`px-3 py-2 rounded-lg text-sm border transition text-left ${active ? 'bg-[var(--navy-deep)] text-white border-[var(--navy-deep)]' : 'bg-white text-slate-700 border-[var(--border)] hover:border-blue-300'}`}>
+                      <div className="font-medium">{pkg.icon} {pkg.label}</div>
+                      <div className={`text-xs ${active ? 'text-slate-200' : 'text-slate-400'}`}>{fmtMoney(pkg.price, form.currency)}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="rounded-lg border border-[var(--navy-deep)] overflow-hidden">
+              <div className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-white" style={{ background:'var(--navy-deep)' }}>Teams Analysed &amp; Delivery SLA</div>
+              <div className="p-3 bg-slate-50/60">
+                <p className="text-xs text-slate-400 mb-2">Tick each team analysed and set how fast its match analysis is delivered. Covers League competition matches for the contract season.</p>
+                <div className="space-y-1.5">
+                  {['U14','U15','U16','U17','U19',"Men's"].map(team => {
+                    const on = (form.analysisTeams || []).includes(team);
+                    const hrs = (form.teamSla || {})[team] || 72;
+                    return (
+                      <div key={team} className="flex items-center gap-3">
+                        <button type="button" onClick={()=>toggleTeam(team)}
+                          className={`px-3 py-1.5 rounded-lg text-sm border transition w-24 text-left ${on ? 'bg-[var(--navy-deep)] text-white border-[var(--navy-deep)]' : 'bg-white text-slate-600 border-[var(--border)] hover:border-blue-300'}`}>
+                          {on ? '✓ ' : ''}{team}
+                        </button>
+                        {on && (
+                          <div className="flex items-center gap-2">
+                            <select value={hrs} onChange={e=>setTeamSla(team, Number(e.target.value))} className="px-2 py-1.5 text-sm border border-[var(--border)] rounded-lg bg-white font-medium">
+                              {[24,48,72].map(h => <option key={h} value={h}>{h}h</option>)}
+                            </select>
+                            <span className={`text-xs font-semibold px-2 py-1 rounded-full ${hrs===24 ? 'bg-emerald-100 text-emerald-700' : hrs===48 ? 'bg-amber-100 text-amber-700' : 'bg-slate-200 text-slate-600'}`}>{hrs}h SLA</span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+        {group === 'Analysis Services' && (
+          <div className="mt-4 pt-4 border-t border-[var(--border)]">
+            <div className="text-sm font-medium text-slate-600 mb-2">Opponent analysis access</div>
+            <div className="space-y-2">
+              {[['oppMatchFootage','Opponent match footage'],['oppTeamAnalysis','Opponent team analysis'],['oppPlayerAnalysis','Opponent player analysis']].map(([key,label]) => (
+                <label key={key} className="flex items-center gap-2.5 text-sm text-slate-700 cursor-pointer">
+                  <input type="checkbox" checked={!!form[key]} onChange={e=>set(key, e.target.checked)} className="w-4 h-4 rounded border-slate-300" />
+                  {label}
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+        </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="p-4 md:p-6 max-w-3xl">
       <div className="font-display mb-6 text-[var(--navy-deep)]">{isEdit ? 'Edit Contract' : 'New Contract'}</div>
@@ -890,117 +1095,23 @@ function ContractForm({ navigate, editContractId }) {
           </select>
         </Field>
 
-        <CollapsibleSection title="Services Included" open={openSections.services} onToggle={()=>toggleSection('services')} summary={`${lineItems.length} selected · ${fmtMoney(lineItemsTotal, form.currency)}`}>
-        <p className="text-xs text-slate-500 mb-4">Tick each service this client is getting, set quantity and price. Mark a service "Included" to provide it at no charge — its value is still shown to the client (struck through) but isn't added to the total. The contract sent to the client lists services with their amounts and the total. The description and value below update automatically — review both before saving.</p>
-        {SERVICE_GROUPS.map(group => {
-          const groupServices = SERVICE_CATALOG.filter(s => s.group === group);
-          const selectedCount = groupServices.filter(s => services[s.key]?.selected).length;
-          const open = !!openGroups[group];
-          return (
-          <div key={group} className="mb-2 last:mb-0 border border-[var(--border)] rounded-lg overflow-hidden">
-            <button type="button" onClick={()=>toggleGroup(group)} className="w-full flex items-center justify-between px-3 py-2.5 bg-slate-50 hover:bg-slate-100 transition text-left">
-              <span className="text-xs font-semibold text-[var(--navy-deep)] uppercase tracking-wide">{group}</span>
-              <span className="flex items-center gap-2">
-                {selectedCount > 0 && <span className="text-[11px] font-medium text-white bg-[var(--navy-deep)] rounded-full px-2 py-0.5">{selectedCount} selected</span>}
-                <span className={`text-slate-400 transition-transform ${open ? 'rotate-180' : ''}`}>▾</span>
-              </span>
-            </button>
-            {open && (
-            <div className="p-3">
-            <div className="space-y-2">
-              {groupServices.map(s => {
-                const svc = services[s.key];
-                return (
-                  <div key={s.key} className="py-1.5 border-b border-[var(--border)] last:border-0">
-                    <div className="flex items-center gap-3">
-                      <input type="checkbox" checked={svc.selected} onChange={e=>toggleService(s.key, { selected: e.target.checked })} className="shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <div className="text-sm">{s.label}</div>
-                        <div className="text-xs text-slate-400">{SERVICE_UNIT_LABELS[s.unit]}</div>
-                      </div>
-                      {(s.unit === 'per_match' || s.unit === 'per_unit') && svc.selected && (
-                        <input type="number" min="0" value={svc.qty} onChange={e=>toggleService(s.key, { qty: Number(e.target.value) })} className="w-20 px-2 py-1 text-sm border border-[var(--border)] rounded-lg" placeholder="Qty" />
-                      )}
-                      {svc.selected && s.unit !== 'included' && (
-                        <label className="flex items-center gap-1 text-xs text-slate-500 shrink-0 cursor-pointer" title="Include this service at no charge (its value is still shown to the client, struck through)">
-                          <input type="checkbox" checked={!!svc.included} onChange={e=>toggleService(s.key, { included: e.target.checked })} />
-                          Included
-                        </label>
-                      )}
-                      {svc.selected && s.unit !== 'included' && (
-                        <div className="flex items-center gap-1 shrink-0">
-                          <span className="text-xs text-slate-400">{CURRENCY_SYMBOL[form.currency]}</span>
-                          <input type="number" min="0" step="0.01" value={svc.rate} onChange={e=>toggleService(s.key, { rate: Number(e.target.value) })} className="w-20 px-2 py-1 text-sm border border-[var(--border)] rounded-lg text-right" placeholder="Rate" />
-                        </div>
-                      )}
-                      {svc.selected && s.unit !== 'included' && (() => { const lp = s.unit==='flat'?svc.rate:svc.rate*svc.qty; return (
-                        <div className="w-28 text-right text-sm font-data">
-                          {svc.included
-                            ? (lp > 0
-                                ? <><span className="line-through text-slate-400">{fmtMoney(lp, form.currency)}</span> <span className="text-emerald-600">Incl.</span></>
-                                : <span className="text-emerald-600">Included</span>)
-                            : fmtMoney(lp, form.currency)}
-                        </div>
-                      ); })()}
-                    </div>
-                    {s.key === 'platform_access' && svc.selected && (
-                      <div className="flex flex-wrap items-center gap-5 mt-2 ml-7 pl-2 border-l-2 border-slate-100">
-                        {[
-                          { field:'directorSeats', label:'Directors' },
-                          { field:'coachSeats', label:'Coaches' },
-                          { field:'playerSeats', label:'Players' },
-                        ].map(({ field, label }) => {
-                          const isUnlimited = svc[field] === UNLIMITED_SEATS;
-                          return (
-                            <div key={field} className="flex items-center gap-2">
-                              <label className="flex items-center gap-2 text-xs text-slate-500">
-                                {label}
-                                <input
-                                  type="number" min="0" disabled={isUnlimited}
-                                  value={isUnlimited ? '' : svc[field]}
-                                  onChange={e=>toggleService(s.key, { [field]: Number(e.target.value) })}
-                                  className="w-16 px-2 py-1 text-sm border border-[var(--border)] rounded-lg disabled:bg-slate-100 disabled:text-slate-400"
-                                  placeholder={isUnlimited ? '∞' : ''}
-                                />
-                              </label>
-                              <label className="flex items-center gap-1 text-xs text-slate-500 cursor-pointer">
-                                <input
-                                  type="checkbox" checked={isUnlimited}
-                                  onChange={e=>toggleService(s.key, { [field]: e.target.checked ? UNLIMITED_SEATS : 0 })}
-                                />
-                                Unlimited
-                              </label>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-            {group === 'Core Services' && (
-              <div className="mt-3">
-                <Field label="Match Analysis SLA">
-                  <select value={form.slaHours} onChange={e=>setSlaHours(Number(e.target.value))} className={inputCls(false)}>
-                    {[24,48,72].map(h => <option key={h} value={h}>{h} hours</option>)}
-                  </select>
-                </Field>
-              </div>
-            )}
-            </div>
-            )}
-          </div>
-          );
-        })}
+        <CollapsibleSection title="Platform & Analysis" open={openSections.services} onToggle={()=>toggleSection('services')} summary={`${lineItems.filter(i=>PLATFORM_GROUPS.includes(i.group)).length} selected`}>
+        <p className="text-xs text-slate-500 mb-4">The core of the deal — platform access, the teams analysed and their delivery SLA, and match analysis. Mark a service "Included" to provide it at no charge (its value is still shown, struck through, but not added to the total).</p>
+        {PLATFORM_GROUPS.map(group => renderServiceGroup(group))}
+        </CollapsibleSection>
+
+        <CollapsibleSection title="Add-on Services" open={openSections.addons} onToggle={()=>toggleSection('addons')} summary={`${lineItems.filter(i=>ADDON_GROUPS.includes(i.group)).length} selected`}>
+        <p className="text-xs text-slate-500 mb-4">Optional extras — recording, physical data, broadcasting and additional reports. Tick each one the client is taking and set its quantity and price.</p>
+        {ADDON_GROUPS.map(group => renderServiceGroup(group))}
         <div className="flex justify-between pt-3 border-t border-[var(--border)] font-heading text-base">
-          <span>Total</span>
+          <span>Total (chargeable)</span>
           <span className="font-data">{fmtMoney(lineItemsTotal, form.currency)}</span>
         </div>
         </CollapsibleSection>
 
         {/* --- Commercial Model: how the deal is funded. --------------------- */}
-        <CollapsibleSection title="Commercial Model" open={openSections.commercial} onToggle={()=>toggleSection('commercial')} summary={(PAYMENT_MODEL_LABELS[form.paymentModel] || 'Club-funded').split(' — ')[0]}>
+        <CollapsibleSection title="Commercial & Payment" open={openSections.money} onToggle={()=>toggleSection('money')} summary={`${(PAYMENT_MODEL_LABELS[form.paymentModel] || 'Club-funded').split(' — ')[0]} · ${fmtMoney(form.value || 0, form.currency)}`}>
+        <div className="font-heading text-sm mb-3 text-[var(--navy-deep)]">Funding</div>
         <p className="text-xs text-slate-400 mb-3">How is this deal funded? The services above describe what the Client gets; this sets who pays. For Shared and Player-funded deals, the contract value is entered manually below (the player numbers aren't known in advance, so they're stated as terms, not computed).</p>
         <div className="space-y-1.5 mb-3">
           {[['club_all','Club-funded — the Client pays the full fee'],['club_players','Shared — a fixed amount is agreed with the Client; players fund the remainder'],['players_all','Player-funded — fees are collected directly from players']].map(([val,label]) => (
@@ -1032,71 +1143,8 @@ function ContractForm({ navigate, editContractId }) {
             <p className="text-xs text-slate-500 mt-3 pt-3 border-t border-[var(--border)]">Players pay the Service Provider directly. The club commission ({form.kickbackPct || 0}% of fees actually collected, settled per season) is stated as a term — it does not drive the contract value or installments.</p>
           </div>
         )}
-        </CollapsibleSection>
 
-        {/* --- Analysis Scope: which teams + opponent-access toggles. --------- */}
-        <CollapsibleSection title="Analysis Scope" open={openSections.analysis} onToggle={()=>toggleSection('analysis')} summary={(form.analysisTeams && form.analysisTeams.length) ? form.analysisTeams.join(', ') : 'No teams set'}>
-        <p className="text-xs text-slate-400 mb-3">Define exactly which of the Client's teams are analysed. Analysis covers League competition matches for the contract season.</p>
-        <div className="mb-4">
-          <div className="text-sm font-medium text-slate-600 mb-2">Teams covered</div>
-          <div className="flex flex-wrap gap-2">
-            {['U14','U15','U16','U17','U19',"Men's"].map(team => {
-              const on = (form.analysisTeams || []).includes(team);
-              return (
-                <button type="button" key={team} onClick={()=>set('analysisTeams', on ? form.analysisTeams.filter(t=>t!==team) : [...(form.analysisTeams||[]), team])}
-                  className={`px-3 py-1.5 rounded-lg text-sm border transition ${on ? 'bg-[var(--navy-deep)] text-white border-[var(--navy-deep)]' : 'bg-white text-slate-600 border-[var(--border)] hover:border-blue-300'}`}>
-                  {on ? '✓ ' : ''}{team}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-        <div>
-          <div className="text-sm font-medium text-slate-600 mb-2">Opponent analysis access</div>
-          <div className="space-y-2">
-            {[['oppMatchFootage','Opponent match footage'],['oppTeamAnalysis','Opponent team analysis'],['oppPlayerAnalysis','Opponent player analysis']].map(([key,label]) => (
-              <label key={key} className="flex items-center gap-2.5 text-sm text-slate-700 cursor-pointer">
-                <input type="checkbox" checked={!!form[key]} onChange={e=>set(key, e.target.checked)} className="w-4 h-4 rounded border-slate-300" />
-                {label}
-              </label>
-            ))}
-          </div>
-        </div>
-        {/* Per-team SLA bands (optional). Default SLA applies to all other teams. */}
-        <div className="mt-5 pt-4 border-t border-[var(--border)]">
-          <div className="text-sm font-medium text-slate-600 mb-1">Delivery SLA</div>
-          <p className="text-xs text-slate-400 mb-2">Default: <strong>{form.slaHours || 24} hours</strong> for all covered teams (set under Core Services). Optionally give specific teams a different SLA below.</p>
-          {(form.slaBands || []).map((band, i) => (
-            <div key={i} className="rounded-lg border border-[var(--border)] p-3 mb-2 bg-slate-50/60">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs text-slate-500">These teams:</span>
-                <div className="flex items-center gap-2">
-                  <select value={band.hours} onChange={e=>updateSlaBand(i, { hours: Number(e.target.value) })} className="px-2 py-1 text-sm border border-[var(--border)] rounded-lg bg-white">
-                    {[24,48,72].map(h => <option key={h} value={h}>{h} hours</option>)}
-                  </select>
-                  <button type="button" onClick={()=>removeSlaBand(i)} className="text-slate-400 hover:text-red-500 px-1" title="Remove band">✕</button>
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                {(form.analysisTeams && form.analysisTeams.length ? form.analysisTeams : ['U14','U15','U16','U17','U19',"Men's"]).map(team => {
-                  const on = band.teams.includes(team);
-                  return (
-                    <button type="button" key={team} onClick={()=>toggleBandTeam(i, team)}
-                      className={`px-2.5 py-1 rounded-lg text-xs border transition ${on ? 'bg-[var(--navy-deep)] text-white border-[var(--navy-deep)]' : 'bg-white text-slate-600 border-[var(--border)] hover:border-blue-300'}`}>
-                      {on ? '✓ ' : ''}{team}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
-          {(form.analysisTeams && form.analysisTeams.length)
-            ? <button type="button" onClick={addSlaBand} className="text-sm text-[var(--blue-primary)] hover:underline">+ Add a different SLA for specific teams</button>
-            : <span className="text-xs text-slate-400">Select the covered teams above to set a different SLA for specific teams.</span>}
-        </div>
-        </CollapsibleSection>
-
-        <CollapsibleSection title="Contract Details" open={openSections.details} onToggle={()=>toggleSection('details')} summary={`${fmtMoney(form.value || 0, form.currency)}${form.startDate && form.endDate ? ` · ${fmtDate(form.startDate)}–${fmtDate(form.endDate)}` : ''}`}>
+        <div className="font-heading text-sm mt-6 mb-3 pt-5 border-t border-[var(--border)] text-[var(--navy-deep)]">Value & Dates</div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Field label="Value" required error={errors.value}>
             <input disabled={form.billingBasis !== 'player_funded'} type="number" step="0.01" value={form.value} onChange={e=>set('value',e.target.value)} className={inputCls(errors.value)} placeholder="12000.00" />
@@ -1128,9 +1176,8 @@ function ContractForm({ navigate, editContractId }) {
             </select>
           </Field>
         </div>
-        </CollapsibleSection>
 
-        <CollapsibleSection title="Payment Schedule" open={openSections.schedule} onToggle={()=>toggleSection('schedule')} summary={PAYMENT_TYPES.find(t=>t.value===form.paymentType)?.label || ''}>
+        <div className="font-heading text-sm mt-6 mb-3 pt-5 border-t border-[var(--border)] text-[var(--navy-deep)]">Payment Schedule</div>
         {form.paymentType === 'one_time' && (
           <Field label="Payment Date" required error={errors.oneTimeDate}>
             <input type="date" value={oneTimeDate} onChange={e=>setOneTimeDate(e.target.value)} className={inputCls(errors.oneTimeDate)} />

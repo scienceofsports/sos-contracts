@@ -338,19 +338,18 @@ export function generateContractPdf({ contract, client, company }) {
     y = boxTop + boxH + 10;
   };
 
-  // Small inline "Included"/"Complimentary" chip: light-cyan rounded rect with
-  // cyan-deep bold text. `baselineY` is the text baseline of the line it sits on.
+  // Small inline "Included" chip: light-green rounded rect with green bold text
+  // (matches the on-screen chip). `baselineY` is the line's text baseline.
   const chip = (label, x, baselineY) => {
     const size = 8;
     const padX = 6;
     const chipH = 12;
-    const green = label === 'Complimentary';
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(size);
     const w = doc.getTextWidth(label) + padX * 2;
-    doc.setFillColor(...(green ? CHIP_GREEN_BG : CHIP_BG));
+    doc.setFillColor(...CHIP_GREEN_BG);
     doc.roundedRect(x, baselineY - chipH + 3, w, chipH, 3, 3, 'F');
-    doc.setTextColor(...(green ? CHIP_GREEN_TX : CYAN_DEEP));
+    doc.setTextColor(...CHIP_GREEN_TX);
     doc.text(label, x + padX, baselineY - 0.5);
     return x + w;
   };
@@ -725,6 +724,18 @@ export function generateContractPdf({ contract, client, company }) {
   // --- Entire Agreement ----------------------------------------------------
   clause(entireAgreementNum, 'Entire Agreement & Amendments',
     'This Agreement constitutes the entire agreement between the Parties. Any amendment must be made in writing and signed by both Parties.');
+
+  // --- Designated Contact block (present once captured at signing). ---------
+  if (contract.contactName) {
+    pillHeader(null, 'Designated Contact');
+    const opsBits = [contract.contactName, contract.contactRole].filter(Boolean).join(', ');
+    const opsTail = [contract.contactEmail, contract.contactPhone].filter(Boolean).join(' · ');
+    text(`Client's designated contact for operations & communication: ${opsBits}${opsTail ? ' · ' + opsTail : ''}.`, { size: 10, gap: 2 });
+    if (contract.financeName || contract.financeEmail) {
+      text(`Finance contact: ${[contract.financeName, contract.financeEmail].filter(Boolean).join(' · ')}.`, { size: 10, gap: 2 });
+    }
+    y += 6;
+  }
 
   // --- Navy closing panel — warm, confident sign-off before signatures. ----
   {

@@ -159,12 +159,6 @@ export function parseSpecialTerms(raw) {
   return [{ relatesTo: 'General', text: stripMarkdown(s) }];
 }
 
-// One-line rendering of a special term: "(Re: Fees & Payment) text" or "text".
-export function specialTermLine(term) {
-  const ref = term.relatesTo && term.relatesTo !== 'General' ? `(Re: ${term.relatesTo}) ` : '';
-  return `${ref}${term.text}`.trim();
-}
-
 // Derive a "2026/2027" season label from ISO start/end dates (fallback to just
 // the start year, or '' when no dates). Ported into both PDF generators.
 export function seasonLabelFromDates(startDate, endDate) {
@@ -218,22 +212,21 @@ export function commercialModelText(contract, fm) {
 // per-team bands. Returns an array of sentences. NOTE: ported into both PDF
 // generators — keep in sync.
 export function serviceLevelsLines(contract) {
-  const defHours = Number(contract?.slaHours) || 24;
+  const defHours = Number(contract?.slaHours) || 72;
   const bands = Array.isArray(contract?.slaBands) ? contract.slaBands.filter(b => b && Array.isArray(b.teams) && b.teams.length && Number(b.hours)) : [];
   if (!bands.length) {
     return [`The Service Provider shall use reasonable endeavours to deliver the key analytical outputs for each covered match within ${defHours} hours of receipt of usable match footage and applicable match data.`];
   }
-  // Teams explicitly banded; the rest fall under the default.
-  const banded = new Set();
-  const lines = bands.map(b => {
-    b.teams.forEach(t => banded.add(t));
-    return `For ${b.teams.join(', ')}: within ${Number(b.hours)} hours.`;
-  });
-  const allTeams = Array.isArray(contract?.analysisTeams) ? contract.analysisTeams : [];
-  const rest = allTeams.filter(t => !banded.has(t));
-  const restLine = rest.length ? ` For all other covered teams: within ${defHours} hours.` : '';
+  // If every team shares the same SLA, render one clean sentence.
+  const distinctHours = [...new Set(bands.map(b => Number(b.hours)))];
+  if (distinctHours.length === 1) {
+    return [`The Service Provider shall use reasonable endeavours to deliver the key analytical outputs for each covered match within ${distinctHours[0]} hours of receipt of usable match footage and applicable match data.`];
+  }
+  // Mixed SLA — list each timeframe with its teams (fastest first).
+  const sorted = [...bands].sort((a, b) => Number(a.hours) - Number(b.hours));
+  const lines = sorted.map(b => `for ${b.teams.join(', ')}, within ${Number(b.hours)} hours`);
   return [
-    `The Service Provider shall use reasonable endeavours to deliver the key analytical outputs for each covered match within the following timeframes, measured from receipt of usable match footage and applicable match data: ${lines.join(' ')}${restLine}`,
+    `The Service Provider shall use reasonable endeavours to deliver the key analytical outputs for each covered match, measured from receipt of usable match footage and applicable match data, as follows: ${lines.join('; ')}.`,
   ];
 }
 

@@ -134,7 +134,7 @@ function vatSummary(contract: Any, fm: (a: Any) => string): { applies: boolean; 
   } else {
     net = num(contract?.value); gross = net;
   }
-  vat = Math.round(vat * 100) / 100; gross = Math.round(gross * 100) / 100;
+  net = Math.round(net * 100) / 100; vat = Math.round(vat * 100) / 100; gross = Math.round(gross * 100) / 100;
   const applies = vat > 0.005;
   const ratePct = rate ? Math.round(rate * 100) : 19;
   if (applies) {
@@ -221,21 +221,19 @@ function seasonLabelFromDates(startDate: Any, endDate: Any): string {
 // Port of serviceLevelsLines — default SLA + optional per-team bands. Accepts
 // snake_case or camelCase. Keep in sync with src/lib/constants.js.
 function serviceLevelsLines(c: Any): string[] {
-  const defHours = Number(c?.slaHours ?? c?.sla_hours) || 24;
+  const defHours = Number(c?.slaHours ?? c?.sla_hours) || 72;
   const rawBands = c?.slaBands ?? c?.sla_bands;
   const bands = Array.isArray(rawBands) ? rawBands.filter((b: Any) => b && Array.isArray(b.teams) && b.teams.length && Number(b.hours)) : [];
   if (!bands.length) {
     return [`The Service Provider shall use reasonable endeavours to deliver the key analytical outputs for each covered match within ${defHours} hours of receipt of usable match footage and applicable match data.`];
   }
-  const banded = new Set<string>();
-  const lines = bands.map((b: Any) => {
-    b.teams.forEach((t: string) => banded.add(t));
-    return `For ${b.teams.join(', ')}: within ${Number(b.hours)} hours.`;
-  });
-  const allTeams = Array.isArray(c?.analysisTeams) ? c.analysisTeams : (Array.isArray(c?.analysis_teams) ? c.analysis_teams : []);
-  const rest = allTeams.filter((t: string) => !banded.has(t));
-  const restLine = rest.length ? ` For all other covered teams: within ${defHours} hours.` : '';
-  return [`The Service Provider shall use reasonable endeavours to deliver the key analytical outputs for each covered match within the following timeframes, measured from receipt of usable match footage and applicable match data: ${lines.join(' ')}${restLine}`];
+  const distinctHours = [...new Set(bands.map((b: Any) => Number(b.hours)))];
+  if (distinctHours.length === 1) {
+    return [`The Service Provider shall use reasonable endeavours to deliver the key analytical outputs for each covered match within ${distinctHours[0]} hours of receipt of usable match footage and applicable match data.`];
+  }
+  const sorted = [...bands].sort((a: Any, b: Any) => Number(a.hours) - Number(b.hours));
+  const lines = sorted.map((b: Any) => `for ${b.teams.join(', ')}, within ${Number(b.hours)} hours`);
+  return [`The Service Provider shall use reasonable endeavours to deliver the key analytical outputs for each covered match, measured from receipt of usable match footage and applicable match data, as follows: ${lines.join('; ')}.`];
 }
 
 const PAYMENT_MODEL_LABELS: Record<string, string> = {
@@ -659,16 +657,15 @@ export async function buildContractPdf(input: {
   const specialTermsNum = specialTermsParsed.length ? n++ : null;
   const entireAgreementNum = n++;
 
-  // Draw a small cyan "Included"/"Complimentary" chip inline; returns advanced x.
+  // Draw a small green "Included" chip inline (matches on-screen); returns x.
   const chip = (label: string, x: number, baselineY: number) => {
     const size = 8;
     const padX = 6;
     const w = font.widthOfTextAtSize(label, size) + padX * 2;
     const chipH = 13;
-    const green = label === 'Complimentary';
     // baselineY is the downward baseline of the text line the chip sits on.
-    page.drawRectangle({ x, y: py(baselineY + 3), width: w, height: chipH, color: green ? CHIP_GREEN_BG : CHIP_BG });
-    page.drawText(label, { x: x + padX, y: py(baselineY - 1.5), size, font: bold, color: green ? CHIP_GREEN_TX : CYAN_DEEP });
+    page.drawRectangle({ x, y: py(baselineY + 3), width: w, height: chipH, color: CHIP_GREEN_BG });
+    page.drawText(label, { x: x + padX, y: py(baselineY - 1.5), size, font: bold, color: CHIP_GREEN_TX });
     return x + w;
   };
 
