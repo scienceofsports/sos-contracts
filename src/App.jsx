@@ -15,6 +15,8 @@ import {
   computeKickback,
   commercialModelText,
   PAYMENT_MODEL_LABELS,
+  SPECIAL_TERM_CLAUSES,
+  parseSpecialTerms,
 } from './lib/constants.js';
 import {
   nowISO,
@@ -600,6 +602,12 @@ function ContractForm({ navigate, editContractId }) {
   const [openSections, setOpenSections] = useState(() => ({ services: true }));
   const toggleSection = (k) => setOpenSections(o => ({ ...o, [k]: !o[k] }));
   const [installments, setInstallments] = useState([]);
+  // Structured special terms: [{ relatesTo, text }]. Serialized to JSON in the
+  // special_terms column on save; parsed (legacy plain text supported) on load.
+  const [specialTermsList, setSpecialTermsList] = useState([]);
+  const addSpecialTerm = () => setSpecialTermsList(l => [...l, { relatesTo: 'General', text: '' }]);
+  const updateSpecialTerm = (i, patch) => setSpecialTermsList(l => l.map((t, idx) => idx === i ? { ...t, ...patch } : t));
+  const removeSpecialTerm = (i) => setSpecialTermsList(l => l.filter((_, idx) => idx !== i));
   const [oneTimeDate, setOneTimeDate] = useState('');
   const [firstDueDate, setFirstDueDate] = useState('');
   const [errors, setErrors] = useState({});
@@ -634,6 +642,7 @@ function ContractForm({ navigate, editContractId }) {
         kickbackPct: existing.kickbackPct ?? '',
       });
       setServices(existing.services ? { ...defaultServicesState(), ...existing.services } : defaultServicesState());
+      setSpecialTermsList(parseSpecialTerms(existing.specialTerms));
       if (existing.payments && existing.payments.length) {
         if (existing.paymentType === 'one_time') {
           setOneTimeDate(existing.payments[0].dueDate.slice(0,10));
@@ -798,6 +807,9 @@ function ContractForm({ navigate, editContractId }) {
     setBusy(true);
     try {
       const client = clients.find(c => c.id === form.clientId);
+      // Serialize the structured special terms (drop empty rows) to JSON, or ''.
+      const cleanTerms = specialTermsList.filter(t => t.text && t.text.trim());
+      const specialTerms = cleanTerms.length ? JSON.stringify(cleanTerms) : '';
       const schedule = form.paymentType === 'one_time'
         ? [{ date: oneTimeDate, amount: Number(form.value) }]
         : form.paymentType === 'milestone'
@@ -808,6 +820,7 @@ function ContractForm({ navigate, editContractId }) {
       if (isEdit) {
         contract = await contractService.update(editContractId, {
           ...form,
+          specialTerms,
           value: Number(form.value),
           startDate: form.startDate ? new Date(form.startDate).toISOString() : '',
           endDate: form.endDate ? new Date(form.endDate).toISOString() : '',
@@ -826,6 +839,7 @@ function ContractForm({ navigate, editContractId }) {
       } else {
         contract = await contractService.create({
           ...form,
+          specialTerms,
           value: Number(form.value),
           status: 'draft',
           startDate: form.startDate ? new Date(form.startDate).toISOString() : '',
@@ -1115,14 +1129,30 @@ function ContractForm({ navigate, editContractId }) {
         )}
         </CollapsibleSection>
 
-        <CollapsibleSection title="Description & Special Terms" open={openSections.text} onToggle={()=>toggleSection('text')} summary={form.specialTerms ? 'Has special terms' : 'Auto-generated description'}>
+        <CollapsibleSection title="Description & Special Terms" open={openSections.text} onToggle={()=>toggleSection('text')} summary={specialTermsList.filter(t=>t.text&&t.text.trim()).length ? `${specialTermsList.filter(t=>t.text&&t.text.trim()).length} special term(s)` : 'Auto-generated description'}>
         <Field label="Description">
           <textarea value={form.description} onChange={e=>set('description',e.target.value)} rows={18} className={inputCls(false) + ' font-data text-xs'} placeholder="Scope of work, deliverables, terms…" />
         </Field>
 
-        <Field label="Special Terms / Additional Agreements (optional)">
-          <textarea value={form.specialTerms} onChange={e=>set('specialTerms',e.target.value)} rows={4} className={inputCls(false)} placeholder="Any one-off terms specific to this club — e.g. a complimentary extra, an early-renewal discount, a custom condition. Appears as its own clause in the signed contract." />
-        </Field>
+        <div className="mb-2">
+          <div className="text-sm font-medium text-slate-600 mb-1">Special Terms / Additional Agreements (optional)</div>
+          <p className="text-xs text-slate-400 mb-3">Add one-off terms specific to this club. Link a term to the clause it modifies (e.g. Fees &amp; Payment) so it reads clearly in the signed contract, or leave it "General".</p>
+          <div className="space-y-3">
+            {specialTermsList.map((term, i) => (
+              <div key={i} className="rounded-lg border border-[var(--border)] p-3 bg-slate-50/60">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-xs text-slate-400 shrink-0">Relates to</span>
+                  <select value={term.relatesTo || 'General'} onChange={e=>updateSpecialTerm(i, { relatesTo: e.target.value })} className="px-2 py-1 text-sm border border-[var(--border)] rounded-lg bg-white text-slate-600 flex-1">
+                    {SPECIAL_TERM_CLAUSES.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                  <button type="button" onClick={()=>removeSpecialTerm(i)} className="text-slate-400 hover:text-red-500 px-2 shrink-0" title="Remove term">✕</button>
+                </div>
+                <textarea value={term.text} onChange={e=>updateSpecialTerm(i, { text: e.target.value })} rows={2} className={inputCls(false)} placeholder="e.g. The club commission shall be settled quarterly rather than per season." />
+              </div>
+            ))}
+          </div>
+          <button type="button" onClick={addSpecialTerm} className="text-sm text-[var(--blue-primary)] hover:underline mt-2">+ Add Special Term</button>
+        </div>
         </CollapsibleSection>
 
         <div className="flex justify-end gap-3 pt-4">
@@ -1574,7 +1604,8 @@ function ContractDocumentBody({ contract, client, company }) {
           const liabilityNum = n++;
           const forceMajeureNum = n++;
           const governingLawNum = n++;
-          const specialTermsNum = contract.specialTerms && contract.specialTerms.trim() ? n++ : null;
+          const specialTermsParsed = parseSpecialTerms(contract.specialTerms);
+          const specialTermsNum = specialTermsParsed.length ? n++ : null;
           const entireAgreementNum = n++;
           return (
             <React.Fragment>
@@ -1710,7 +1741,14 @@ function ContractDocumentBody({ contract, client, company }) {
               {specialTermsNum && (
                 <React.Fragment>
                   <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{specialTermsNum}.</span> Special Terms</div>
-                  <p className="text-sm text-slate-700 mb-8 whitespace-pre-line">{contract.specialTerms}</p>
+                  <ol className="text-sm text-slate-700 mb-8 space-y-2 list-decimal pl-5">
+                    {specialTermsParsed.map((t, i) => (
+                      <li key={i}>
+                        {t.relatesTo && t.relatesTo !== 'General' && <span className="font-semibold" style={{ color:'var(--navy-deep)' }}>Re: {t.relatesTo}. </span>}
+                        <span className="whitespace-pre-line">{t.text}</span>
+                      </li>
+                    ))}
+                  </ol>
                 </React.Fragment>
               )}
 

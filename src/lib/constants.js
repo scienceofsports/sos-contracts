@@ -117,6 +117,40 @@ export function analysisScopeText(contract, seasonLabel) {
   return { teams: teamsStr, coverage, opponent };
 }
 
+// Clause names a special term can reference (stable — by name, not number).
+export const SPECIAL_TERM_CLAUSES = [
+  'General', 'Purpose', 'Scope of Services', 'Scope of Analysis', 'Fees & Payment',
+  'Commercial Terms & Club Commission', 'Confidentiality & Data Protection',
+  'Intellectual Property Rights', 'Duration', 'Termination',
+  'Limitation of Liability', 'Force Majeure', 'Governing Law & Jurisdiction',
+];
+
+// Normalize the special_terms value into a list of { relatesTo, text } rows.
+// Backward compatible: a plain string (legacy contracts) becomes one General
+// term. A JSON array is parsed as-is. NOTE: ported into both PDF generators.
+export function parseSpecialTerms(raw) {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw.filter(t => t && t.text && t.text.trim());
+  if (typeof raw === 'object') return [raw].filter(t => t && t.text && t.text.trim());
+  const s = String(raw).trim();
+  if (!s) return [];
+  // Try JSON (new format); fall back to legacy plain text as one General term.
+  if (s[0] === '[' || s[0] === '{') {
+    try {
+      const parsed = JSON.parse(s);
+      const arr = Array.isArray(parsed) ? parsed : [parsed];
+      return arr.filter(t => t && t.text && t.text.trim());
+    } catch { /* not JSON — treat as plain text below */ }
+  }
+  return [{ relatesTo: 'General', text: s }];
+}
+
+// One-line rendering of a special term: "(Re: Fees & Payment) text" or "text".
+export function specialTermLine(term) {
+  const ref = term.relatesTo && term.relatesTo !== 'General' ? `(Re: ${term.relatesTo}) ` : '';
+  return `${ref}${term.text}`.trim();
+}
+
 // Derive a "2026/2027" season label from ISO start/end dates (fallback to just
 // the start year, or '' when no dates). Ported into both PDF generators.
 export function seasonLabelFromDates(startDate, endDate) {

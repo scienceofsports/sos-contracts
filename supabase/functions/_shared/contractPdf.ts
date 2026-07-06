@@ -151,6 +151,25 @@ function analysisScopeText(c: Any, seasonLabel: string): { teams: string; covera
   return { teams, coverage, opponent };
 }
 
+// Port of parseSpecialTerms — normalize special_terms into [{relatesTo,text}].
+// Backward compatible: plain string (legacy) → one General term; JSON array →
+// parsed. Keep in sync with src/lib/constants.js.
+function parseSpecialTerms(raw: Any): Array<{ relatesTo?: string; text: string }> {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw.filter((t: Any) => t && t.text && String(t.text).trim());
+  if (typeof raw === 'object') return [raw].filter((t: Any) => t && t.text && String(t.text).trim());
+  const s = String(raw).trim();
+  if (!s) return [];
+  if (s[0] === '[' || s[0] === '{') {
+    try {
+      const parsed = JSON.parse(s);
+      const arr = Array.isArray(parsed) ? parsed : [parsed];
+      return arr.filter((t: Any) => t && t.text && String(t.text).trim());
+    } catch { /* not JSON — treat as plain text below */ }
+  }
+  return [{ relatesTo: 'General', text: s }];
+}
+
 // Port of seasonLabelFromDates — "2026/2027" from ISO start/end dates.
 function seasonLabelFromDates(startDate: Any, endDate: Any): string {
   const sy = startDate ? new Date(startDate).getUTCFullYear() : null;
@@ -574,7 +593,8 @@ export async function buildContractPdf(input: {
   const liabilityNum = n++;
   const forceMajeureNum = n++;
   const governingLawNum = n++;
-  const specialTermsNum = (specialTerms && String(specialTerms).trim()) ? n++ : null;
+  const specialTermsParsed = parseSpecialTerms(specialTerms);
+  const specialTermsNum = specialTermsParsed.length ? n++ : null;
   const entireAgreementNum = n++;
 
   // Draw a small cyan "Included"/"Complimentary" chip inline; returns advanced x.
@@ -795,9 +815,14 @@ export async function buildContractPdf(input: {
   clause(governingLawNum, 'Governing Law & Jurisdiction',
     `This Agreement shall be governed by the laws of ${governingLaw}, with exclusive jurisdiction in ${jurisdiction}.`);
 
-  // --- Special Terms (optional) --------------------------------------------
+  // --- Special Terms (optional) — numbered list, each optionally clause-ref'd.
   if (specialTermsNum) {
-    clause(specialTermsNum, 'Special Terms', specialTerms);
+    ensure(40);
+    pillHeader(specialTermsNum, 'Special Terms');
+    specialTermsParsed.forEach((t, i) => {
+      const ref = t.relatesTo && t.relatesTo !== 'General' ? `Re: ${t.relatesTo}. ` : '';
+      text(`${i + 1}.  ${ref}${t.text}`, { size: 10, gap: i === specialTermsParsed.length - 1 ? 10 : 3, x: M + 6, width: maxW - 6 });
+    });
   }
 
   // --- Entire Agreement ----------------------------------------------------

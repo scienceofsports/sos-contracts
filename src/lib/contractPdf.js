@@ -22,7 +22,7 @@
    ========================================================================= */
 import { jsPDF } from 'jspdf';
 import { fmtDate, fmtMoney, daysBetween } from './format.js';
-import { computeServiceLineItems, platformSeatsSummary, SERVICE_GROUPS, analysisScopeText, seasonLabelFromDates, commercialModelText } from './constants.js';
+import { computeServiceLineItems, platformSeatsSummary, SERVICE_GROUPS, analysisScopeText, seasonLabelFromDates, commercialModelText, parseSpecialTerms } from './constants.js';
 
 export function generateContractPdf({ contract, client, company }) {
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
@@ -419,7 +419,8 @@ export function generateContractPdf({ contract, client, company }) {
   const liabilityNum = n++;
   const forceMajeureNum = n++;
   const governingLawNum = n++;
-  const specialTermsNum = (contract.specialTerms && contract.specialTerms.trim()) ? n++ : null;
+  const specialTermsParsed = parseSpecialTerms(contract.specialTerms);
+  const specialTermsNum = specialTermsParsed.length ? n++ : null;
   const entireAgreementNum = n++;
 
   // --- Purpose — STRUCTURED by service group when services exist. -----------
@@ -645,9 +646,14 @@ export function generateContractPdf({ contract, client, company }) {
   clause(governingLawNum, 'Governing Law & Jurisdiction',
     `This Agreement shall be governed by the laws of ${contract.governingLaw}, with exclusive jurisdiction in ${contract.jurisdiction}.`);
 
-  // --- Special Terms (optional) --------------------------------------------
+  // --- Special Terms (optional) — numbered list, each optionally clause-ref'd.
   if (specialTermsNum) {
-    clause(specialTermsNum, 'Special Terms', contract.specialTerms);
+    ensure(40);
+    pillHeader(specialTermsNum, 'Special Terms');
+    specialTermsParsed.forEach((t, i) => {
+      const ref = t.relatesTo && t.relatesTo !== 'General' ? `Re: ${t.relatesTo}. ` : '';
+      text(`${i + 1}.  ${ref}${t.text}`, { size: 10, gap: i === specialTermsParsed.length - 1 ? 10 : 3, x: M + 6, width: maxW - 6 });
+    });
   }
 
   // --- Entire Agreement ----------------------------------------------------
