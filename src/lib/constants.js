@@ -98,6 +98,35 @@ export function platformSeatsSummary(svc) {
   return parts.join(', ');
 }
 
+// Build the two "Scope of Analysis" sentences from a contract's scope fields.
+// Returns { teams, coverage, opponent } strings (empty teams → caller may skip
+// the clause). `seasonLabel` is derived from the contract dates by the caller.
+// NOTE: this helper is PORTED verbatim into both PDF generators — keep in sync.
+export function analysisScopeText(contract, seasonLabel) {
+  const teams = Array.isArray(contract?.analysisTeams) ? contract.analysisTeams : [];
+  const teamsStr = teams.length ? teams.join(', ') : '';
+  const coverage = `Analysis covers League competition matches${seasonLabel ? ` for the ${seasonLabel} football season` : ''}.`;
+  // Only surface access that IS granted — never print "not included" lines.
+  const opp = [
+    ['Opponent match footage', contract?.oppMatchFootage],
+    ['Opponent team analysis', contract?.oppTeamAnalysis],
+    ['Opponent player analysis', contract?.oppPlayerAnalysis],
+  ];
+  const granted = opp.filter(([, on]) => on).map(([label]) => label);
+  const opponent = granted.length ? granted.join(' · ') + '.' : '';
+  return { teams: teamsStr, coverage, opponent };
+}
+
+// Derive a "2026/2027" season label from ISO start/end dates (fallback to just
+// the start year, or '' when no dates). Ported into both PDF generators.
+export function seasonLabelFromDates(startDate, endDate) {
+  const sy = startDate ? new Date(startDate).getUTCFullYear() : null;
+  const ey = endDate ? new Date(endDate).getUTCFullYear() : null;
+  if (sy && ey && ey !== sy) return `${sy}/${ey}`;
+  if (sy) return `${sy}/${sy + 1}`;
+  return '';
+}
+
 export function generateDescriptionFromServices(services, slaHours) {
   const items = computeServiceLineItems(services);
   if (!items.length) return '';

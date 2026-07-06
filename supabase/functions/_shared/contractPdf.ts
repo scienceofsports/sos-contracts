@@ -134,6 +134,30 @@ function platformSeatsSummary(svc: Any): string {
   return parts.join(', ');
 }
 
+// Port of analysisScopeText — build the two "Scope of Analysis" sentences.
+// Keep in sync with src/lib/constants.js. Accepts snake_case or camelCase.
+function analysisScopeText(c: Any, seasonLabel: string): { teams: string; coverage: string; opponent: string } {
+  const teamsArr = Array.isArray(c?.analysisTeams) ? c.analysisTeams : (Array.isArray(c?.analysis_teams) ? c.analysis_teams : []);
+  const teams = teamsArr.length ? teamsArr.join(', ') : '';
+  const coverage = `Analysis covers League competition matches${seasonLabel ? ` for the ${seasonLabel} football season` : ''}.`;
+  const opp: Array<[string, boolean]> = [
+    ['Opponent match footage', !!(c?.oppMatchFootage ?? c?.opp_match_footage)],
+    ['Opponent team analysis', !!(c?.oppTeamAnalysis ?? c?.opp_team_analysis)],
+    ['Opponent player analysis', !!(c?.oppPlayerAnalysis ?? c?.opp_player_analysis)],
+  ];
+  const opponent = opp.map(([label, on]) => `${label} — ${on ? 'included' : 'not included'}`).join(' · ') + '.';
+  return { teams, coverage, opponent };
+}
+
+// Port of seasonLabelFromDates — "2026/2027" from ISO start/end dates.
+function seasonLabelFromDates(startDate: Any, endDate: Any): string {
+  const sy = startDate ? new Date(startDate).getUTCFullYear() : null;
+  const ey = endDate ? new Date(endDate).getUTCFullYear() : null;
+  if (sy && ey && ey !== sy) return `${sy}/${ey}`;
+  if (sy) return `${sy}/${sy + 1}`;
+  return '';
+}
+
 // Strip a data: URL prefix and decode base64 to bytes. Returns null on failure.
 function dataUrlToBytes(dataUrl: Any): Uint8Array | null {
   try {
@@ -495,6 +519,8 @@ export async function buildContractPdf(input: {
   let n = 1;
   const purposeNum = n++;
   const scopeNum = lineItems.length > 0 ? n++ : null;
+  const analysisScope = analysisScopeText(c, seasonLabelFromDates(startDate, endDate));
+  const analysisNum = analysisScope.teams ? n++ : null;
   const feesNum = n++;
   const confidentialityNum = n++;
   const ipNum = n++;
@@ -638,6 +664,22 @@ export async function buildContractPdf(input: {
     const totalW2 = bold.widthOfTextAtSize(totalStr, 10.5);
     page.drawText(totalStr, { x: W - M - cellPadX - totalW2, y: py(y), size: 10.5, font: bold, color: NAVY });
     y += 12;
+  }
+
+  // --- Scope of Analysis ---------------------------------------------------
+  if (analysisNum) {
+    pillHeader(analysisNum, 'Scope of Analysis');
+    text(`The Service Provider shall provide performance analysis for the following teams of the Client: ${analysisScope.teams}. ${analysisScope.coverage}`, { size: 10, gap: analysisScope.opponent ? 6 : 10 });
+    // Cyan-bar "Opponent access" subheading + granted items — only if any granted.
+    if (analysisScope.opponent) {
+      ensure(20);
+      y += 10;
+      const oaBaseline = y;
+      page.drawRectangle({ x: M, y: py(oaBaseline + 2), width: 3, height: 10, color: CYAN });
+      page.drawText('OPPONENT ACCESS', { x: M + 8, y: py(oaBaseline), size: 9, font: bold, color: NAVY });
+      y += 4;
+      text(analysisScope.opponent, { size: 10, gap: 10 });
+    }
   }
 
   // --- Fees & Payment ------------------------------------------------------

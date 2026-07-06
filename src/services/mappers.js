@@ -166,6 +166,11 @@ export function contractFromRow(row, payments = [], events = []) {
     contactPhone: row.contact_phone ?? null,
     financeName: row.finance_name ?? null,
     financeEmail: row.finance_email ?? null,
+    // ---- Analysis Scope: which teams are covered + opponent-access toggles.
+    analysisTeams: row.analysis_teams ?? [],
+    oppMatchFootage: row.opp_match_footage ?? false,
+    oppTeamAnalysis: row.opp_team_analysis ?? false,
+    oppPlayerAnalysis: row.opp_player_analysis ?? false,
     createdBy: row.created_by ?? null,
     createdAt: row.created_at ?? null,
     sentAt: sentEvent?.server_timestamp ?? null,
@@ -230,6 +235,10 @@ export function contractToRow(obj) {
   if ('contactPhone' in obj) row.contact_phone = obj.contactPhone;
   if ('financeName' in obj) row.finance_name = obj.financeName;
   if ('financeEmail' in obj) row.finance_email = obj.financeEmail;
+  if ('analysisTeams' in obj) row.analysis_teams = obj.analysisTeams;
+  if ('oppMatchFootage' in obj) row.opp_match_footage = obj.oppMatchFootage;
+  if ('oppTeamAnalysis' in obj) row.opp_team_analysis = obj.oppTeamAnalysis;
+  if ('oppPlayerAnalysis' in obj) row.opp_player_analysis = obj.oppPlayerAnalysis;
   if ('createdBy' in obj) row.created_by = obj.createdBy;
   return row;
 }

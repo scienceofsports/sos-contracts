@@ -10,6 +10,8 @@ import {
   computeServiceLineItems,
   platformSeatsSummary,
   generateDescriptionFromServices,
+  analysisScopeText,
+  seasonLabelFromDates,
 } from './lib/constants.js';
 import {
   nowISO,
@@ -565,6 +567,7 @@ function ContractForm({ navigate, editContractId }) {
     title:'', clientId:'', type:'platform_subscription', value:'', currency:'EUR',
     startDate:'', endDate:'', paymentType:'one_time', paymentTermsDays:30, latePaymentPenalty:1.5,
     governingLaw:'Republic of Cyprus', jurisdiction:'Nicosia, Cyprus', description:'', slaHours:24, specialTerms:'',
+    analysisTeams:[], oppMatchFootage:false, oppTeamAnalysis:false, oppPlayerAnalysis:false,
   });
   const [titleEdited, setTitleEdited] = useState(isEdit);
   const [installments, setInstallments] = useState([]);
@@ -590,6 +593,10 @@ function ContractForm({ navigate, editContractId }) {
         latePaymentPenalty: existing.latePaymentPenalty, governingLaw: existing.governingLaw,
         jurisdiction: existing.jurisdiction, description: existing.description, slaHours: existing.slaHours || 24,
         specialTerms: existing.specialTerms || '',
+        analysisTeams: existing.analysisTeams || [],
+        oppMatchFootage: !!existing.oppMatchFootage,
+        oppTeamAnalysis: !!existing.oppTeamAnalysis,
+        oppPlayerAnalysis: !!existing.oppPlayerAnalysis,
       });
       setServices(existing.services ? { ...defaultServicesState(), ...existing.services } : defaultServicesState());
       if (existing.payments && existing.payments.length) {
@@ -867,6 +874,35 @@ function ContractForm({ navigate, editContractId }) {
         <div className="flex justify-between pt-3 border-t border-[var(--border)] font-heading text-base">
           <span>Total</span>
           <span className="font-data">{fmtMoney(lineItemsTotal, form.currency)}</span>
+        </div>
+
+        {/* --- Analysis Scope: which teams + opponent-access toggles. --------- */}
+        <div className="font-heading text-base mt-6 mb-1 pt-6 border-t border-[var(--border)]">Analysis Scope</div>
+        <p className="text-xs text-slate-400 mb-3">Define exactly which of the Client's teams are analysed. Analysis covers League competition matches only (excluding friendlies &amp; cup) for the contract season.</p>
+        <div className="mb-4">
+          <div className="text-sm font-medium text-slate-600 mb-2">Teams covered</div>
+          <div className="flex flex-wrap gap-2">
+            {['U14','U15','U16','U17','U19',"Men's"].map(team => {
+              const on = (form.analysisTeams || []).includes(team);
+              return (
+                <button type="button" key={team} onClick={()=>set('analysisTeams', on ? form.analysisTeams.filter(t=>t!==team) : [...(form.analysisTeams||[]), team])}
+                  className={`px-3 py-1.5 rounded-lg text-sm border transition ${on ? 'bg-[var(--navy-deep)] text-white border-[var(--navy-deep)]' : 'bg-white text-slate-600 border-[var(--border)] hover:border-blue-300'}`}>
+                  {on ? '✓ ' : ''}{team}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        <div>
+          <div className="text-sm font-medium text-slate-600 mb-2">Opponent analysis access</div>
+          <div className="space-y-2">
+            {[['oppMatchFootage','Opponent match footage'],['oppTeamAnalysis','Opponent team analysis'],['oppPlayerAnalysis','Opponent player analysis']].map(([key,label]) => (
+              <label key={key} className="flex items-center gap-2.5 text-sm text-slate-700 cursor-pointer">
+                <input type="checkbox" checked={!!form[key]} onChange={e=>set(key, e.target.checked)} className="w-4 h-4 rounded border-slate-300" />
+                {label}
+              </label>
+            ))}
+          </div>
         </div>
 
         <div className="font-heading text-base mt-6 mb-4 pt-6 border-t border-[var(--border)]">Contract Details</div>
@@ -1385,6 +1421,8 @@ function ContractDocumentBody({ contract, client, company }) {
           let n = 1;
           const purposeNum = n++;
           const scopeNum = lineItems.length > 0 ? n++ : null;
+          const analysisScope = analysisScopeText(contract, seasonLabelFromDates(contract.startDate, contract.endDate));
+          const analysisNum = analysisScope.teams ? n++ : null;
           const feesNum = n++;
           const confidentialityNum = n++;
           const ipNum = n++;
@@ -1464,6 +1502,20 @@ function ContractDocumentBody({ contract, client, company }) {
                       </tr>
                     </tbody>
                   </table>
+                </React.Fragment>
+              )}
+
+              {analysisNum && (
+                <React.Fragment>
+                  <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{analysisNum}.</span> Scope of Analysis</div>
+                  <p className={`text-sm text-slate-700 ${analysisScope.opponent ? 'mb-3' : 'mb-8'}`}>The Service Provider shall provide performance analysis for the following teams of the Client: <strong style={{ color:'var(--navy-deep)' }}>{analysisScope.teams}</strong>. {analysisScope.coverage}</p>
+                  {analysisScope.opponent && (
+                    <div className="mb-8 flex items-center gap-2 flex-wrap">
+                      <span aria-hidden style={{ background:'var(--cyan)', width:3, height:14, borderRadius:2, WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }} />
+                      <span className="text-xs font-bold uppercase tracking-wide mr-1" style={{ color:'var(--navy-deep)' }}>Opponent access:</span>
+                      <span className="text-sm text-slate-700">{analysisScope.opponent}</span>
+                    </div>
+                  )}
                 </React.Fragment>
               )}
 
@@ -2565,6 +2617,10 @@ function normalizeSnapshot(snapshot) {
     latePaymentPenalty: pick(c, 'latePaymentPenalty', 'late_payment_penalty'),
     specialTerms: pick(c, 'specialTerms', 'special_terms'),
     services: pick(c, 'services'),
+    analysisTeams: pick(c, 'analysisTeams', 'analysis_teams') || [],
+    oppMatchFootage: pick(c, 'oppMatchFootage', 'opp_match_footage') || false,
+    oppTeamAnalysis: pick(c, 'oppTeamAnalysis', 'opp_team_analysis') || false,
+    oppPlayerAnalysis: pick(c, 'oppPlayerAnalysis', 'opp_player_analysis') || false,
     documentHashBefore: pick(c, 'documentHashBefore', 'document_hash_before'),
     createdAt: pick(c, 'createdAt', 'created_at'),
     sentAt: pick(c, 'sentAt', 'sent_at'),

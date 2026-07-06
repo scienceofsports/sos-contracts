@@ -22,7 +22,7 @@
    ========================================================================= */
 import { jsPDF } from 'jspdf';
 import { fmtDate, fmtMoney, daysBetween } from './format.js';
-import { computeServiceLineItems, platformSeatsSummary, SERVICE_GROUPS } from './constants.js';
+import { computeServiceLineItems, platformSeatsSummary, SERVICE_GROUPS, analysisScopeText, seasonLabelFromDates } from './constants.js';
 
 export function generateContractPdf({ contract, client, company }) {
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
@@ -407,6 +407,8 @@ export function generateContractPdf({ contract, client, company }) {
   let n = 1;
   const purposeNum = n++;
   const scopeNum = lineItems.length > 0 ? n++ : null;
+  const analysisScope = analysisScopeText(contract, seasonLabelFromDates(contract.startDate, contract.endDate));
+  const analysisNum = analysisScope.teams ? n++ : null;
   const feesNum = n++;
   const confidentialityNum = n++;
   const ipNum = n++;
@@ -554,6 +556,26 @@ export function generateContractPdf({ contract, client, company }) {
     doc.text('Total Contract Value', M + cellPadX, y);
     doc.text(fmtMoney(contract.value, contract.currency), W - M - cellPadX, y, { align: 'right' });
     y += 12;
+  }
+
+  // --- Scope of Analysis ---------------------------------------------------
+  if (analysisNum) {
+    pillHeader(analysisNum, 'Scope of Analysis');
+    text(`The Service Provider shall provide performance analysis for the following teams of the Client: ${analysisScope.teams}. ${analysisScope.coverage}`, { size: 10, gap: analysisScope.opponent ? 6 : 10 });
+    // Cyan-bar "Opponent access" subheading + granted items — only if any granted.
+    if (analysisScope.opponent) {
+      ensure(20);
+      y += 10;
+      const oaBaseline = y;
+      doc.setFillColor(...CYAN);
+      doc.rect(M, oaBaseline - 8, 3, 10, 'F');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor(...NAVY);
+      doc.text('OPPONENT ACCESS', M + 8, oaBaseline);
+      y += 4;
+      text(analysisScope.opponent, { size: 10, gap: 10 });
+    }
   }
 
   // --- Fees & Payment ------------------------------------------------------
