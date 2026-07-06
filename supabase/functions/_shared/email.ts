@@ -2,6 +2,15 @@
 // the RESEND_API_KEY function secret — never in frontend code or git.
 const RESEND_ENDPOINT = 'https://api.resend.com/emails';
 
+// Escape user-supplied values before interpolating into email HTML — prevents
+// HTML/link injection into SOS-branded mail (e.g. a decline reason or a signer
+// name lands in staff/client inboxes).
+export function escapeHtml(s: unknown): string {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 // From-address for all signing emails. Overridable via the SIGNING_FROM_EMAIL
 // secret; defaults to the branded contracts address.
 function fromAddress(): string {
@@ -139,5 +148,44 @@ export function signerConfirmationEmail(opts: {
     <p>Your <strong>Certificate of Completion</strong> is attached to this email for your records. It contains the full signature evidence, including the document integrity hash. Please keep it safe.</p>
     <p>If you have any questions about this agreement, simply reply to this email.</p>
     <p>With thanks,<br/>The Science of Sports team</p>
+  `);
+}
+
+// Payment reminder to a client. Tone escalates by how overdue the payment is.
+// All interpolated values are HTML-escaped.
+export function paymentReminderEmail(opts: {
+  contactName: string;
+  description: string;
+  amount: string;      // pre-formatted, e.g. "€4,046.00"
+  dueDate: string;     // pre-formatted, e.g. "10/09/2026"
+  daysOverdue: number; // 0 = not yet due / due today
+  bankLine?: string;   // optional pre-formatted bank details
+}): string {
+  const name = escapeHtml(opts.contactName) || 'Sir/Madam';
+  const desc = escapeHtml(opts.description);
+  const amount = escapeHtml(opts.amount);
+  const due = escapeHtml(opts.dueDate);
+  const d = opts.daysOverdue;
+  let lead: string, tone: string;
+  if (d <= 0) {
+    tone = 'This is a friendly reminder';
+    lead = `that <strong>${desc}</strong> (${amount}) is due on <strong>${due}</strong>.`;
+  } else if (d < 14) {
+    tone = 'This is a reminder';
+    lead = `that <strong>${desc}</strong> (${amount}), which was due on <strong>${due}</strong>, is now <strong>${d} day${d === 1 ? '' : 's'} overdue</strong>. We would be grateful for settlement at your earliest convenience.`;
+  } else if (d < 30) {
+    tone = 'This is an important reminder';
+    lead = `that <strong>${desc}</strong> (${amount}) has been outstanding since <strong>${due}</strong> and is now <strong>${d} days overdue</strong>. Please arrange payment as soon as possible.`;
+  } else {
+    tone = 'This is a formal notice';
+    lead = `that <strong>${desc}</strong> (${amount}) has remained unpaid since <strong>${due}</strong> and is now <strong>${d} days overdue</strong>. Please settle this amount without further delay to avoid any impact on the services under your agreement.`;
+  }
+  const bank = opts.bankLine ? `<p style="background:#F1F5F9;padding:12px 16px;border-radius:8px;font-size:13px;">${escapeHtml(opts.bankLine)}</p>` : '';
+  return WRAP(`
+    <p>Dear ${name},</p>
+    <p>${tone} ${lead}</p>
+    ${bank}
+    <p>If payment has already been made, please disregard this message and accept our thanks. If you have any questions, simply reply to this email.</p>
+    <p>Kind regards,<br/>The Science of Sports team</p>
   `);
 }

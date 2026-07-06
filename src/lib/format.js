@@ -66,3 +66,19 @@ export function computeVAT(client, amount) {
   return { vatRate: 0, vatAmount: 0, note: 'Outside scope of VAT.' };
 }
 export function round2(n) { return Math.round(n * 100) / 100; }
+
+// Effective payment status, computed live: a pending payment whose due date has
+// passed counts as 'overdue' everywhere it's shown or summed — no cron needed.
+// Explicit statuses (paid, disputed, overdue) are respected as-is.
+export function effectiveStatus(payment) {
+  if (!payment) return 'pending';
+  const s = payment.status || 'pending';
+  if (s === 'pending' && payment.dueDate && new Date(payment.dueDate) < new Date()) return 'overdue';
+  return s;
+}
+
+// Whole days a payment is past due (0 if not overdue). Positive = late.
+export function daysOverdue(payment) {
+  if (effectiveStatus(payment) !== 'overdue' || !payment?.dueDate) return 0;
+  return Math.floor((Date.now() - new Date(payment.dueDate).getTime()) / 86400000);
+}

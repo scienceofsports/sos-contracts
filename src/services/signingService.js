@@ -34,6 +34,10 @@ export const signingService = {
   createSigningRequest: async (contractId, appOrigin) =>
     invoke('create-signing-request', { contractId, appOrigin }),
 
+  // ADMIN: send a real payment-reminder email to the client for a payment.
+  sendPaymentReminder: async (paymentId) =>
+    invoke('send-payment-reminder', { paymentId }),
+
   // PUBLIC: fetch the frozen document snapshot for a signing token.
   getSigningRequest: async (token) =>
     invoke('get-signing-request', { token }),

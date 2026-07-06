@@ -29,6 +29,8 @@ import {
   validateEmail,
   computeVAT,
   round2,
+  effectiveStatus,
+  daysOverdue,
 } from './lib/format.js';
 import { decodePortablePayload } from './lib/portable.js';
 import { downloadContractPdf } from './lib/contractPdf.js';
@@ -273,8 +275,13 @@ function Dashboard({ navigate }) {
   const totalActiveValue = contracts.filter(c => c.status === 'active').reduce((s,c) => s + Number(c.value||0), 0);
   const allPayments = contracts.flatMap(c => c.payments.map(p => ({ ...p, contractTitle: c.title, contractNumber: c.contractNumber, clientId: c.clientId })));
   const collectedYTD = allPayments.filter(p => p.status === 'paid' && new Date(p.paidAt).getFullYear() === now.getFullYear()).reduce((s,p) => s + Number(p.paidAmount||0), 0);
-  const outstanding = allPayments.filter(p => p.status === 'pending' || p.status === 'overdue' || p.status === 'disputed').reduce((s,p) => s + Number(p.totalAmount||0), 0);
-  const overdue = allPayments.filter(p => p.status === 'overdue').reduce((s,p) => s + Number(p.totalAmount||0), 0);
+  // Overdue is COMPUTED live from due dates (a pending payment past due = overdue).
+  const outstanding = allPayments.filter(p => { const st = effectiveStatus(p); return st === 'pending' || st === 'overdue' || st === 'disputed'; }).reduce((s,p) => s + Number(p.totalAmount||0), 0);
+  const overdue = allPayments.filter(p => effectiveStatus(p) === 'overdue').reduce((s,p) => s + Number(p.totalAmount||0), 0);
+  // Aged overdue buckets (the board/collections view of the money that's late).
+  const overduePays = allPayments.filter(p => effectiveStatus(p) === 'overdue');
+  const overdueBuckets = { d30: 0, d60: 0, d90: 0 };
+  overduePays.forEach(p => { const d = daysOverdue(p); const amt = Number(p.totalAmount||0); if (d > 90) overdueBuckets.d90 += amt; else if (d > 60) overdueBuckets.d60 += amt; else overdueBuckets.d30 += amt; });
   const renewalCount = contracts.filter(c => c.status === 'active' && c.endDate && daysBetween(now, c.endDate) >= 0 && daysBetween(now, c.endDate) <= 60).length;
 
   const stages = ['draft','sent','signed','active','expired'];
@@ -303,8 +310,8 @@ function Dashboard({ navigate }) {
   const clientHealth = clients.map(cl => {
     const clientContracts = contracts.filter(c => c.clientId === cl.id);
     const activeC = clientContracts.find(c => c.status === 'active');
-    const overdueP = clientContracts.flatMap(c=>c.payments).some(p => p.status === 'overdue');
-    const pendingP = clientContracts.flatMap(c=>c.payments).filter(p => p.status === 'pending').sort((a,b)=>new Date(a.dueDate)-new Date(b.dueDate))[0];
+    const overdueP = clientContracts.flatMap(c=>c.payments).some(p => effectiveStatus(p) === 'overdue');
+    const pendingP = clientContracts.flatMap(c=>c.payments).filter(p => effectiveStatus(p) === 'pending').sort((a,b)=>new Date(a.dueDate)-new Date(b.dueDate))[0];
     let health = 'green';
     if (overdueP) health = 'red';
     else if (!activeC && clientContracts.some(c => c.status === 'sent')) health = 'amber';
@@ -2111,10 +2118,23 @@ function PaymentsReceivables({ navigate }) {
   const clientMap = Object.fromEntries(clients.map(c => [c.id, c]));
   const rows = contracts.flatMap(c => c.payments.filter(p=>p.status!=='paid').map(p => ({ ...p, contractId: c.id, contract: c })));
   rows.sort((a,b) => new Date(a.dueDate) - new Date(b.dueDate));
+  // Summary totals for the chase list.
+  const totalOutstanding = rows.reduce((s,p)=>s+Number(p.totalAmount||0), 0);
+  const totalOverdue = rows.filter(p=>effectiveStatus(p)==='overdue').reduce((s,p)=>s+Number(p.totalAmount||0), 0);
+  const weekMs = Date.now() + 7*86400000;
+  const dueThisWeek = rows.filter(p=>{ const d=p.dueDate?new Date(p.dueDate).getTime():0; return effectiveStatus(p)!=='overdue' && d>0 && d<=weekMs; }).reduce((s,p)=>s+Number(p.totalAmount||0), 0);
+  const cur = rows[0]?.currency || 'EUR';
 
   return (
     <div className="p-4 md:p-6">
-      <div className="font-display mb-6 text-[var(--navy-deep)]">Receivables</div>
+      <div className="font-display mb-4 text-[var(--navy-deep)]">Receivables</div>
+      {rows.length > 0 && (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
+          <div className="bg-white rounded-xl border border-[var(--border)] p-4"><div className="text-xs text-slate-400 mb-1">Total Outstanding</div><div className="font-display text-xl text-[var(--navy-deep)]">{fmtMoney(totalOutstanding, cur)}</div></div>
+          <div className="bg-white rounded-xl border border-red-200 p-4"><div className="text-xs text-red-500 mb-1">Overdue</div><div className="font-display text-xl text-red-600">{fmtMoney(totalOverdue, cur)}</div></div>
+          <div className="bg-white rounded-xl border border-[var(--border)] p-4"><div className="text-xs text-slate-400 mb-1">Due this week</div><div className="font-display text-xl text-[var(--navy-deep)]">{fmtMoney(dueThisWeek, cur)}</div></div>
+        </div>
+      )}
       {rows.length === 0 ? <EmptyState title="Nothing outstanding" icon="🎉" /> : (
         <div className="bg-white rounded-xl border border-[var(--border)] overflow-x-auto">
           <table className="w-full text-sm">
@@ -2126,7 +2146,7 @@ function PaymentsReceivables({ navigate }) {
                   <td className="py-3 px-4">{clientMap[p.contract.clientId]?.companyName}</td>
                   <td className="py-3 px-4">{fmtDate(p.dueDate)}</td>
                   <td className="py-3 px-4 font-data">{fmtMoney(p.totalAmount, p.currency)}</td>
-                  <td className="py-3 px-4"><Badge status={p.status} /></td>
+                  <td className="py-3 px-4"><Badge status={effectiveStatus(p)} />{daysOverdue(p) > 0 && <span className="ml-1 text-[10px] text-red-500">{daysOverdue(p)}d</span>}</td>
                   <td className="py-3 px-4 space-x-2">
                     <button onClick={()=>setReminderPayment(p)} className="text-blue-600 hover:underline text-xs">Send Reminder</button>
                     {auth.isAdmin && <button onClick={()=>setMarkPaid(p)} className="text-emerald-600 hover:underline text-xs">Mark Paid</button>}
@@ -2154,11 +2174,19 @@ function ReminderModal({ payment, client, onClose }) {
   else if (days < 0) { tone = 'Firm reminder'; reminderType = 'overdue_7'; }
 
   const [sent, setSent] = useState(false);
+  const [busy, setBusy] = useState(false);
 
   const send = async () => {
-    await paymentService.addReminder(payment.contractId, payment.id, { type: reminderType, tone });
-    setSent(true);
-    toast.push('Reminder logged and simulated email sent.', 'success');
+    setBusy(true);
+    try {
+      const res = await signingService.sendPaymentReminder(payment.id);
+      setSent(true);
+      toast.push(`Reminder emailed to ${res.sentTo || 'the client'}.`, 'success');
+    } catch (err) {
+      toast.push(err.message || 'Could not send the reminder.', 'error');
+    } finally {
+      setBusy(false);
+    }
   };
 
   const markDisputed = async () => {
@@ -2172,7 +2200,7 @@ function ReminderModal({ payment, client, onClose }) {
       <React.Fragment>
         {reminderType === 'overdue_14' || reminderType === 'overdue_30' ? <button onClick={markDisputed} className="px-4 py-2 text-sm rounded-lg border border-purple-200 text-purple-700 hover:bg-purple-50">Mark as Disputed</button> : null}
         <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-[var(--border)] hover:bg-slate-50">Close</button>
-        {!sent && <button onClick={send} className="px-4 py-2 text-sm rounded-lg bg-[var(--blue-primary)] text-white hover:bg-blue-700">Send Reminder</button>}
+        {!sent && <button onClick={send} disabled={busy} className="px-4 py-2 text-sm rounded-lg bg-[var(--blue-primary)] text-white hover:bg-blue-700 disabled:opacity-50">{busy ? 'Sending…' : 'Send Reminder'}</button>}
       </React.Fragment>
     }>
       <div className="text-xs text-slate-400 mb-2">Tone: {tone}</div>
@@ -2185,7 +2213,8 @@ function ReminderModal({ payment, client, onClose }) {
           <br/><br/>Kind regards,<br/>Science of Sports
         </p>
       </div>
-      {sent && <div className="text-xs text-emerald-600 mt-3">✓ Reminder sent and logged to audit trail.</div>}
+      {sent && <div className="text-xs text-emerald-600 mt-3">✓ Reminder emailed to the client and logged.</div>}
+      <p className="text-[11px] text-slate-400 mt-2">This preview reflects the email; the actual email is sent branded via Science of Sports.</p>
     </Modal>
   );
 }
