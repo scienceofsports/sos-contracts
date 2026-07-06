@@ -127,6 +127,52 @@ export function seasonLabelFromDates(startDate, endDate) {
   return '';
 }
 
+// Commercial Model — kickback calculator. Pure math, no formatting.
+// gross = players × monthlyFee × months; kickback = gross × pct/100;
+// net = gross − kickback. Returns numbers rounded to 2 dp.
+// NOTE: ported verbatim into both PDF generators — keep in sync.
+export function computeKickback({ playerCount, playerMonthlyFee, playerMonths, kickbackPct }) {
+  const n = Number(playerCount) || 0;
+  const fee = Number(playerMonthlyFee) || 0;
+  const months = Number(playerMonths) || 0;
+  const pct = Number(kickbackPct) || 0;
+  const gross = Math.round(n * fee * months * 100) / 100;
+  const kickback = Math.round(gross * (pct / 100) * 100) / 100;
+  const net = Math.round((gross - kickback) * 100) / 100;
+  return { gross, kickback, net, pct, playerCount: n, playerMonthlyFee: fee, playerMonths: months };
+}
+
+// Human labels for the payment models.
+export const PAYMENT_MODEL_LABELS = {
+  club_all: 'Club-funded — the Client pays the full fee',
+  club_players: 'Shared — the Client and its players jointly fund the fee',
+  players_all: 'Player-funded — fees are collected directly from players',
+};
+
+// Build the Commercial Terms clause parts from a contract + a money formatter
+// `fm(amount)`. Returns { intro, breakdown, commission } (any may be '').
+// NOTE: ported verbatim into both PDF generators — keep in sync.
+export function commercialModelText(contract, fm) {
+  const basis = contract?.billingBasis || 'services';
+  const model = contract?.paymentModel || null;
+  if (basis !== 'player_funded' || !model) return { intro: '', breakdown: '', commission: '' };
+  const k = computeKickback({
+    playerCount: contract.playerCount, playerMonthlyFee: contract.playerMonthlyFee,
+    playerMonths: contract.playerMonths, kickbackPct: contract.kickbackPct,
+  });
+  const feeLine = `${k.playerCount} players at ${fm(k.playerMonthlyFee)} per player per month over ${k.playerMonths} months`;
+  const intro = PAYMENT_MODEL_LABELS[model] || '';
+  if (model === 'players_all') {
+    // Terms only — no netted value; commission on amounts actually collected.
+    const commission = k.pct ? `The Service Provider shall pay the Client a commission of ${k.pct}% of the fees actually collected from players enrolled through the Client, reconciled and settled per football season.` : '';
+    return { intro, breakdown: `Access fees are collected by the Service Provider directly from participating players (${feeLine}).`, commission };
+  }
+  // club_all / club_players — calculated net, kickback shown as a breakdown.
+  const breakdown = `Gross player fees (${feeLine}) total ${fm(k.gross)}. A club kickback of ${k.pct}% (${fm(k.kickback)}) is applied, resulting in a net contract value of ${fm(k.net)} payable by the Client.`;
+  const commission = 'The kickback is applied as a discount against the fees payable by the Client and is reflected in the total contract value and payment schedule above.';
+  return { intro, breakdown, commission };
+}
+
 export function generateDescriptionFromServices(services, slaHours) {
   const items = computeServiceLineItems(services);
   if (!items.length) return '';

@@ -22,7 +22,7 @@
    ========================================================================= */
 import { jsPDF } from 'jspdf';
 import { fmtDate, fmtMoney, daysBetween } from './format.js';
-import { computeServiceLineItems, platformSeatsSummary, SERVICE_GROUPS, analysisScopeText, seasonLabelFromDates } from './constants.js';
+import { computeServiceLineItems, platformSeatsSummary, SERVICE_GROUPS, analysisScopeText, seasonLabelFromDates, commercialModelText } from './constants.js';
 
 export function generateContractPdf({ contract, client, company }) {
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
@@ -410,6 +410,8 @@ export function generateContractPdf({ contract, client, company }) {
   const analysisScope = analysisScopeText(contract, seasonLabelFromDates(contract.startDate, contract.endDate));
   const analysisNum = analysisScope.teams ? n++ : null;
   const feesNum = n++;
+  const commercial = commercialModelText(contract, (a) => fmtMoney(a, contract.currency));
+  const commercialNum = commercial.intro ? n++ : null;
   const confidentialityNum = n++;
   const ipNum = n++;
   const durationNum = n++;
@@ -603,6 +605,13 @@ export function generateContractPdf({ contract, client, company }) {
     text('BANK DETAILS (SERVICE PROVIDER)', { x: innerX, size: 8, style: 'bold', color: NAVY, gap: 4 });
     for (const bl of bankLines) text(bl, { x: innerX, size: 9, color: SOFT_GREY, gap: 1 });
     y = boxTop + boxH + 10;
+  }
+
+  // --- Commercial Terms & Club Commission ----------------------------------
+  if (commercialNum) {
+    const paras = [`${commercial.intro}. ${commercial.breakdown}`];
+    if (commercial.commission) paras.push(commercial.commission);
+    clause(commercialNum, 'Commercial Terms & Club Commission', ...paras);
   }
 
   // --- Confidentiality & Data Protection (lilac callout) -------------------

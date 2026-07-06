@@ -158,6 +158,47 @@ function seasonLabelFromDates(startDate: Any, endDate: Any): string {
   return '';
 }
 
+// Port of computeKickback — keep in sync with src/lib/constants.js.
+function computeKickback(o: Any): Any {
+  const n = Number(o?.playerCount) || 0;
+  const fee = Number(o?.playerMonthlyFee) || 0;
+  const months = Number(o?.playerMonths) || 0;
+  const pct = Number(o?.kickbackPct) || 0;
+  const gross = Math.round(n * fee * months * 100) / 100;
+  const kickback = Math.round(gross * (pct / 100) * 100) / 100;
+  const net = Math.round((gross - kickback) * 100) / 100;
+  return { gross, kickback, net, pct, playerCount: n, playerMonthlyFee: fee, playerMonths: months };
+}
+
+const PAYMENT_MODEL_LABELS: Record<string, string> = {
+  club_all: 'Club-funded — the Client pays the full fee',
+  club_players: 'Shared — the Client and its players jointly fund the fee',
+  players_all: 'Player-funded — fees are collected directly from players',
+};
+
+// Port of commercialModelText. Accepts snake_case or camelCase via pick-style
+// reads. `fm(amount)` formats money. Keep in sync with src/lib/constants.js.
+function commercialModelText(c: Any, fm: (a: Any) => string): { intro: string; breakdown: string; commission: string } {
+  const basis = (c?.billingBasis ?? c?.billing_basis) || 'services';
+  const model = (c?.paymentModel ?? c?.payment_model) || null;
+  if (basis !== 'player_funded' || !model) return { intro: '', breakdown: '', commission: '' };
+  const k = computeKickback({
+    playerCount: c?.playerCount ?? c?.player_count,
+    playerMonthlyFee: c?.playerMonthlyFee ?? c?.player_monthly_fee,
+    playerMonths: c?.playerMonths ?? c?.player_months,
+    kickbackPct: c?.kickbackPct ?? c?.kickback_pct,
+  });
+  const feeLine = `${k.playerCount} players at ${fm(k.playerMonthlyFee)} per player per month over ${k.playerMonths} months`;
+  const intro = PAYMENT_MODEL_LABELS[model] || '';
+  if (model === 'players_all') {
+    const commission = k.pct ? `The Service Provider shall pay the Client a commission of ${k.pct}% of the fees actually collected from players enrolled through the Client, reconciled and settled per football season.` : '';
+    return { intro, breakdown: `Access fees are collected by the Service Provider directly from participating players (${feeLine}).`, commission };
+  }
+  const breakdown = `Gross player fees (${feeLine}) total ${fm(k.gross)}. A club kickback of ${k.pct}% (${fm(k.kickback)}) is applied, resulting in a net contract value of ${fm(k.net)} payable by the Client.`;
+  const commission = 'The kickback is applied as a discount against the fees payable by the Client and is reflected in the total contract value and payment schedule above.';
+  return { intro, breakdown, commission };
+}
+
 // Strip a data: URL prefix and decode base64 to bytes. Returns null on failure.
 function dataUrlToBytes(dataUrl: Any): Uint8Array | null {
   try {
@@ -522,6 +563,8 @@ export async function buildContractPdf(input: {
   const analysisScope = analysisScopeText(c, seasonLabelFromDates(startDate, endDate));
   const analysisNum = analysisScope.teams ? n++ : null;
   const feesNum = n++;
+  const commercial = commercialModelText(c, (a: Any) => fmtMoney(a, currency));
+  const commercialNum = commercial.intro ? n++ : null;
   const confidentialityNum = n++;
   const ipNum = n++;
   const durationNum = n++;
@@ -710,6 +753,13 @@ export async function buildContractPdf(input: {
       for (const bl of bankLines) text(bl, { x: innerX, size: 9, color: SOFT_GREY, gap: 1 });
       y = boxTop + boxH + 10;
     }
+  }
+
+  // --- Commercial Terms & Club Commission ----------------------------------
+  if (commercialNum) {
+    const paras: Any[] = [`${commercial.intro}. ${commercial.breakdown}`];
+    if (commercial.commission) paras.push(commercial.commission);
+    clause(commercialNum, 'Commercial Terms & Club Commission', ...paras);
   }
 
   // --- Confidentiality & Data Protection (lilac callout) -------------------

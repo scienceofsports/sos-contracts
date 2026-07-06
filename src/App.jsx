@@ -12,6 +12,9 @@ import {
   generateDescriptionFromServices,
   analysisScopeText,
   seasonLabelFromDates,
+  computeKickback,
+  commercialModelText,
+  PAYMENT_MODEL_LABELS,
 } from './lib/constants.js';
 import {
   nowISO,
@@ -556,6 +559,23 @@ function defaultServicesState() {
   return Object.fromEntries(SERVICE_CATALOG.map(s => [s.key, { selected:false, qty:s.defaultQty, rate:s.defaultRate, complimentary:false, bundledIncluded:false, ...(s.key === 'platform_access' ? { directorSeats:0, coachSeats:0, playerSeats:0 } : {}) }]));
 }
 
+// Collapsible form section: a bordered card with a clickable header (title +
+// optional summary shown when collapsed) and a body that expands/collapses.
+function CollapsibleSection({ title, summary, open, onToggle, children }) {
+  return (
+    <div className="mt-4 border border-[var(--border)] rounded-lg overflow-hidden">
+      <button type="button" onClick={onToggle} className="w-full flex items-center justify-between gap-3 px-4 py-3 bg-slate-50 hover:bg-slate-100 transition text-left">
+        <span className="font-heading text-sm text-[var(--navy-deep)]">{title}</span>
+        <span className="flex items-center gap-2 min-w-0">
+          {!open && summary && <span className="text-xs text-slate-500 truncate">{summary}</span>}
+          <span className={`text-slate-400 transition-transform shrink-0 ${open ? 'rotate-180' : ''}`}>▾</span>
+        </span>
+      </button>
+      {open && <div className="p-4">{children}</div>}
+    </div>
+  );
+}
+
 function ContractForm({ navigate, editContractId }) {
   const auth = useAuth();
   const toast = useToast();
@@ -568,8 +588,17 @@ function ContractForm({ navigate, editContractId }) {
     startDate:'', endDate:'', paymentType:'one_time', paymentTermsDays:30, latePaymentPenalty:1.5,
     governingLaw:'Republic of Cyprus', jurisdiction:'Nicosia, Cyprus', description:'', slaHours:24, specialTerms:'',
     analysisTeams:[], oppMatchFootage:false, oppTeamAnalysis:false, oppPlayerAnalysis:false,
+    billingBasis:'services', paymentModel:'', playerCount:'', playerMonthlyFee:'', playerMonths:'', kickbackPct:'',
   });
   const [titleEdited, setTitleEdited] = useState(isEdit);
+  // Which service groups are expanded in the form (collapsible sections).
+  // Core Services starts open; the rest collapse until clicked.
+  const [openGroups, setOpenGroups] = useState(() => ({ 'Core Services': true }));
+  const toggleGroup = (g) => setOpenGroups(o => ({ ...o, [g]: !o[g] }));
+  // Which top-level form sections are expanded. New contract: only Services.
+  // Editing: smart-expanded after load (see the edit effect below).
+  const [openSections, setOpenSections] = useState(() => ({ services: true }));
+  const toggleSection = (k) => setOpenSections(o => ({ ...o, [k]: !o[k] }));
   const [installments, setInstallments] = useState([]);
   const [oneTimeDate, setOneTimeDate] = useState('');
   const [firstDueDate, setFirstDueDate] = useState('');
@@ -597,6 +626,12 @@ function ContractForm({ navigate, editContractId }) {
         oppMatchFootage: !!existing.oppMatchFootage,
         oppTeamAnalysis: !!existing.oppTeamAnalysis,
         oppPlayerAnalysis: !!existing.oppPlayerAnalysis,
+        billingBasis: existing.billingBasis || 'services',
+        paymentModel: existing.paymentModel || '',
+        playerCount: existing.playerCount ?? '',
+        playerMonthlyFee: existing.playerMonthlyFee ?? '',
+        playerMonths: existing.playerMonths ?? '',
+        kickbackPct: existing.kickbackPct ?? '',
       });
       setServices(existing.services ? { ...defaultServicesState(), ...existing.services } : defaultServicesState());
       if (existing.payments && existing.payments.length) {
@@ -608,6 +643,22 @@ function ContractForm({ navigate, editContractId }) {
           setFirstDueDate(existing.payments[0].dueDate.slice(0,10));
         }
       }
+      // Smart-expand: open every section + service group that has content, so
+      // editing shows what's filled at a glance.
+      const svc = existing.services || {};
+      setOpenSections({
+        services: true,
+        commercial: !!existing.paymentModel,
+        analysis: (existing.analysisTeams && existing.analysisTeams.length) || existing.oppMatchFootage || existing.oppTeamAnalysis || existing.oppPlayerAnalysis,
+        details: true,
+        schedule: !!(existing.payments && existing.payments.length),
+        text: !!(existing.specialTerms && existing.specialTerms.trim()),
+      });
+      const groupsWithSel = {};
+      SERVICE_GROUPS.forEach(g => {
+        if (SERVICE_CATALOG.some(s => s.group === g && svc[s.key]?.selected)) groupsWithSel[g] = true;
+      });
+      setOpenGroups({ 'Core Services': true, ...groupsWithSel });
       setLoadingExisting(false);
     })();
   }, [isEdit, editContractId]);
@@ -661,6 +712,13 @@ function ContractForm({ navigate, editContractId }) {
     setForm(f => ({ ...f, [k]: v }));
   };
 
+  // Payment model is the primary funding choice. All three models are
+  // player-pool based (they collect player fees); billingBasis flags that the
+  // Commercial Terms clause + value logic should use the player pool.
+  const setPaymentModel = (model) => {
+    setForm(f => ({ ...f, paymentModel: model, billingBasis: 'player_funded' }));
+  };
+
   const setClient = (clientId) => {
     setForm(f => ({
       ...f,
@@ -688,6 +746,24 @@ function ContractForm({ navigate, editContractId }) {
 
   const lineItems = computeServiceLineItems(services);
   const lineItemsTotal = lineItems.reduce((s,i)=>s+i.amount,0);
+
+  // Commercial Model — live kickback calc for the form's player-funded basis.
+  const kb = computeKickback({ playerCount: form.playerCount, playerMonthlyFee: form.playerMonthlyFee, playerMonths: form.playerMonths, kickbackPct: form.kickbackPct });
+  // Club-funded & Shared compute a net value that drives the contract value;
+  // Player-funded shows the pool but leaves the value manual (players pay SOS).
+  const isCalcModel = form.paymentModel === 'club_all' || form.paymentModel === 'club_players';
+  // When services drive value, keep value synced to the catalog total; when a
+  // calculated player-funded model is active, sync value to the net figure.
+  useEffect(() => {
+    if (isCalcModel) {
+      const net = String(kb.net || 0);
+      setForm(f => (f.value === net ? f : { ...f, value: net }));
+    } else if (form.billingBasis === 'services') {
+      const total = String(lineItemsTotal);
+      setForm(f => (f.value === total ? f : { ...f, value: total }));
+    }
+    // players_all: value not auto-driven (terms-only kickback).
+  }, [isCalcModel, kb.net, form.billingBasis, lineItemsTotal]);
 
   const validate = () => {
     const e = {};
@@ -783,13 +859,25 @@ function ContractForm({ navigate, editContractId }) {
           </select>
         </Field>
 
-        <div className="font-heading text-base mt-6 mb-1 pt-6 border-t border-[var(--border)]">Services Included</div>
+        <CollapsibleSection title="Services Included" open={openSections.services} onToggle={()=>toggleSection('services')} summary={`${lineItems.length} selected · ${fmtMoney(lineItemsTotal, form.currency)}`}>
         <p className="text-xs text-slate-500 mb-4">Tick each service this client is getting, set quantity and price. Mark a service "Included" to bundle it into the core platform price (shown to the client as part of the value they're getting), or "Comp" to waive it as a one-off free favor. Prices here are for your reference only — the contract sent to the client lists services and the total, not per-line prices. The description and value below update automatically — review both before saving.</p>
-        {SERVICE_GROUPS.map(group => (
-          <div key={group} className="mb-4 last:mb-0">
-            <div className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-2">{group}</div>
+        {SERVICE_GROUPS.map(group => {
+          const groupServices = SERVICE_CATALOG.filter(s => s.group === group);
+          const selectedCount = groupServices.filter(s => services[s.key]?.selected).length;
+          const open = !!openGroups[group];
+          return (
+          <div key={group} className="mb-2 last:mb-0 border border-[var(--border)] rounded-lg overflow-hidden">
+            <button type="button" onClick={()=>toggleGroup(group)} className="w-full flex items-center justify-between px-3 py-2.5 bg-slate-50 hover:bg-slate-100 transition text-left">
+              <span className="text-xs font-semibold text-[var(--navy-deep)] uppercase tracking-wide">{group}</span>
+              <span className="flex items-center gap-2">
+                {selectedCount > 0 && <span className="text-[11px] font-medium text-white bg-[var(--navy-deep)] rounded-full px-2 py-0.5">{selectedCount} selected</span>}
+                <span className={`text-slate-400 transition-transform ${open ? 'rotate-180' : ''}`}>▾</span>
+              </span>
+            </button>
+            {open && (
+            <div className="p-3">
             <div className="space-y-2">
-              {SERVICE_CATALOG.filter(s => s.group === group).map(s => {
+              {groupServices.map(s => {
                 const svc = services[s.key];
                 return (
                   <div key={s.key} className="py-1.5 border-b border-[var(--border)] last:border-0">
@@ -869,16 +957,54 @@ function ContractForm({ navigate, editContractId }) {
                 </Field>
               </div>
             )}
+            </div>
+            )}
           </div>
-        ))}
+          );
+        })}
         <div className="flex justify-between pt-3 border-t border-[var(--border)] font-heading text-base">
           <span>Total</span>
           <span className="font-data">{fmtMoney(lineItemsTotal, form.currency)}</span>
         </div>
+        </CollapsibleSection>
+
+        {/* --- Commercial Model: how the deal is funded. --------------------- */}
+        <CollapsibleSection title="Commercial Model" open={openSections.commercial} onToggle={()=>toggleSection('commercial')} summary={form.paymentModel ? (PAYMENT_MODEL_LABELS[form.paymentModel] || '').split(' — ')[0] : 'Club-funded (default)'}>
+        <p className="text-xs text-slate-400 mb-3">How is this deal funded? The services above describe what the Client gets; this sets who pays. Player-funded and Shared deals compute the value from player fees, net of the club kickback.</p>
+        <div className="space-y-1.5 mb-3">
+          {[['club_all','Club-funded — the Client pays the full fee'],['club_players','Shared — the Client and its players jointly fund the fee'],['players_all','Player-funded — fees are collected directly from players']].map(([val,label]) => (
+            <label key={val} className="flex items-start gap-2.5 text-sm text-slate-700 cursor-pointer">
+              <input type="radio" name="paymentModel" checked={form.paymentModel===val} onChange={()=>setPaymentModel(val)} className="mt-0.5" />
+              <span>{label}</span>
+            </label>
+          ))}
+        </div>
+        {(form.paymentModel === 'club_all' || form.paymentModel === 'club_players' || form.paymentModel === 'players_all') && (
+          <div className="rounded-lg border border-[var(--border)] p-4 mb-2 bg-slate-50/60">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <Field label="Players"><input type="number" min="0" value={form.playerCount} onChange={e=>set('playerCount', e.target.value)} className={inputCls(false)} placeholder="100" /></Field>
+              <Field label={`Fee / player / month (${CURRENCY_SYMBOL[form.currency]})`}><input type="number" min="0" step="0.01" value={form.playerMonthlyFee} onChange={e=>set('playerMonthlyFee', e.target.value)} className={inputCls(false)} placeholder="15" /></Field>
+              <Field label="Months"><input type="number" min="0" value={form.playerMonths} onChange={e=>set('playerMonths', e.target.value)} className={inputCls(false)} placeholder="10" /></Field>
+              <Field label="Club kickback %"><input type="number" min="0" max="100" step="0.1" value={form.kickbackPct} onChange={e=>set('kickbackPct', e.target.value)} className={inputCls(false)} placeholder="20" /></Field>
+            </div>
+            {(form.paymentModel === 'club_all' || form.paymentModel === 'club_players') && kb.gross > 0 && (
+              <div className="mt-3 pt-3 border-t border-[var(--border)] text-sm space-y-1">
+                <div className="flex justify-between text-slate-600"><span>Gross player fees</span><span className="font-data">{fmtMoney(kb.gross, form.currency)}</span></div>
+                <div className="flex justify-between text-slate-600"><span>Club kickback ({kb.pct}%)</span><span className="font-data text-emerald-600">− {fmtMoney(kb.kickback, form.currency)}</span></div>
+                <div className="flex justify-between font-heading text-[var(--navy-deep)] pt-1 border-t border-[var(--border)]"><span>Net contract value</span><span className="font-data">{fmtMoney(kb.net, form.currency)}</span></div>
+                <p className="text-xs text-slate-400 pt-1">This net value auto-fills the contract value below; build the installment schedule to match.</p>
+              </div>
+            )}
+            {form.paymentModel === 'players_all' && (
+              <p className="text-xs text-slate-500 mt-3 pt-3 border-t border-[var(--border)]">Players pay the Service Provider directly. The club commission ({form.kickbackPct || 0}% of fees actually collected, settled per season) is stated as a term — it does not drive the contract value or installments.</p>
+            )}
+          </div>
+        )}
+        </CollapsibleSection>
 
         {/* --- Analysis Scope: which teams + opponent-access toggles. --------- */}
-        <div className="font-heading text-base mt-6 mb-1 pt-6 border-t border-[var(--border)]">Analysis Scope</div>
-        <p className="text-xs text-slate-400 mb-3">Define exactly which of the Client's teams are analysed. Analysis covers League competition matches only (excluding friendlies &amp; cup) for the contract season.</p>
+        <CollapsibleSection title="Analysis Scope" open={openSections.analysis} onToggle={()=>toggleSection('analysis')} summary={(form.analysisTeams && form.analysisTeams.length) ? form.analysisTeams.join(', ') : 'No teams set'}>
+        <p className="text-xs text-slate-400 mb-3">Define exactly which of the Client's teams are analysed. Analysis covers League competition matches for the contract season.</p>
         <div className="mb-4">
           <div className="text-sm font-medium text-slate-600 mb-2">Teams covered</div>
           <div className="flex flex-wrap gap-2">
@@ -904,11 +1030,12 @@ function ContractForm({ navigate, editContractId }) {
             ))}
           </div>
         </div>
+        </CollapsibleSection>
 
-        <div className="font-heading text-base mt-6 mb-4 pt-6 border-t border-[var(--border)]">Contract Details</div>
+        <CollapsibleSection title="Contract Details" open={openSections.details} onToggle={()=>toggleSection('details')} summary={`${fmtMoney(form.value || 0, form.currency)}${form.startDate && form.endDate ? ` · ${fmtDate(form.startDate)}–${fmtDate(form.endDate)}` : ''}`}>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Field label="Value" required error={errors.value}>
-            <input disabled type="number" step="0.01" value={form.value} onChange={e=>set('value',e.target.value)} className={inputCls(errors.value)} placeholder="12000.00" />
+            <input disabled={form.billingBasis !== 'player_funded' || form.paymentModel !== 'players_all'} type="number" step="0.01" value={form.value} onChange={e=>set('value',e.target.value)} className={inputCls(errors.value)} placeholder="12000.00" />
           </Field>
           <Field label="Currency">
             <select value={form.currency} onChange={e=>set('currency',e.target.value)} className={inputCls(false)}>
@@ -916,7 +1043,7 @@ function ContractForm({ navigate, editContractId }) {
             </select>
           </Field>
         </div>
-        <p className="text-xs text-slate-400 -mt-3 mb-4">Value is computed automatically from the services above.</p>
+        <p className="text-xs text-slate-400 -mt-3 mb-4">{form.billingBasis === 'player_funded' ? (form.paymentModel === 'players_all' ? 'Players pay directly — enter the Client-payable value (if any) manually.' : 'Value is the net player-funded figure (gross − kickback) from the Commercial Model above.') : 'Value is computed automatically from the services above.'}</p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Field label="Start Date">
             <input type="date" value={form.startDate} onChange={e=>set('startDate',e.target.value)} className={inputCls(false)} />
@@ -937,8 +1064,9 @@ function ContractForm({ navigate, editContractId }) {
             </select>
           </Field>
         </div>
+        </CollapsibleSection>
 
-        <div className="font-heading text-sm mb-2">Payment Schedule</div>
+        <CollapsibleSection title="Payment Schedule" open={openSections.schedule} onToggle={()=>toggleSection('schedule')} summary={PAYMENT_TYPES.find(t=>t.value===form.paymentType)?.label || ''}>
         {form.paymentType === 'one_time' && (
           <Field label="Payment Date" required error={errors.oneTimeDate}>
             <input type="date" value={oneTimeDate} onChange={e=>setOneTimeDate(e.target.value)} className={inputCls(errors.oneTimeDate)} />
@@ -975,7 +1103,9 @@ function ContractForm({ navigate, editContractId }) {
             <p className="text-xs text-slate-500 mt-2">Total: {fmtMoney(milestoneTotal, form.currency)} of {fmtMoney(form.value, form.currency)}</p>
           </div>
         )}
+        </CollapsibleSection>
 
+        <CollapsibleSection title="Description & Special Terms" open={openSections.text} onToggle={()=>toggleSection('text')} summary={form.specialTerms ? 'Has special terms' : 'Auto-generated description'}>
         <Field label="Description">
           <textarea value={form.description} onChange={e=>set('description',e.target.value)} rows={18} className={inputCls(false) + ' font-data text-xs'} placeholder="Scope of work, deliverables, terms…" />
         </Field>
@@ -983,8 +1113,9 @@ function ContractForm({ navigate, editContractId }) {
         <Field label="Special Terms / Additional Agreements (optional)">
           <textarea value={form.specialTerms} onChange={e=>set('specialTerms',e.target.value)} rows={4} className={inputCls(false)} placeholder="Any one-off terms specific to this club — e.g. a complimentary extra, an early-renewal discount, a custom condition. Appears as its own clause in the signed contract." />
         </Field>
+        </CollapsibleSection>
 
-        <div className="flex justify-end gap-3 pt-2">
+        <div className="flex justify-end gap-3 pt-4">
           <button onClick={()=>navigate('contracts:all')} className="px-4 py-2 text-sm rounded-lg border border-[var(--border)] hover:bg-slate-50">Cancel</button>
           <button disabled={busy} onClick={()=>submit(true)} className="px-4 py-2 text-sm rounded-lg bg-[var(--blue-primary)] text-white hover:bg-blue-700 transition disabled:opacity-50">{busy ? 'Saving…' : (isEdit ? 'Save Changes' : 'Save as Draft')}</button>
         </div>
@@ -1424,6 +1555,8 @@ function ContractDocumentBody({ contract, client, company }) {
           const analysisScope = analysisScopeText(contract, seasonLabelFromDates(contract.startDate, contract.endDate));
           const analysisNum = analysisScope.teams ? n++ : null;
           const feesNum = n++;
+          const commercial = commercialModelText(contract, (a) => fmtMoney(a, contract.currency));
+          const commercialNum = commercial.intro ? n++ : null;
           const confidentialityNum = n++;
           const ipNum = n++;
           const durationNum = n++;
@@ -1529,6 +1662,14 @@ function ContractDocumentBody({ contract, client, company }) {
                   {company.bankIBAN && <div>IBAN: <strong>{company.bankIBAN}</strong></div>}
                   {company.bankSWIFT && <div>SWIFT/BIC: <strong>{company.bankSWIFT}</strong></div>}
                 </div>
+              )}
+
+              {commercialNum && (
+                <React.Fragment>
+                  <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{commercialNum}.</span> Commercial Terms & Club Commission</div>
+                  <p className="text-sm text-slate-700 mb-2"><span className="font-semibold" style={{ color:'var(--navy-deep)' }}>{commercial.intro}.</span> {commercial.breakdown}</p>
+                  {commercial.commission && <p className="text-sm text-slate-700 mb-8">{commercial.commission}</p>}
+                </React.Fragment>
               )}
 
               <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{confidentialityNum}.</span> Confidentiality & Data Protection</div>
@@ -2621,6 +2762,12 @@ function normalizeSnapshot(snapshot) {
     oppMatchFootage: pick(c, 'oppMatchFootage', 'opp_match_footage') || false,
     oppTeamAnalysis: pick(c, 'oppTeamAnalysis', 'opp_team_analysis') || false,
     oppPlayerAnalysis: pick(c, 'oppPlayerAnalysis', 'opp_player_analysis') || false,
+    billingBasis: pick(c, 'billingBasis', 'billing_basis') || 'services',
+    paymentModel: pick(c, 'paymentModel', 'payment_model') || null,
+    playerCount: pick(c, 'playerCount', 'player_count'),
+    playerMonthlyFee: pick(c, 'playerMonthlyFee', 'player_monthly_fee'),
+    playerMonths: pick(c, 'playerMonths', 'player_months'),
+    kickbackPct: pick(c, 'kickbackPct', 'kickback_pct'),
     documentHashBefore: pick(c, 'documentHashBefore', 'document_hash_before'),
     createdAt: pick(c, 'createdAt', 'created_at'),
     sentAt: pick(c, 'sentAt', 'sent_at'),

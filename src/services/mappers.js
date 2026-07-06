@@ -171,6 +171,13 @@ export function contractFromRow(row, payments = [], events = []) {
     oppMatchFootage: row.opp_match_footage ?? false,
     oppTeamAnalysis: row.opp_team_analysis ?? false,
     oppPlayerAnalysis: row.opp_player_analysis ?? false,
+    // ---- Commercial Model: billing basis, payment model, kickback inputs.
+    billingBasis: row.billing_basis ?? 'services',
+    paymentModel: row.payment_model ?? null,
+    playerCount: row.player_count ?? null,
+    playerMonthlyFee: row.player_monthly_fee ?? null,
+    playerMonths: row.player_months ?? null,
+    kickbackPct: row.kickback_pct ?? null,
     createdBy: row.created_by ?? null,
     createdAt: row.created_at ?? null,
     sentAt: sentEvent?.server_timestamp ?? null,
@@ -239,6 +246,12 @@ export function contractToRow(obj) {
   if ('oppMatchFootage' in obj) row.opp_match_footage = obj.oppMatchFootage;
   if ('oppTeamAnalysis' in obj) row.opp_team_analysis = obj.oppTeamAnalysis;
   if ('oppPlayerAnalysis' in obj) row.opp_player_analysis = obj.oppPlayerAnalysis;
+  if ('billingBasis' in obj) row.billing_basis = obj.billingBasis || 'services';
+  if ('paymentModel' in obj) row.payment_model = obj.paymentModel || null;
+  if ('playerCount' in obj) row.player_count = obj.playerCount === '' ? null : obj.playerCount;
+  if ('playerMonthlyFee' in obj) row.player_monthly_fee = obj.playerMonthlyFee === '' ? null : obj.playerMonthlyFee;
+  if ('playerMonths' in obj) row.player_months = obj.playerMonths === '' ? null : obj.playerMonths;
+  if ('kickbackPct' in obj) row.kickback_pct = obj.kickbackPct === '' ? null : obj.kickbackPct;
   if ('createdBy' in obj) row.created_by = obj.createdBy;
   return row;
 }
