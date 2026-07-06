@@ -716,7 +716,14 @@ function ContractForm({ navigate, editContractId }) {
   // deal (value = services total). Shared / Player-funded involve player fees
   // (billingBasis 'player_funded'), which the value + clause logic then use.
   const setPaymentModel = (model) => {
-    setForm(f => ({ ...f, paymentModel: model, billingBasis: model === 'club_all' ? 'services' : 'player_funded' }));
+    setForm(f => {
+      const billingBasis = model === 'club_all' ? 'services' : 'player_funded';
+      // Player-funded value is entered manually — clear any value carried over
+      // from a previous model so a stale figure can't slip through. Club-funded
+      // and Shared re-derive their value automatically via the sync effect.
+      const value = model === 'players_all' ? '' : f.value;
+      return { ...f, paymentModel: model, billingBasis, value };
+    });
   };
 
   const setClient = (clientId) => {
@@ -732,7 +739,10 @@ function ContractForm({ navigate, editContractId }) {
       const next = { ...s, [key]: { ...s[key], ...patch } };
       setForm(f => ({
         ...f,
-        value: String(computeServiceLineItems(next).reduce((sum,i)=>sum+i.amount,0)),
+        // Services drive the value only for a services-based deal; for a
+        // player-funded deal the value comes from the calculator (Shared) or is
+        // entered manually (Player-funded), so never overwrite it here.
+        value: f.billingBasis === 'player_funded' ? f.value : String(computeServiceLineItems(next).reduce((sum,i)=>sum+i.amount,0)),
         description: generateDescriptionFromServices(next, f.slaHours),
         title: titleEdited ? f.title : generateTitle(f.clientId, next),
       }));

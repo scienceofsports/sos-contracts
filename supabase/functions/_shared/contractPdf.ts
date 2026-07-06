@@ -140,12 +140,14 @@ function analysisScopeText(c: Any, seasonLabel: string): { teams: string; covera
   const teamsArr = Array.isArray(c?.analysisTeams) ? c.analysisTeams : (Array.isArray(c?.analysis_teams) ? c.analysis_teams : []);
   const teams = teamsArr.length ? teamsArr.join(', ') : '';
   const coverage = `Analysis covers League competition matches${seasonLabel ? ` for the ${seasonLabel} football season` : ''}.`;
+  // Only surface access that IS granted — never print "not included" lines.
   const opp: Array<[string, boolean]> = [
     ['Opponent match footage', !!(c?.oppMatchFootage ?? c?.opp_match_footage)],
     ['Opponent team analysis', !!(c?.oppTeamAnalysis ?? c?.opp_team_analysis)],
     ['Opponent player analysis', !!(c?.oppPlayerAnalysis ?? c?.opp_player_analysis)],
   ];
-  const opponent = opp.map(([label, on]) => `${label} — ${on ? 'included' : 'not included'}`).join(' · ') + '.';
+  const granted = opp.filter(([, on]) => on).map(([label]) => label);
+  const opponent = granted.length ? granted.join(' · ') + '.' : '';
   return { teams, coverage, opponent };
 }
 
