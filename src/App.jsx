@@ -3698,15 +3698,26 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
         signatureImageBase64 = uploadedSigDataUrl;
       } else if (useTyped) {
         // Render the typed name onto an offscreen canvas in a cursive-ish font.
+        // Auto-shrink the font so ANY length of name fits fully within the canvas
+        // (and therefore within the certificate's signature box) — a long name
+        // must never be clipped. Text is centred.
         const tmp = document.createElement('canvas');
         tmp.width = 460; tmp.height = 140;
         const tctx = tmp.getContext('2d');
         tctx.fillStyle = '#ffffff';
         tctx.fillRect(0, 0, tmp.width, tmp.height);
         tctx.fillStyle = '#0f172a';
-        tctx.font = '40px "Segoe Script", "Brush Script MT", cursive';
+        const name = typedSig.trim();
+        const maxTextW = tmp.width - 40;   // 20px padding each side
+        let fontSize = 40;
+        do {
+          tctx.font = `${fontSize}px "Segoe Script", "Brush Script MT", cursive`;
+          if (tctx.measureText(name).width <= maxTextW) break;
+          fontSize -= 2;
+        } while (fontSize > 14);
         tctx.textBaseline = 'middle';
-        tctx.fillText(typedSig.trim(), 20, tmp.height / 2);
+        tctx.textAlign = 'center';
+        tctx.fillText(name, tmp.width / 2, tmp.height / 2);
         signatureImageBase64 = tmp.toDataURL('image/png');
       } else if (canvasRef.current) {
         signatureImageBase64 = canvasRef.current.toDataURL('image/png');

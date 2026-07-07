@@ -1032,6 +1032,14 @@ export async function buildContractPdf(input: {
     // Signature area: reserve a tall band; draw a LARGE image (scaleToFit
     // ~180x64) sitting just above the signature line, else the italic name.
     const sigLineY = yy + 64;           // downward position of the signature line
+    // Draw the fallback NAME at a font size that fits the column width, so a
+    // long typed name is never clipped or run past the column edge.
+    const drawFittedName = (str: string) => {
+      const maxW = colW - 4;
+      let size = 20;
+      while (size > 9 && italic.widthOfTextAtSize(str, size) > maxW) size -= 1;
+      page.drawText(str, { x: x + 2, y: py(sigLineY - 6), size, font: italic, color: BLACK });
+    };
     if (col.sig) {
       try {
         // Larger signature: fit into a bigger box so it reads bold and prominent.
@@ -1039,10 +1047,10 @@ export async function buildContractPdf(input: {
         // Image bottom sits ~5pt above the ruled line; grows upward.
         page.drawImage(col.sig, { x: x + 2, y: py(sigLineY - 5), width: scaled.width, height: scaled.height });
       } catch (_) {
-        if (col.sigFallback) page.drawText(col.sigFallback, { x: x + 2, y: py(sigLineY - 6), size: 20, font: italic, color: BLACK });
+        if (col.sigFallback) drawFittedName(col.sigFallback);
       }
     } else if (col.sigFallback) {
-      page.drawText(col.sigFallback, { x: x + 2, y: py(sigLineY - 6), size: 20, font: italic, color: BLACK });
+      drawFittedName(col.sigFallback);
     }
     // Signature line + label.
     page.drawLine({ start: { x, y: py(sigLineY) }, end: { x: x + colW, y: py(sigLineY) }, thickness: 0.75, color: rgb(0.588, 0.627, 0.667) });
