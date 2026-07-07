@@ -346,8 +346,15 @@ function Dashboard({ navigate }) {
   const allPayments = contracts.flatMap(c => c.payments.map(p => ({ ...p, contractTitle: c.title, contractNumber: c.contractNumber, clientId: c.clientId })));
   const collectedYTD = allPayments.filter(p => p.status === 'paid' && new Date(p.paidAt).getFullYear() === now.getFullYear()).reduce((s,p) => s + Number(p.paidAmount||0), 0);
   // Overdue is COMPUTED live from due dates (a pending payment past due = overdue).
-  const outstanding = allPayments.filter(p => { const st = effectiveStatus(p); return st === 'pending' || st === 'overdue' || st === 'disputed'; }).reduce((s,p) => s + Number(p.totalAmount||0), 0);
+  const openPayments = allPayments.filter(p => { const st = effectiveStatus(p); return st === 'pending' || st === 'overdue' || st === 'disputed'; });
+  // FULL outstanding = every unpaid scheduled payment, incl. future instalments of
+  // multi-year deals. This is the contracted receivable, NOT money owed today.
+  const outstanding = openPayments.reduce((s,p) => s + Number(p.totalAmount||0), 0);
   const overdue = allPayments.filter(p => effectiveStatus(p) === 'overdue').reduce((s,p) => s + Number(p.totalAmount||0), 0);
+  // DUE NOW = the board-relevant figure: money already overdue + due within 30
+  // days. Excludes far-future scheduled instalments so the headline isn't
+  // dominated by a 3-year deal's whole payment plan.
+  const dueNow = openPayments.filter(p => daysBetween(now, p.dueDate) <= 30).reduce((s,p) => s + Number(p.totalAmount||0), 0);
   // Aged overdue buckets (the board/collections view of the money that's late).
   const overduePays = allPayments.filter(p => effectiveStatus(p) === 'overdue');
   const overdueBuckets = { d30: 0, d60: 0, d90: 0 };
@@ -441,9 +448,15 @@ function Dashboard({ navigate }) {
           accent="#10B981"
         />
         <HeroCard
-          label={overdue > 0 ? 'Outstanding · incl. overdue' : 'Outstanding'}
-          value={fmtMoney(outstanding,'EUR')}
-          sub={overdue > 0 ? `${fmtMoney(overdue,'EUR')} overdue — needs chasing` : 'all current — nothing overdue'}
+          label={overdue > 0 ? 'Due now · incl. overdue' : 'Due now (30 days)'}
+          value={fmtMoney(dueNow,'EUR')}
+          sub={
+            overdue > 0
+              ? `${fmtMoney(overdue,'EUR')} overdue — needs chasing`
+              : (outstanding > dueNow
+                  ? `${fmtMoney(outstanding,'EUR')} contracted total (future instalments)`
+                  : 'all current — nothing overdue')
+          }
           accent={overdue > 0 ? '#EF4444' : '#F59E0B'}
           onClick={()=>navigate('payments:receivables')}
         />
