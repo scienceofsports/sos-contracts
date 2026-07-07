@@ -256,42 +256,67 @@ function MetricCard({ label, value, sub, color }) {
   );
 }
 
-function ReminderBanners({ contracts, clients }) {
+// Board-level alerts. Genuinely urgent items (money that's actually overdue)
+// each get their own banner — those are red flags worth seeing. Routine
+// upcoming items (due this week, renewals coming up) are NOT shown one-per-row;
+// they collapse into a single quiet summary line so the dashboard stays clean.
+function ReminderBanners({ contracts, clients, navigate }) {
   if (!contracts) return null;
   const clientMap = Object.fromEntries((clients||[]).map(c => [c.id, c]));
-  const banners = [];
   const now = new Date();
+
+  const overdueBanners = [];   // late money — shown individually
+  let dueSoonCount = 0, dueSoonAmount = 0;   // routine, collapsed into a summary
+  let renewalCount = 0;
 
   contracts.forEach(c => {
     c.payments.forEach(p => {
       if (p.status === 'pending' || p.status === 'overdue') {
         const days = daysBetween(now, p.dueDate);
-        if (days < 0 && Math.abs(days) >= 30) banners.push({ type:'formal', text:`${p.description} for ${clientMap[c.clientId]?.companyName || 'client'} is ${Math.abs(days)} days overdue — formal notice required.` });
-        else if (days < 0 && Math.abs(days) >= 14) banners.push({ type:'urgent', text:`${p.description} is ${Math.abs(days)} days overdue — urgent reminder due.` });
-        else if (days < 0) banners.push({ type:'warn', text:`${p.description} is overdue by ${Math.abs(days)} day(s).` });
-        else if (days === 0) banners.push({ type:'info', text:`${p.description} is due today.` });
-        else if (days <= 7) banners.push({ type:'info', text:`${p.description} due in ${days} day(s) — friendly reminder window.` });
+        const amt = Number(p.totalAmount || 0);
+        const who = clientMap[c.clientId]?.companyName || 'client';
+        if (days < 0 && Math.abs(days) >= 30) overdueBanners.push({ type:'formal', text:`${who}: ${fmtMoney(amt,'EUR')} is ${Math.abs(days)} days overdue — formal notice required.` });
+        else if (days < 0 && Math.abs(days) >= 14) overdueBanners.push({ type:'urgent', text:`${who}: ${fmtMoney(amt,'EUR')} is ${Math.abs(days)} days overdue — urgent reminder due.` });
+        else if (days < 0) overdueBanners.push({ type:'warn', text:`${who}: ${fmtMoney(amt,'EUR')} overdue by ${Math.abs(days)} day(s).` });
+        else if (days <= 7) { dueSoonCount++; dueSoonAmount += amt; }   // due today/this week → summarised
       }
     });
     if (c.status === 'active' && c.endDate) {
       const days = daysBetween(now, c.endDate);
-      if (days >= 0 && days <= 60) banners.push({ type:'renewal', text:`${c.title} expires in ${days} days — renewal discussion recommended.` });
+      if (days >= 0 && days <= 60) renewalCount++;
     }
   });
 
-  if (!banners.length) return null;
+  const hasSummary = dueSoonCount > 0 || renewalCount > 0;
+  if (!overdueBanners.length && !hasSummary) return null;
+
   const styles = {
     formal: 'bg-red-50 border-red-200 text-red-700',
     urgent: 'bg-red-50 border-red-200 text-red-700',
     warn: 'bg-amber-50 border-amber-200 text-amber-700',
-    info: 'bg-blue-50 border-blue-200 text-blue-700',
-    renewal: 'bg-purple-50 border-purple-200 text-purple-700',
   };
+  const summaryBits = [];
+  if (dueSoonCount) summaryBits.push(`${dueSoonCount} payment${dueSoonCount===1?'':'s'} (${fmtMoney(dueSoonAmount,'EUR')}) due this week`);
+  if (renewalCount) summaryBits.push(`${renewalCount} renewal${renewalCount===1?'':'s'} due within 60 days`);
+
   return (
     <div className="space-y-2 mb-6">
-      {banners.slice(0,5).map((b, i) => (
+      {/* Overdue money — the real flags, shown individually (cap to keep it tidy) */}
+      {overdueBanners.slice(0,4).map((b, i) => (
         <div key={i} className={`border rounded-lg px-4 py-2.5 text-sm ${styles[b.type]}`}>{b.text}</div>
       ))}
+      {overdueBanners.length > 4 && (
+        <button onClick={()=>navigate && navigate('payments:receivables')} className="w-full text-left border rounded-lg px-4 py-2.5 text-sm bg-red-50 border-red-200 text-red-700 hover:bg-red-100 transition">
+          + {overdueBanners.length - 4} more overdue — view all →
+        </button>
+      )}
+      {/* Routine upcoming items — one quiet, informative summary line */}
+      {hasSummary && (
+        <button onClick={()=>navigate && navigate('payments:receivables')} className="w-full text-left border rounded-lg px-4 py-2.5 text-sm bg-slate-50 border-[var(--border)] text-slate-600 hover:bg-slate-100 transition flex items-center justify-between">
+          <span>📅 {summaryBits.join(' · ')}</span>
+          <span className="text-xs text-slate-400">view →</span>
+        </button>
+      )}
     </div>
   );
 }
@@ -392,7 +417,7 @@ function Dashboard({ navigate }) {
         <button onClick={exportBoardCSV} className="px-4 py-2 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">Board Export</button>
       </div>
 
-      <ReminderBanners contracts={contracts} clients={clients} />
+      <ReminderBanners contracts={contracts} clients={clients} navigate={navigate} />
 
       {/* HERO ROW — the at-a-glance summary. The four numbers that matter most,
           large, each with a context line. Everything else lives below. */}
