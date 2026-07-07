@@ -340,8 +340,10 @@ function slaSummaryLine(contract) {
   const bands = Array.isArray(contract?.slaBands)
     ? contract.slaBands.filter(b => b && Array.isArray(b.teams) && b.teams.length && Number(b.hours)) : [];
   if (!bands.length) {
-    const h = Number(contract?.slaHours) || 24;
-    return `${h}-hour SLA on key analytical outputs after each match`;
+    // No per-team analysis in this deal -> there is no match-analysis SLA to
+    // report. Returning null (rather than a phantom 24h line) keeps platform-
+    // only contracts truthful; summarizeAgreement filters nulls out.
+    return null;
   }
   const distinct = [...new Set(bands.map(b => Number(b.hours)))];
   if (distinct.length === 1) {
@@ -375,11 +377,16 @@ export function summarizeAgreement(contract, slaHoursLegacy) {
     if (i.included) line += ' (included)';
     return line;
   });
-  out.push(slaSummaryLine(slaCtx));
+  const sla = slaSummaryLine(slaCtx);
+  if (sla) out.push(sla);
   return out;
 }
 
-export function generateDescriptionFromServices(services, slaHours) {
+// `slaCtx` may be a number (legacy: a single slaHours) or a contract-shaped
+// object with per-team `slaBands` (and optional `slaHours` fallback). The SLA
+// sentence now reflects the ACTUAL chosen SLA/bands, and is omitted entirely
+// when the deal has no per-team analysis (no phantom "24-hour SLA").
+export function generateDescriptionFromServices(services, slaCtx) {
   const items = computeServiceLineItems(services);
   if (!items.length) return '';
   const groups = SERVICE_GROUPS;
@@ -399,6 +406,8 @@ export function generateDescriptionFromServices(services, slaHours) {
     });
     lines.push('');
   });
-  lines.push(`${slaHours || 24}-hour SLA on delivery of key analytical outputs after each match.`);
+  const ctx = (slaCtx && typeof slaCtx === 'object') ? slaCtx : { slaHours: slaCtx };
+  const sla = slaSummaryLine(ctx);
+  if (sla) lines.push(sla.replace(/ SLA on key analytical/, ' SLA on delivery of key analytical') + '.');
   return lines.join('\n');
 }

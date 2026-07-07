@@ -696,6 +696,9 @@ function ContractForm({ navigate, editContractId }) {
   };
   const [oneTimeDate, setOneTimeDate] = useState('');
   const [firstDueDate, setFirstDueDate] = useState('');
+  // Once the end date is user-set (typed, or loaded from an existing contract),
+  // changing the start date stops auto-rolling the season end.
+  const endDateTouched = useRef(false);
   const [errors, setErrors] = useState({});
   const [busy, setBusy] = useState(false);
 
@@ -750,6 +753,11 @@ function ContractForm({ navigate, editContractId }) {
           setOneTimeDate(existing.payments[0].dueDate.slice(0,10));
         } else if (existing.paymentType === 'milestone') {
           setInstallments(existing.payments.map(p => ({ date: p.dueDate.slice(0,10), amount: String(p.amount) })));
+          // A saved schedule is a real, deliberate schedule — treat it as
+          // user-set so re-opening the contract doesn't wipe it. If the user
+          // then changes the value, the "must add up" validation nudges them.
+          amountsTouched.current = true;
+          datesTouched.current = true;
         } else {
           setFirstDueDate(existing.payments[0].dueDate.slice(0,10));
         }
@@ -768,6 +776,9 @@ function ContractForm({ navigate, editContractId }) {
         if (SERVICE_CATALOG.some(s => s.group === g && svc[s.key]?.selected)) groupsWithSel[g] = true;
       });
       setOpenGroups({ 'Core Services': true, ...groupsWithSel });
+      // A loaded contract's end date is deliberate — don't let a later start-date
+      // tweak silently re-roll it.
+      if (existing.endDate) endDateTouched.current = true;
       setLoadingExisting(false);
     })();
   }, [isEdit, editContractId]);
@@ -794,15 +805,21 @@ function ContractForm({ navigate, editContractId }) {
   };
 
   const addInstallmentRow = () => {
-    milestonesTouched.current = true;
+    // Adding/removing a row changes the structure -> stop auto-generating both.
+    amountsTouched.current = true;
+    datesTouched.current = true;
     setInstallments(rows => [...rows, { date: '', amount: '' }]);
   };
   const updateInstallmentRow = (i, patch) => {
-    milestonesTouched.current = true;
+    // Only lock what the user actually edited: typing an amount stops the
+    // value-driven re-split; typing a date stops the start-date-driven dates.
+    if ('amount' in patch) amountsTouched.current = true;
+    if ('date' in patch) datesTouched.current = true;
     setInstallments(rows => rows.map((r, idx) => idx === i ? { ...r, ...patch } : r));
   };
   const removeInstallmentRow = (i) => {
-    milestonesTouched.current = true;
+    amountsTouched.current = true;
+    datesTouched.current = true;
     setInstallments(rows => rows.filter((_, idx) => idx !== i));
   };
   const milestoneTotal = installments.reduce((s,r) => s + (Number(r.amount) || 0), 0);
@@ -825,17 +842,33 @@ function ContractForm({ navigate, editContractId }) {
       { date: ymd(d3), amount: String(i3) },
     ];
   };
-  // Whether the user has manually edited the milestone rows yet. Until they do,
-  // we keep the rows in sync with the start date + value for NEW contracts, so
-  // the standard schedule pre-fills without the user typing anything.
-  const milestonesTouched = useRef(false);
+  // Whether the user has manually edited the milestone AMOUNTS / DATES yet.
+  // Tracked separately so the two auto-behaviours are independent: the amounts
+  // keep re-splitting to match the contract value until you type an amount, and
+  // the dates keep re-flowing from the start date until you pick a date. This is
+  // what makes "edit the value -> installments update automatically" work even
+  // after the schedule was first pre-filled.
+  const amountsTouched = useRef(false);
+  const datesTouched = useRef(false);
   useEffect(() => {
-    if (isEdit) return;                                   // never auto-fill an edit
     if (form.paymentType !== 'milestone') return;
-    if (milestonesTouched.current) return;                // respect manual edits
+    // If the user has hand-edited BOTH amounts and dates, leave the rows alone.
+    // (On an edit, a saved schedule marks both touched — so it's preserved; but
+    // an untouched auto schedule still re-splits when the value changes.)
+    if (amountsTouched.current && datesTouched.current) return;
     if (!form.startDate || !(Number(form.value) > 0)) return;
-    setInstallments(buildDefaultMilestones(form.startDate, form.value));
-  }, [isEdit, form.paymentType, form.startDate, form.value]);
+    const gen = buildDefaultMilestones(form.startDate, form.value);
+    setInstallments(rows => {
+      // First fill (no rows yet): take the whole generated schedule.
+      if (!rows.length) return gen;
+      // Otherwise re-flow only the parts the user hasn't locked, keeping the
+      // row count the user has (fall back to generated length on first fill).
+      return gen.map((g, i) => ({
+        date: datesTouched.current ? (rows[i]?.date ?? g.date) : g.date,
+        amount: amountsTouched.current ? (rows[i]?.amount ?? g.amount) : g.amount,
+      }));
+    });
+  }, [form.paymentType, form.startDate, form.value]);
 
   const generateTitle = (clientId, services) => {
     const clientName = clients?.find(c => c.id === clientId)?.companyName;
@@ -851,6 +884,19 @@ function ContractForm({ navigate, editContractId }) {
 
   const set = (k,v) => {
     if (k === 'title') setTitleEdited(true);
+    // Editing the end date locks it — from then on changing the start date no
+    // longer re-rolls the season end (respects the "auto until you touch it" rule).
+    if (k === 'endDate') endDateTouched.current = true;
+    if (k === 'startDate') {
+      setForm(f => {
+        const next = { ...f, startDate: v };
+        // Re-roll the season end date from the new start, unless the user has
+        // set the end date themselves.
+        if (!endDateTouched.current && v) next.endDate = seasonEndYmd(v);
+        return next;
+      });
+      return;
+    }
     setForm(f => ({ ...f, [k]: v }));
   };
 
@@ -892,7 +938,7 @@ function ContractForm({ navigate, editContractId }) {
         // player-funded deal the value comes from the calculator (Shared) or is
         // entered manually (Player-funded), so never overwrite it here.
         value: f.billingBasis === 'player_funded' ? f.value : String(computeServiceLineItems(next).reduce((sum,i)=>sum+i.amount,0)),
-        description: generateDescriptionFromServices(next, f.slaHours),
+        description: generateDescriptionFromServices(next, docSlaCtx(f)),
         title: titleEdited ? f.title : generateTitle(f.clientId, next),
         packageEdited: (f.packageKey && (changesPackagePrice || changesPackageServices)) ? true : f.packageEdited,
       }));
@@ -903,20 +949,30 @@ function ContractForm({ navigate, editContractId }) {
   // Per-team SLA. `analysisTeams` = covered teams; `teamSla` maps team -> hours.
   // Ticking a team adds it at 72h by default; unticking removes it + its SLA.
   const DEFAULT_TEAM_SLA = 72;
+  // The SLA context passed to the description/summary generators: derived LIVE
+  // from the current teams + per-team SLA (with the single slaHours as a legacy
+  // fallback). Centralizing this is what keeps `description` truthful whenever
+  // teams / SLAs change — not just when a service is toggled.
+  const docSlaCtx = (f) => ({ slaBands: buildSlaBands(f.analysisTeams, f.teamSla), slaHours: f.slaHours });
+  // Recompute every field derived from teams/SLA (currently `description`) from
+  // an already-updated form object. Any team/SLA mutation funnels through here.
+  const withDoc = (f) => ({ ...f, description: generateDescriptionFromServices(services, docSlaCtx(f)) });
   const toggleTeam = (team) => setForm(f => {
     const on = (f.analysisTeams || []).includes(team);
     const teams = on ? (f.analysisTeams || []).filter(t => t !== team) : [...(f.analysisTeams || []), team];
     const teamSla = { ...(f.teamSla || {}) };
     if (on) delete teamSla[team]; else teamSla[team] = teamSla[team] || DEFAULT_TEAM_SLA;
-    return { ...f, analysisTeams: teams, teamSla, packageEdited: f.packageKey ? true : f.packageEdited };
+    return withDoc({ ...f, analysisTeams: teams, teamSla, packageEdited: f.packageKey ? true : f.packageEdited });
   });
-  const setTeamSla = (team, hours) => setForm(f => ({ ...f, teamSla: { ...(f.teamSla || {}), [team]: hours }, packageEdited: f.packageKey ? true : f.packageEdited }));
+  const setTeamSla = (team, hours) => setForm(f => withDoc({ ...f, teamSla: { ...(f.teamSla || {}), [team]: hours }, packageEdited: f.packageKey ? true : f.packageEdited }));
   // Apply an A/B/C package: set teams + per-team SLA, and the price (via the
   // platform-access flat rate, so it flows into the value). Fully editable after.
   const applyPackage = (pkg) => {
     const teams = Object.keys(pkg.teamSla);
-    setServices(s => ({ ...s, platform_access: { ...s.platform_access, selected: true, included: false, rate: pkg.price } }));
-    setForm(f => ({ ...f, analysisTeams: teams, teamSla: { ...pkg.teamSla }, packageKey: pkg.key, packageEdited: false }));
+    const nextServices = { ...services, platform_access: { ...services.platform_access, selected: true, included: false, rate: pkg.price } };
+    setServices(nextServices);
+    setForm(f => ({ ...f, analysisTeams: teams, teamSla: { ...pkg.teamSla }, packageKey: pkg.key, packageEdited: false,
+      description: generateDescriptionFromServices(nextServices, { slaBands: buildSlaBands(teams, pkg.teamSla), slaHours: f.slaHours }) }));
   };
   // Build the slaBands storage [{teams,hours}] from the per-team map, grouping
   // teams that share the same SLA (drives serviceLevelsLines identically).
@@ -990,8 +1046,15 @@ function ContractForm({ navigate, editContractId }) {
       // Serialize the structured special terms (drop empty rows) to JSON, or ''.
       const cleanTerms = specialTermsList.filter(t => t.text && t.text.trim());
       const specialTerms = cleanTerms.length ? JSON.stringify(cleanTerms) : '';
-      // Derive the stored SLA bands from the per-team SLA map.
+      // Derive the stored SLA bands from the per-team SLA map, and keep the
+      // legacy single slaHours + the description in sync with them at save time
+      // (final guard so a saved contract can never carry a stale 24h or an
+      // out-of-date services description, whatever edit path was used).
       const slaBands = buildSlaBands(form.analysisTeams, form.teamSla);
+      const slaHours = slaBands.length
+        ? Math.min(...slaBands.map(b => Number(b.hours)))
+        : (Number(form.slaHours) || 0);
+      const description = generateDescriptionFromServices(services, { slaBands, slaHours });
       const schedule = form.paymentType === 'one_time'
         ? [{ date: oneTimeDate, amount: Number(form.value) }]
         : form.paymentType === 'milestone'
@@ -1004,6 +1067,8 @@ function ContractForm({ navigate, editContractId }) {
           ...form,
           specialTerms,
           slaBands,
+          slaHours,
+          description,
           value: Number(form.value),
           startDate: form.startDate ? new Date(form.startDate).toISOString() : '',
           endDate: form.endDate ? new Date(form.endDate).toISOString() : '',
@@ -1024,6 +1089,8 @@ function ContractForm({ navigate, editContractId }) {
           ...form,
           specialTerms,
           slaBands,
+          slaHours,
+          description,
           value: Number(form.value),
           status: 'draft',
           startDate: form.startDate ? new Date(form.startDate).toISOString() : '',
