@@ -1273,6 +1273,9 @@ function ContractDetail({ contractId, navigate }) {
   const [showMarkPaidPayment, setShowMarkPaidPayment] = useState(null);
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [certificate, setCertificate] = useState(null);
+  // Inline invoice-ref editing: { id, value } while a row is being edited.
+  const [editingRef, setEditingRef] = useState(null);
+  const [savingRef, setSavingRef] = useState(false);
 
   const load = useCallback(async () => {
     const c = await contractService.getById(contractId);
@@ -1288,6 +1291,28 @@ function ContractDetail({ contractId, navigate }) {
   }, [contractId]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Save an edited invoice reference (accountingRef) on a payment, and log it.
+  const saveInvoiceRef = async (payment) => {
+    const next = (editingRef?.value || '').trim() || null;
+    const prev = payment.accountingRef || null;
+    if (next === prev) { setEditingRef(null); return; }
+    setSavingRef(true);
+    try {
+      await paymentService.update(payment.id, { accountingRef: next });
+      await contractService.addAuditEntry(contract.id, {
+        type: 'payment',
+        message: `Invoice reference for "${payment.description}" ${prev ? `changed from ${prev} to ${next || '—'}` : `set to ${next}`}`,
+        by: auth.user?.id ?? null,
+      });
+      setEditingRef(null);
+      await load();
+    } catch (err) {
+      toast.push(err.message || 'Could not update the invoice reference.', 'error');
+    } finally {
+      setSavingRef(false);
+    }
+  };
 
   if (!contract) return <div className="p-6"><Skeleton className="h-96 w-full" /></div>;
 
@@ -1455,7 +1480,22 @@ function ContractDetail({ contractId, navigate }) {
               <tbody>
                 {contract.payments.map(p => (
                   <tr key={p.id} className="border-b border-[var(--border)] last:border-0">
-                    <td className="py-2.5 pr-4 font-data text-xs">{p.accountingRef || '—'}</td>
+                    <td className="py-2.5 pr-4 font-data text-xs">
+                      {editingRef?.id === p.id ? (
+                        <span className="inline-flex items-center gap-1">
+                          <input autoFocus value={editingRef.value} onChange={e=>setEditingRef({ id:p.id, value:e.target.value })}
+                            onKeyDown={e=>{ if(e.key==='Enter') saveInvoiceRef(p); if(e.key==='Escape') setEditingRef(null); }}
+                            className="w-28 px-2 py-1 text-xs border border-[var(--border)] rounded" placeholder="Invoice #" />
+                          <button disabled={savingRef} onClick={()=>saveInvoiceRef(p)} className="text-emerald-600 hover:underline">Save</button>
+                          <button onClick={()=>setEditingRef(null)} className="text-slate-400 hover:underline">Cancel</button>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5">
+                          {p.accountingRef || <span className="text-slate-400">—</span>}
+                          {auth.isAdmin && <button onClick={()=>setEditingRef({ id:p.id, value:p.accountingRef||'' })} className="no-print text-blue-600 hover:underline text-[11px]">{p.accountingRef ? 'Edit' : 'Add'}</button>}
+                        </span>
+                      )}
+                    </td>
                     <td className="py-2.5 pr-4">{p.description}</td>
                     <td className="py-2.5 pr-4">{fmtDate(p.dueDate)}</td>
                     <td className="py-2.5 pr-4 font-data">{fmtMoney(p.totalAmount, p.currency)}</td>

@@ -127,6 +127,22 @@ export const clientService = {
 };
 
 /* ============================== CONTRACTS ============================== */
+// Normalize a contract_events (operational) row into the signature_events shape
+// that contractFromRow's auditLog mapper consumes, so both ledgers merge into
+// one chronological audit stream.
+function normalizeCommercialEvent(e) {
+  return {
+    id: e.id,
+    contract_id: e.contract_id,
+    event_type: e.event_type,
+    message: e.message,
+    server_timestamp: e.created_at,
+    created_at: e.created_at,
+    actor_id: e.actor_id,
+    actor_type: e.actor_type || 'admin',
+  };
+}
+
 export const contractService = {
   getAll: async () => {
     // Fetch all contracts, then all payments, then group payments by
@@ -146,15 +162,22 @@ export const contractService = {
     });
 
     // Events too, grouped by contract, so list/dashboard reflect real signings.
+    // Two ledgers: signature_events (tamper-evident signing) + contract_events
+    // (operational). Both are normalized into one stream for the audit log.
     const eventRows = unwrap(
       await supabase.from('signature_events').select('*').order('server_timestamp', { ascending: true })
     );
+    const commercialRows = unwrap(
+      await supabase.from('contract_events').select('*').order('created_at', { ascending: true })
+    );
     const eventsByContract = new Map();
-    (eventRows || []).forEach((e) => {
+    const pushEvent = (e) => {
       if (!e.contract_id) return;
       if (!eventsByContract.has(e.contract_id)) eventsByContract.set(e.contract_id, []);
       eventsByContract.get(e.contract_id).push(e);
-    });
+    };
+    (eventRows || []).forEach(pushEvent);
+    (commercialRows || []).map(normalizeCommercialEvent).forEach(pushEvent);
 
     return contractRows.map((row) =>
       contractFromRow(row, byContract.get(row.id) || [], eventsByContract.get(row.id) || [])
@@ -173,7 +196,8 @@ export const contractService = {
         .eq('contract_id', id)
         .order('due_date', { ascending: true })
     );
-    // Pull the tamper-evident event ledger so signer details + audit trail show.
+    // Pull the tamper-evident event ledger so signer details + audit trail show,
+    // plus the operational contract_events, merged into one audit stream.
     const eventRows = unwrap(
       await supabase
         .from('signature_events')
@@ -181,7 +205,15 @@ export const contractService = {
         .eq('contract_id', id)
         .order('server_timestamp', { ascending: true })
     );
-    return contractFromRow(rows[0], paymentRows || [], eventRows || []);
+    const commercialRows = unwrap(
+      await supabase
+        .from('contract_events')
+        .select('*')
+        .eq('contract_id', id)
+        .order('created_at', { ascending: true })
+    );
+    const merged = [...(eventRows || []), ...(commercialRows || []).map(normalizeCommercialEvent)];
+    return contractFromRow(rows[0], paymentRows || [], merged);
   },
 
   // The Certificate of Completion for a signed contract (most recent), with a
@@ -261,13 +293,19 @@ export const contractService = {
   },
 
   addAuditEntry: async (id, entry) => {
-    // Stage 2 NO-OP: the real, tamper-evident audit trail lives in
-    // signature_events, which has strict RLS/columns and an append-only trigger.
-    // Writing there safely is Stage 4 work. For now we do not write anything and
-    // simply return the (re-fetched) contract so the UI does not break.
-    // eslint-disable-next-line no-unused-vars
-    const _entry = entry;
-    // TODO Stage 4: write this audit entry into signature_events (append-only).
+    // Commercial/operational events (payment paid, invoice ref set, client detail
+    // corrected, status change) go to contract_events — SEPARATE from the
+    // tamper-evident signature_events signing ledger. Best-effort: a logging
+    // failure must never break the underlying action the user just took.
+    try {
+      await supabase.from('contract_events').insert({
+        contract_id: id,
+        event_type: entry?.type ?? 'note',
+        message: entry?.message ?? '',
+        actor_id: entry?.by ?? null,
+        metadata: entry?.metadata ?? {},
+      });
+    } catch (_) { /* non-fatal: the action succeeded regardless */ }
     return contractService.getById(id);
   },
 
@@ -365,6 +403,16 @@ export const paymentService = {
       await supabase.from('payments').insert(rows).select()
     );
     return (inserted || []).map(paymentFromRow);
+  },
+
+  // Patch arbitrary editable fields on a payment (e.g. accountingRef). Maps
+  // camelCase app fields to columns; unknown fields are dropped by paymentToRow.
+  update: async (paymentId, patch) => {
+    const row = paymentToRow(patch || {});
+    const updated = unwrap(
+      await supabase.from('payments').update(row).eq('id', paymentId).select().single()
+    );
+    return paymentFromRow(updated);
   },
 
   markPaid: async (contractId, paymentId, paidAmount, userId, paidAt) => {
