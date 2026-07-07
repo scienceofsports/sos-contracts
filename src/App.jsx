@@ -3132,23 +3132,26 @@ function DeclinePanel({ reason, setReason, onCancel, onConfirm, busy }) {
   );
 }
 
-// Compact "Why Science of Sports" trust panel — a few credibility chips to
+// Compact "Why Science of Sports" trust panel — a few credibility points to
 // reassure a nervous signer. Approved credentials only (no sales language).
+// A calm vertical list reads more easily than a cramped row of pills.
 function TrustPanel() {
-  const badges = [
+  const points = [
     ['🏆', 'Official CFA Partner'],
     ['⚽', '3,000+ players profiled'],
-    ['📊', '1,000+ matches analysed / year'],
-    ['🇨🇾', '#1 in Cyprus'],
+    ['📊', '1,000+ matches analysed every year'],
   ];
   return (
     <div className="rounded-lg mb-6 px-4 py-3" style={{ background:'rgba(10,26,63,0.04)', border:'1px solid var(--border)' }}>
       <div className="text-xs font-semibold mb-2" style={{ color:'var(--navy-deep)' }}>Why Science of Sports</div>
-      <div className="flex flex-wrap gap-2">
-        {badges.map(([icon, label]) => (
-          <span key={label} className="sos-chip sos-chip-cyan">{icon} {label}</span>
+      <ul className="space-y-1.5">
+        {points.map(([icon, label]) => (
+          <li key={label} className="flex items-center gap-2 text-sm text-slate-600">
+            <span className="shrink-0">{icon}</span>
+            <span>{label}</span>
+          </li>
         ))}
-      </div>
+      </ul>
     </div>
   );
 }
