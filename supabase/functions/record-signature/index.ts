@@ -16,6 +16,31 @@ import { appendEvent } from '../_shared/audit.ts';
 import { buildCertificate } from '../_shared/certificate.ts';
 import { buildContractPdf } from '../_shared/contractPdf.ts';
 
+// Resolve the best staff email to alert: company contact, else the admin who
+// created the contract. Returns null if neither is available.
+async function resolveStaffEmail(admin: any, contractId: string): Promise<string | null> {
+  try {
+    const { data: company } = await admin.from('company').select('contact_email').limit(1).maybeSingle();
+    if (company?.contact_email) return company.contact_email;
+    const { data: contract } = await admin.from('contracts').select('created_by').eq('id', contractId).maybeSingle();
+    if (contract?.created_by) {
+      const { data: adminUser } = await admin.from('app_users').select('email').eq('id', contract.created_by).maybeSingle();
+      return adminUser?.email ?? null;
+    }
+  } catch (_) { /* fall through */ }
+  return null;
+}
+
+// Best-effort append to the operational (non-evidence) contract_events log.
+async function appendContractEventSafe(admin: any, contractId: string, message: string): Promise<void> {
+  await admin.from('contract_events').insert({
+    contract_id: contractId,
+    event_type: 'system',
+    actor_type: 'system',
+    message,
+  });
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return handleOptions();
   try {
@@ -55,6 +80,14 @@ Deno.serve(async (req) => {
     if (request.status === 'signed') {
       throw new Error('This contract has already been signed.');
     }
+    // A decline (or a cancelled/expired request) is TERMINAL for this token: the
+    // party said no or the link lapsed. Never let the same link silently flip a
+    // 'declined' contract back to 'active'. A resend must mint a NEW token.
+    // (In-progress states are 'sent' -> 'otp_sent' -> 'otp_verified'; those are
+    // fine — only these terminal states block signing.)
+    if (['declined', 'cancelled', 'expired'].includes(request.status)) {
+      throw new Error('This contract can no longer be signed. Please contact the sender for a new link.');
+    }
     if (!request.otp_verified_at) {
       throw new Error('Please verify your email code before signing.');
     }
@@ -69,10 +102,26 @@ Deno.serve(async (req) => {
       throw new Error('Signer name and signature are required.');
     }
 
-    // 4. Integrity check: re-hash the frozen snapshot and compare to Send-time
-    //    hash. We record both hashes but do NOT block signing on a mismatch —
-    //    the mismatch itself becomes part of the evidence record.
-    const document_hash_after = await hashDocument(request.document_snapshot);
+    // 4. Build the snapshot that will ACTUALLY be rendered into the executed
+    //    document, applying the client's confirmed company details FIRST, then
+    //    hash THAT. This guarantees document_hash_after covers exactly what the
+    //    signer signs (party identity fields the signer confirmed on-screen).
+    //    The frozen request.document_snapshot is left immutable — we render and
+    //    hash from a working copy `snap` and never overwrite the original.
+    const snap = structuredClone(request.document_snapshot || {});
+    if (clientDetails && snap.client) {
+      if (clientDetails.companyName) { snap.client.company_name = clientDetails.companyName; snap.client.companyName = clientDetails.companyName; }
+      if (clientDetails.address) { snap.client.address = clientDetails.address; }
+      if (clientDetails.vatNumber) { snap.client.vat_number = clientDetails.vatNumber; snap.client.vatNumber = clientDetails.vatNumber; }
+      if (clientDetails.registrationNumber) { snap.client.registration_number = clientDetails.registrationNumber; snap.client.registrationNumber = clientDetails.registrationNumber; }
+    }
+
+    // Integrity check: hash the to-be-executed document and compare to the
+    // Send-time hash. We record both hashes but do NOT block signing on a
+    // mismatch — the mismatch itself becomes part of the evidence record. (A
+    // mismatch is expected & benign when the signer fills previously-blank party
+    // details; it is flagged on the certificate + a staff alert either way.)
+    const document_hash_after = await hashDocument(snap);
     const integrityOk = document_hash_after === request.document_hash_before;
 
     // 5. Decode the base64 PNG and upload to private Storage.
@@ -92,7 +141,25 @@ Deno.serve(async (req) => {
     const user_agent = req.headers.get('user-agent');
     const signedAt = new Date().toISOString();
 
-    // 7. Append the tamper-evident 'signed' event with the full evidence bundle.
+    // 7. ATOMICALLY CLAIM the signing before recording anything immutable.
+    //    claim_signing_request flips 'sent' -> 'signed' under a row lock and
+    //    returns true ONLY for the single caller that wins. If two record-
+    //    signature calls race (double-submit) or one retries after a partial
+    //    failure, exactly one claim succeeds — so the append-only 'signed' event
+    //    below can never be written twice. (A DB partial-unique index on
+    //    signature_events(contract_id) WHERE event_type='signed' is the final
+    //    backstop — see migration 0016.)
+    const { data: claimed, error: claimErr } = await admin
+      .rpc('claim_signing_request', { p_request_id: request.id });
+    if (claimErr) throw new Error(`Could not claim signing request: ${claimErr.message}`);
+    if (claimed !== true) {
+      // Someone else already signed (or the request is no longer signable).
+      // Idempotent response: do NOT append a second signature.
+      throw new Error('This contract has already been signed.');
+    }
+
+    // 8. Append the tamper-evident 'signed' event with the full evidence bundle.
+    //    We are past the atomic claim, so this runs at most once per contract.
     await appendEvent(admin, {
       contract_id: request.contract_id,
       signing_request_id: request.id,
@@ -112,16 +179,8 @@ Deno.serve(async (req) => {
       consent_read: !!consents.read,
     });
 
-    // 8. Advance statuses: request -> signed, contract -> active (signing
-    //    activates the contract, matching prior behaviour).
-    const { error: reqUpdateErr } = await admin
-      .from('signing_requests')
-      .update({ status: 'signed' })
-      .eq('id', request.id);
-    if (reqUpdateErr) throw new Error(reqUpdateErr.message);
-
-    // Persist the client-provided contact people alongside activation. Only set
-    // fields that were actually provided; leave the rest null.
+    // Advance the contract to 'active' (signing activates it) and persist the
+    // client-provided contact people. Only set fields that were provided.
     const nz = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
     const { error: contractUpdateErr } = await admin
       .from('contracts')
@@ -137,29 +196,42 @@ Deno.serve(async (req) => {
       .eq('id', request.contract_id);
     if (contractUpdateErr) throw new Error(contractUpdateErr.message);
 
-    // 9. Generate the Certificate of Completion PDF, store it, and email it to
-    //    BOTH the signer (confirmation) and staff (notification). Wrapped so a
-    //    certificate/email hiccup never fails the signing itself.
-    const snap = request.document_snapshot || {};
-    // Apply the client's confirmed company details (address/VAT/reg/name) onto
-    // the snapshot's client block so the executed document reflects what the
-    // signer confirmed at signing (fixes a lingering "[address]" placeholder).
-    if (clientDetails && snap.client) {
-      if (clientDetails.companyName) { snap.client.company_name = clientDetails.companyName; snap.client.companyName = clientDetails.companyName; }
-      if (clientDetails.address) { snap.client.address = clientDetails.address; }
-      if (clientDetails.vatNumber) { snap.client.vat_number = clientDetails.vatNumber; snap.client.vatNumber = clientDetails.vatNumber; }
-      if (clientDetails.registrationNumber) { snap.client.registration_number = clientDetails.registrationNumber; snap.client.registrationNumber = clientDetails.registrationNumber; }
-      // Persist the confirmed details back onto the client record + the request
-      // snapshot so the admin view and re-downloads stay consistent.
+    // 9. Persist the client's confirmed company details onto the CLIENT RECORD
+    //    (so the admin view + future contracts benefit). The confirmed values
+    //    are already applied to `snap` (before the hash) and are covered by
+    //    document_hash_after, so no separate snapshot rewrite is needed — the
+    //    frozen request.document_snapshot stays immutable as the send-time
+    //    anchor. Record a note in the operational log for traceability.
+    if (clientDetails && snap.client?.id) {
       try {
         await admin.from('clients').update({
           address: clientDetails.address ?? undefined,
           vat_number: clientDetails.vatNumber ?? undefined,
           registration_number: clientDetails.registrationNumber ?? undefined,
         }).eq('id', snap.client.id);
-        await admin.from('signing_requests').update({ document_snapshot: snap }).eq('id', request.id);
-      } catch (_) { /* non-fatal */ }
+      } catch (_) { /* non-fatal — the executed PDF already carries the values */ }
     }
+
+    // 10. Generate the Certificate of Completion PDF, store it, and email it to
+    //     BOTH the signer (confirmation) and staff (notification). Wrapped so a
+    //     certificate/email hiccup never fails the signing itself.
+    // Refresh the header logos from the LIVE client + company rows before we
+    // render the executed PDF. The frozen snapshot may pre-date the logo being
+    // uploaded (or hold a WEBP that pdf-lib cannot embed). logo_url is a cosmetic
+    // field EXCLUDED from serializeDocument, so refreshing it changes no hash;
+    // we mutate only the in-memory working copy `snap`, never the frozen row.
+    try {
+      const clientId = snap?.client?.id;
+      if (clientId) {
+        const { data: liveClient } = await admin
+          .from('clients').select('logo_url').eq('id', clientId).maybeSingle();
+        if (liveClient?.logo_url && snap.client) snap.client.logo_url = liveClient.logo_url;
+      }
+      const { data: liveCompany } = await admin
+        .from('company').select('logo_url').limit(1).maybeSingle();
+      if (liveCompany?.logo_url && snap.company) snap.company.logo_url = liveCompany.logo_url;
+    } catch (_) { /* non-fatal — fall back to whatever the snapshot holds */ }
+
     const contractTitle = snap?.contract?.title ?? 'Contract';
     const contractNumber = snap?.contract?.contractNumber ?? snap?.contract?.contract_number ?? '';
     try {
@@ -271,9 +343,50 @@ Deno.serve(async (req) => {
       }
     } catch (certErr) {
       console.error('certificate generation failed:', certErr);
+      // EVIDENCE-CRITICAL failure: the signature is recorded but the Certificate
+      // of Completion / signed-contract PDF was NOT durably produced. Never let
+      // this pass silently — flag the contract for staff follow-up and alert.
+      try {
+        await admin.from('contracts')
+          .update({ certificate_status: 'failed' })
+          .eq('id', request.contract_id);
+      } catch (_) { /* flag is best-effort; the alert below is the real signal */ }
+      try {
+        await appendContractEventSafe(admin, request.contract_id,
+          `Certificate of Completion generation FAILED after signing — evidence PDF missing, needs regeneration. ${(certErr as Error).message}`);
+      } catch (_) { /* non-fatal */ }
+      try {
+        const alertTo = await resolveStaffEmail(admin, request.contract_id);
+        if (alertTo) {
+          await sendEmail({
+            to: alertTo,
+            subject: `⚠ ACTION NEEDED — certificate failed for signed contract ${contractNumber || contractTitle}`,
+            html: `<p>The contract <strong>${contractTitle}</strong> was signed successfully, but generating its Certificate of Completion / signed PDF failed.</p>
+                   <p>The signature evidence is safely recorded in the ledger, but the certificate PDF must be regenerated. Please review this contract in the admin app.</p>
+                   <p style="color:#666">Error: ${(certErr as Error).message}</p>`,
+          });
+        }
+      } catch (_) { /* alerting is best-effort */ }
     }
 
-    // 10. Done.
+    // If the document hash changed between send and sign, surface it to staff so
+    // a genuine anomaly is never silently activated (a benign mismatch happens
+    // when the signer filled previously-blank party details — staff can confirm).
+    if (!integrityOk) {
+      try {
+        const alertTo = await resolveStaffEmail(admin, request.contract_id);
+        if (alertTo) {
+          await sendEmail({
+            to: alertTo,
+            subject: `⚠ Integrity note — document hash changed on signing: ${contractNumber || contractTitle}`,
+            html: `<p>The contract <strong>${contractTitle}</strong> was signed, but its document hash differs from the send-time hash.</p>
+                   <p>This is expected & harmless when the signer confirmed previously-blank details (address / VAT / registration). If those were already set, review the contract.</p>`,
+          });
+        }
+      } catch (_) { /* best-effort */ }
+    }
+
+    // 11. Done.
     return json({ ok: true, integrityOk, signedAt });
   } catch (e) {
     return json({ error: (e as Error).message }, 400);

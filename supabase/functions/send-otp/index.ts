@@ -34,13 +34,25 @@ Deno.serve(async (req) => {
     if (request.status === 'signed') {
       throw new Error('This contract has already been signed.');
     }
+    // Terminal states can't receive new codes — a declined/cancelled/expired
+    // request is dead; staff must issue a fresh link.
+    if (['declined', 'cancelled', 'expired'].includes(request.status)) {
+      throw new Error('This signing link is no longer active. Please contact the sender for a new one.');
+    }
 
-    // 2. Rate-limit: one code per 30 seconds.
+    // 2a. Rate-limit: one code per 30 seconds (anti-spam floor).
     if (request.otp_sent_at) {
       const secsSince = (Date.now() - new Date(request.otp_sent_at).getTime()) / 1000;
       if (secsSince < 30) {
         throw new Error('Please wait before requesting another code.');
       }
+    }
+    // 2b. Absolute resend cap per request: a leaked/forwarded link can't be used
+    //     to email-bomb the signer or burn Resend quota. After this many sends
+    //     the signer must ask staff for a fresh link.
+    const MAX_OTP_SENDS = 6;
+    if ((request.otp_send_count ?? 0) >= MAX_OTP_SENDS) {
+      throw new Error('Too many verification codes have been requested for this link. Please contact the sender for a new one.');
     }
 
     // 3. Generate a 6-digit numeric code and hash it (store only the hash).
@@ -56,6 +68,7 @@ Deno.serve(async (req) => {
         otp_code_hash,
         otp_sent_at: new Date().toISOString(),
         otp_attempts: 0,
+        otp_send_count: (request.otp_send_count ?? 0) + 1,
         status: 'otp_sent',
       })
       .eq('id', request.id);

@@ -31,6 +31,12 @@ Deno.serve(async (req) => {
     if (new Date(request.expires_at) < new Date()) {
       throw new Error('This signing link has expired.');
     }
+    if (request.status === 'signed') {
+      throw new Error('This contract has already been signed.');
+    }
+    if (['declined', 'cancelled', 'expired'].includes(request.status)) {
+      throw new Error('This signing link is no longer active. Please contact the sender for a new one.');
+    }
 
     // 2. Absolute (cross-request) lockout — bounds brute-force even if the
     //    signer keeps re-requesting fresh codes. Requires a new link from staff.

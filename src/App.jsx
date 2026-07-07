@@ -655,6 +655,20 @@ function ContractForm({ navigate, editContractId }) {
   const addSpecialTerm = () => setSpecialTermsList(l => [...l, { relatesTo: 'General', text: '' }]);
   const updateSpecialTerm = (i, patch) => setSpecialTermsList(l => l.map((t, idx) => idx === i ? { ...t, ...patch } : t));
   const removeSpecialTerm = (i) => setSpecialTermsList(l => l.filter((_, idx) => idx !== i));
+  // Guard against a copy-paste leak: a special term that names a DIFFERENT
+  // client (e.g. an "AEL" clause pasted into a Pafos contract). Returns the
+  // offending name, or '' if the term is clean. Matches whole words only.
+  const otherClientNameInTerm = (text) => {
+    if (!text) return '';
+    const selfName = (clients.find(c => c.id === form.clientId)?.companyName || '').trim().toLowerCase();
+    const hay = text.toLowerCase();
+    for (const c of clients) {
+      const nm = (c.companyName || '').trim();
+      if (!nm || nm.toLowerCase() === selfName) continue;
+      if (new RegExp(`\\b${nm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(hay)) return nm;
+    }
+    return '';
+  };
   const [oneTimeDate, setOneTimeDate] = useState('');
   const [firstDueDate, setFirstDueDate] = useState('');
   const [errors, setErrors] = useState({});
@@ -902,6 +916,16 @@ function ContractForm({ navigate, editContractId }) {
 
   const submit = async (asDraft) => {
     if (!validate()) return;
+    // Copy-paste leak guard: if any special term names a different client,
+    // make the user confirm before saving (prevents an "AEL" clause reaching
+    // a Pafos contract).
+    const leak = specialTermsList
+      .map(t => otherClientNameInTerm(t.text))
+      .find(Boolean);
+    if (leak) {
+      const self = clients.find(c => c.id === form.clientId)?.companyName || 'this client';
+      if (!window.confirm(`A special term names "${leak}", which is a different client — but this contract is for ${self}.\n\nSave anyway?`)) return;
+    }
     setBusy(true);
     try {
       const client = clients.find(c => c.id === form.clientId);
@@ -1283,6 +1307,12 @@ function ContractForm({ navigate, editContractId }) {
                   <button type="button" onClick={()=>removeSpecialTerm(i)} className="text-slate-400 hover:text-red-500 px-2 shrink-0" title="Remove term">✕</button>
                 </div>
                 <textarea value={term.text} onChange={e=>updateSpecialTerm(i, { text: e.target.value })} rows={2} className={inputCls(false)} placeholder="e.g. The club commission shall be settled quarterly rather than per season." />
+                {otherClientNameInTerm(term.text) && (
+                  <p className="mt-1.5 text-xs text-amber-600 flex items-start gap-1">
+                    <span aria-hidden>⚠</span>
+                    <span>This term names <strong>{otherClientNameInTerm(term.text)}</strong> — a different client. Did you mean {clients.find(c=>c.id===form.clientId)?.companyName || 'this client'}?</span>
+                  </p>
+                )}
               </div>
             ))}
           </div>
@@ -1366,6 +1396,15 @@ function ContractDetail({ contractId, navigate }) {
     // and emails the client a real ?req= signing link. The portable ?sign= link
     // (rendered below once status is 'sent') remains as a secondary fallback.
     setShowSendModal(false);
+    // Guard: the VAT lines + bank box on the document are driven by the client's
+    // country (CY → 19% VAT). If the client has no country, the frozen snapshot
+    // captures a VAT-less review copy that then diverges from the signed copy
+    // once the details are confirmed at signing. Block the send so the review
+    // and signed documents are always identical.
+    if (!client?.country) {
+      toast.push('Set the client’s country before sending — it decides VAT (Cyprus = 19%). Edit the client, add the country, then send.', 'error');
+      return;
+    }
     try {
       const origin = window.location.origin;
       const res = await signingService.createSigningRequest(contract.id, origin);
@@ -1378,6 +1417,10 @@ function ContractDetail({ contractId, navigate }) {
   };
 
   const resendContract = async () => {
+    if (!client?.country) {
+      toast.push('Set the client’s country before sending — it decides VAT (Cyprus = 19%).', 'error');
+      return;
+    }
     try {
       const res = await signingService.createSigningRequest(contract.id, window.location.origin);
       if (res?.signUrl) { setSignLink(res.signUrl); setSentLinkModal({ url: res.signUrl }); }

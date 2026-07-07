@@ -10,6 +10,9 @@
 //    the signature_events ledger is tamper-evident.
 // ============================================================================
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Any = any;
+
 export async function sha256Hex(text: string): Promise<string> {
   const data = new TextEncoder().encode(text);
   const buf = await crypto.subtle.digest('SHA-256', data);
@@ -45,6 +48,29 @@ export function serializeDocument(snapshot: {
   const cl = snapshot.client || {};
   const co = snapshot.company || {};
 
+  // Normalize the payment schedule into a byte-stable shape: one canonical line
+  // per instalment (amount / VAT / total / due date / description), numbers
+  // coerced to a fixed representation, sorted by due date then amount so row
+  // order can never change the hash. The schedule is a MATERIAL commercial term
+  // (it is rendered into the signed contract), so it MUST be inside the digest.
+  const numOrNull = (v: unknown) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+  const rawPayments = Array.isArray((c as Any).payments) ? (c as Any).payments : [];
+  const payments = rawPayments
+    .map((p: Any) => ({
+      amount: numOrNull(p.amount ?? p.total_amount),
+      vatAmount: numOrNull(p.vatAmount ?? p.vat_amount) ?? 0,
+      vatRate: numOrNull(p.vatRate ?? p.vat_rate) ?? 0,
+      totalAmount: numOrNull(p.totalAmount ?? p.total_amount),
+      dueDate: p.dueDate ?? p.due_date ?? null,
+      description: p.description ?? null,
+    }))
+    .sort((a: Any, b: Any) =>
+      String(a.dueDate).localeCompare(String(b.dueDate)) ||
+      (a.amount ?? 0) - (b.amount ?? 0));
+
   const canonical = {
     contract: {
       title: c.title ?? null,
@@ -61,6 +87,7 @@ export function serializeDocument(snapshot: {
       description: c.description ?? null,
       specialTerms: c.specialTerms ?? c.special_terms ?? null,
       services: c.services ?? null,
+      payments,
     },
     client: {
       companyName: cl.companyName ?? cl.company_name ?? null,

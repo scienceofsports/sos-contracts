@@ -34,13 +34,37 @@ Deno.serve(async (req) => {
     if (request.status === 'signed') {
       throw new Error('This contract has already been signed.');
     }
+    if (request.status === 'declined') {
+      // Idempotent: already declined — don't re-flip or re-spam the admin.
+      return json({ ok: true, alreadyDeclined: true });
+    }
+    // In-progress states are 'sent' -> 'otp_sent' -> 'otp_verified'; any of these
+    // is declinable. Terminal states (cancelled/expired) are not.
+    const IN_PROGRESS = ['sent', 'otp_sent', 'otp_verified'];
+    if (!IN_PROGRESS.includes(request.status)) {
+      throw new Error('This contract is not in a state that can be declined.');
+    }
+    // Identity gate: declining is a legally meaningful act (the party says no /
+    // asks for changes), so it must be as identity-bound as signing. Require the
+    // same email-OTP verification — a forwarded/leaked link cannot kill the deal.
+    if (!request.otp_verified_at) {
+      throw new Error('Please verify your email code before declining.');
+    }
 
-    // 2. Flip the request and the contract to 'declined'.
-    const { error: reqUpdateErr } = await admin
+    // 2. Atomically claim the decline: flip ONLY if the request is still in an
+    //    in-progress state. Guards against a decline racing a sign and against
+    //    double-decline (a concurrent winner leaves 0 rows for the loser).
+    const { data: claimedRows, error: reqUpdateErr } = await admin
       .from('signing_requests')
       .update({ status: 'declined' })
-      .eq('id', request.id);
+      .eq('id', request.id)
+      .in('status', IN_PROGRESS)
+      .select('id');
     if (reqUpdateErr) throw new Error(reqUpdateErr.message);
+    if (!claimedRows || claimedRows.length === 0) {
+      // Lost the race (signed/declined in a concurrent request).
+      throw new Error('This contract can no longer be declined.');
+    }
 
     const { error: contractUpdateErr } = await admin
       .from('contracts')
