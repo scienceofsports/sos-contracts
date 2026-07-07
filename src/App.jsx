@@ -638,7 +638,7 @@ function CommercialBreakdown({ form, servicesTotal = 0 }) {
     <div className="mt-3 pt-3 border-t border-[var(--border)] text-xs text-slate-600 space-y-1">
       {cv.servicesTotal > 0 && <div className="flex justify-between"><span>Services (from selection above)</span><span className="font-data">{fmtMoney(cv.servicesTotal, cur)}</span></div>}
       {cv.clubFee > 0 && <div className="flex justify-between"><span>Club fixed fee (per season)</span><span className="font-data">{fmtMoney(cv.clubFee, cur)}</span></div>}
-      {cv.fee > 0 && <div className="flex justify-between text-slate-500"><span>Player fee (billed on actual enrolment)</span><span className="font-data">{fmtMoney(cv.fee, cur)} / player / mo</span></div>}
+      {cv.fee > 0 && <div className="flex justify-between text-slate-500"><span>Player fee (billed on actual enrolment)</span><span className="font-data">{fmtMoney(cv.fee, cur)} / player / mo{cv.months > 0 ? ` × ${cv.months} mo` : ''}</span></div>}
       {cv.pct > 0 && <div className="flex justify-between text-slate-500"><span>Club commission on player fees</span><span className="font-data">{cv.pct}%</span></div>}
       <div className="flex justify-between font-semibold text-[var(--navy-deep)] pt-1 border-t border-[var(--border)]">
         <span>Contract value{cv.fee > 0 ? ' (guaranteed)' : ''}</span>
@@ -1334,6 +1334,7 @@ function ContractForm({ navigate, editContractId }) {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <Field label={`Club fixed fee / season (${CURRENCY_SYMBOL[form.currency]})`}><input type="number" min="0" step="0.01" value={form.clubFixedFee} onChange={e=>set('clubFixedFee', e.target.value)} className={inputCls(false)} placeholder="5000" /></Field>
               <Field label={`Player fee / month (${CURRENCY_SYMBOL[form.currency]})`}><input type="number" min="0" step="0.01" value={form.playerMonthlyFee} onChange={e=>set('playerMonthlyFee', e.target.value)} className={inputCls(false)} placeholder="15" /></Field>
+              <Field label="Months (billing period)"><input type="number" min="0" value={form.playerMonths} onChange={e=>set('playerMonths', e.target.value)} className={inputCls(false)} placeholder="10" /></Field>
               <Field label="Minimum players (optional)"><input type="number" min="0" value={form.minPlayers} onChange={e=>set('minPlayers', e.target.value)} className={inputCls(false)} placeholder="optional" /></Field>
               <Field label="Club commission %"><input type="number" min="0" max="100" step="0.1" value={form.kickbackPct} onChange={e=>set('kickbackPct', e.target.value)} className={inputCls(false)} placeholder="25" /></Field>
             </div>
@@ -1345,6 +1346,7 @@ function ContractForm({ navigate, editContractId }) {
             <p className="text-xs text-slate-500 mb-3">Players pay the Service Provider directly at a per-player monthly rate. There is <strong>no fixed up-front value</strong> — fees are billed on actual enrolment and reconciled per season, with a commission paid to the Client.</p>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <Field label={`Player fee / month (${CURRENCY_SYMBOL[form.currency]})`}><input type="number" min="0" step="0.01" value={form.playerMonthlyFee} onChange={e=>set('playerMonthlyFee', e.target.value)} className={inputCls(false)} placeholder="15" /></Field>
+              <Field label="Months (billing period)"><input type="number" min="0" value={form.playerMonths} onChange={e=>set('playerMonths', e.target.value)} className={inputCls(false)} placeholder="10" /></Field>
               <Field label="Minimum players (optional)"><input type="number" min="0" value={form.minPlayers} onChange={e=>set('minPlayers', e.target.value)} className={inputCls(false)} placeholder="optional" /></Field>
               <Field label="Club commission %"><input type="number" min="0" max="100" step="0.1" value={form.kickbackPct} onChange={e=>set('kickbackPct', e.target.value)} className={inputCls(false)} placeholder="25" /></Field>
             </div>

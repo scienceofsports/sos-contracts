@@ -68,6 +68,7 @@ export const SERVICE_UNIT_LABELS = {
 export const SERVICE_GROUPS = ['Core Services', 'Recording Services', 'Analysis Services', 'Reporting Services', 'Coaching Support'];
 
 export function computeServiceLineItems(services) {
+  if (!services || typeof services !== 'object') return [];
   return SERVICE_CATALOG
     .filter(s => services[s.key] && services[s.key].selected)
     .map(s => {
@@ -240,8 +241,11 @@ export function commercialModelText(contract, fm) {
   const minP = Number(contract.minPlayers) || 0;
   const intro = PAYMENT_MODEL_LABELS[model] || '';
   // Per-player RATE sentence — no guessed headcount, no projected total. Player
-  // fees are billed monthly on actual enrolment and reconciled per season.
-  const rateStr = cv.fee ? `${fm(cv.fee)} per player per month` : 'a monthly fee agreed with the Client';
+  // fees are billed monthly on actual enrolment and reconciled per season. The
+  // optional `months` states the billing PERIOD in the clause; it does not
+  // change the guaranteed value (player fees remain variable on real enrolment).
+  const monthsStr = cv.months ? ` over ${cv.months} months` : '';
+  const rateStr = cv.fee ? `${fm(cv.fee)} per player per month${monthsStr}` : `a monthly fee agreed with the Client${monthsStr}`;
   const minStr = minP ? ` The Client undertakes to enrol a minimum of ${minP} players.` : '';
   const reconStr = ' Player fees are billed monthly on actual enrolment and reconciled per football season; no fixed number of players is guaranteed.';
   // Only assert a commission % when it was actually configured (legacy rows may
