@@ -179,6 +179,8 @@ export function contractFromRow(row, payments = [], events = []) {
     playerMonths: row.player_months ?? null,
     kickbackPct: row.kickback_pct ?? null,
     minPlayers: row.min_players ?? null,
+    expectedPlayers: row.expected_players ?? null,
+    clubFixedFee: row.club_fixed_fee ?? null,
     slaBands: row.sla_bands ?? [],
     slaHours: row.sla_hours ?? 24,
     createdBy: row.created_by ?? null,
@@ -256,6 +258,8 @@ export function contractToRow(obj) {
   if ('playerMonths' in obj) row.player_months = obj.playerMonths === '' ? null : obj.playerMonths;
   if ('kickbackPct' in obj) row.kickback_pct = obj.kickbackPct === '' ? null : obj.kickbackPct;
   if ('minPlayers' in obj) row.min_players = obj.minPlayers === '' ? null : obj.minPlayers;
+  if ('expectedPlayers' in obj) row.expected_players = obj.expectedPlayers === '' ? null : obj.expectedPlayers;
+  if ('clubFixedFee' in obj) row.club_fixed_fee = obj.clubFixedFee === '' ? null : obj.clubFixedFee;
   if ('slaBands' in obj) row.sla_bands = Array.isArray(obj.slaBands) ? obj.slaBands : [];
   if ('slaHours' in obj) row.sla_hours = obj.slaHours === '' || obj.slaHours == null ? 24 : obj.slaHours;
   if ('createdBy' in obj) row.created_by = obj.createdBy;

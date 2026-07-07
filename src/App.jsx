@@ -13,6 +13,7 @@ import {
   analysisScopeText,
   seasonLabelFromDates,
   commercialModelText,
+  commercialValue,
   PAYMENT_MODEL_LABELS,
   SPECIAL_TERM_CLAUSES,
   parseSpecialTerms,
@@ -602,6 +603,27 @@ function CollapsibleSection({ title, summary, open, onToggle, children }) {
   );
 }
 
+// Live breakdown of how the player-funded (Shared / Player-funded) contract
+// value is computed, so the figure is never a mystery: club fee + player gross
+// − club commission = value. Mirrors commercialValue() exactly.
+function CommercialBreakdown({ form }) {
+  const cv = commercialValue(form);
+  const cur = form.currency;
+  const hasInputs = cv.fee && cv.months && cv.players;
+  if (!hasInputs && !cv.clubFee) {
+    return <p className="text-xs text-slate-400 mt-3 pt-3 border-t border-[var(--border)]">Enter the player fee, months and expected players to compute the contract value.</p>;
+  }
+  return (
+    <div className="mt-3 pt-3 border-t border-[var(--border)] text-xs text-slate-600 space-y-1">
+      {cv.clubFee > 0 && <div className="flex justify-between"><span>Club fixed fee</span><span className="font-data">{fmtMoney(cv.clubFee, cur)}</span></div>}
+      <div className="flex justify-between"><span>Player fees ({cv.players} × {fmtMoney(cv.fee, cur)} × {cv.months} mo)</span><span className="font-data">{fmtMoney(cv.playerGross, cur)}</span></div>
+      {cv.pct > 0 && <div className="flex justify-between text-slate-500"><span>Less {cv.pct}% club commission</span><span className="font-data">−{fmtMoney(cv.clubShare, cur)}</span></div>}
+      <div className="flex justify-between font-semibold text-[var(--navy-deep)] pt-1 border-t border-[var(--border)]"><span>Contract value (projected)</span><span className="font-data">{fmtMoney(cv.value, cur)}</span></div>
+      <p className="text-[11px] text-slate-400 pt-1">Projection based on expected enrolment; reconciled against actual player numbers per season.</p>
+    </div>
+  );
+}
+
 function ContractForm({ navigate, editContractId }) {
   const auth = useAuth();
   const toast = useToast();
@@ -614,7 +636,7 @@ function ContractForm({ navigate, editContractId }) {
     startDate:'', endDate:'', paymentType:'one_time', paymentTermsDays:30, latePaymentPenalty:1.5,
     governingLaw:'Republic of Cyprus', jurisdiction:'Nicosia, Cyprus', description:'', slaHours:24, specialTerms:'',
     analysisTeams:[], oppMatchFootage:false, oppTeamAnalysis:false, oppPlayerAnalysis:false,
-    billingBasis:'services', paymentModel:'club_all', playerMonthlyFee:'', playerMonths:'', kickbackPct:'', minPlayers:'', slaBands:[], teamSla:{},
+    billingBasis:'services', paymentModel:'club_all', playerMonthlyFee:'', playerMonths:'', kickbackPct:'', minPlayers:'', expectedPlayers:'', clubFixedFee:'', slaBands:[], teamSla:{},
     packageKey:'', packageEdited:false,
   });
   const [titleEdited, setTitleEdited] = useState(isEdit);
@@ -665,6 +687,8 @@ function ContractForm({ navigate, editContractId }) {
         playerMonths: existing.playerMonths ?? '',
         kickbackPct: existing.kickbackPct ?? '',
         minPlayers: existing.minPlayers ?? '',
+        expectedPlayers: existing.expectedPlayers ?? '',
+        clubFixedFee: existing.clubFixedFee ?? '',
         slaBands: Array.isArray(existing.slaBands) ? existing.slaBands : [],
         // Expand stored slaBands into the per-team SLA map; fall back to the old
         // single slaHours for teams not covered by a band (legacy contracts).
@@ -833,29 +857,37 @@ function ContractForm({ navigate, editContractId }) {
   const lineItems = computeServiceLineItems(services);
   const lineItemsTotal = lineItems.reduce((s,i)=>s+i.amount,0);
 
-  // Commercial Model. Value sources per model:
-  //  - Club-funded (services basis): value = services catalog total (auto).
-  //  - Shared: value = the FIXED amount agreed with the club (manual). Players
-  //    fund the remainder at a monthly fee — stated as terms, never computed
-  //    into the value (player numbers aren't known in advance).
-  //  - Player-funded: players pay SOS directly; value is manual.
+  // Commercial Model. Value sources per model (all AUTO-computed now):
+  //  - Club-funded (services basis): value = services catalog total.
+  //  - Shared: value = club fixed fee + (player fee x months x expected players
+  //    x (1 - kickback%)). The club fee is kept in full; the kickback reduces the
+  //    player revenue only.
+  //  - Player-funded: value = player fee x months x expected players x (1 - kickback%).
+  //  All are projections reconciled against actual enrolment (stated in the clause).
+  const commercialProjection = form.billingBasis === 'player_funded' ? commercialValue(form) : null;
   useEffect(() => {
     if (form.billingBasis === 'services') {
       const total = String(lineItemsTotal);
       setForm(f => (f.value === total ? f : { ...f, value: total }));
+    } else if (commercialProjection) {
+      const v = String(commercialProjection.value);
+      setForm(f => (f.value === v ? f : { ...f, value: v }));
     }
-    // Shared / Player-funded: value is entered manually, not auto-driven.
-  }, [form.billingBasis, lineItemsTotal]);
+  }, [form.billingBasis, lineItemsTotal, commercialProjection?.value]);
 
   const validate = () => {
     const e = {};
     if (!form.title.trim()) e.title = 'Title is required.';
     if (!form.clientId) e.clientId = 'Select a client.';
-    // Player-funded deals may have no Client-payable value (players pay SOS
-    // directly), so allow 0 there; every other model requires a positive value.
-    const allowZeroValue = form.paymentModel === 'players_all';
-    if (allowZeroValue ? (form.value === '' || Number(form.value) < 0) : (!form.value || Number(form.value) <= 0)) e.value = allowZeroValue ? 'Enter a value (0 or more).' : 'Enter a positive value.';
-    if (!/^\d+(\.\d{1,2})?$/.test(String(form.value))) e.value = 'Max 2 decimal places.';
+    // The value is computed for every model now. A non-positive computed value
+    // for a player-funded deal means the projection inputs are missing.
+    if (!form.value || Number(form.value) <= 0) {
+      e.value = form.billingBasis === 'player_funded'
+        ? 'Enter the player fee, months and expected players to compute a value.'
+        : 'Enter a positive value.';
+    } else if (!/^\d+(\.\d{1,2})?$/.test(String(form.value))) {
+      e.value = 'Max 2 decimal places.';
+    }
     if (form.startDate && form.endDate && new Date(form.endDate) <= new Date(form.startDate)) e.endDate = 'End date must be after start date.';
     if (form.paymentType === 'one_time' && !oneTimeDate) e.oneTimeDate = 'Payment date is required.';
     if (RECURRING_MONTHS[form.paymentType] && !firstDueDate) e.firstDueDate = 'First due date is required.';
@@ -1139,31 +1171,36 @@ function ContractForm({ navigate, editContractId }) {
         </div>
         {form.paymentModel === 'club_players' && (
           <div className="rounded-lg border border-[var(--border)] p-4 mb-2 bg-slate-50/60">
-            <p className="text-xs text-slate-500 mb-3">The <strong>fixed amount agreed with the Client</strong> is the contract value (enter it under Contract Details below). The player contribution is stated as a term — it is not added to the value.</p>
+            <p className="text-xs text-slate-500 mb-3">The contract value is computed as the <strong>club fixed fee</strong> plus the projected player contribution (fee × months × expected players), net of the club commission. It reconciles against actual enrolment.</p>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <Field label={`Club fixed fee (${CURRENCY_SYMBOL[form.currency]})`}><input type="number" min="0" step="0.01" value={form.clubFixedFee} onChange={e=>set('clubFixedFee', e.target.value)} className={inputCls(false)} placeholder="5000" /></Field>
               <Field label={`Player fee / month (${CURRENCY_SYMBOL[form.currency]})`}><input type="number" min="0" step="0.01" value={form.playerMonthlyFee} onChange={e=>set('playerMonthlyFee', e.target.value)} className={inputCls(false)} placeholder="15" /></Field>
               <Field label="Months"><input type="number" min="0" value={form.playerMonths} onChange={e=>set('playerMonths', e.target.value)} className={inputCls(false)} placeholder="10" /></Field>
+              <Field label="Expected players"><input type="number" min="0" value={form.expectedPlayers} onChange={e=>set('expectedPlayers', e.target.value)} className={inputCls(false)} placeholder="15" /></Field>
               <Field label="Minimum players"><input type="number" min="0" value={form.minPlayers} onChange={e=>set('minPlayers', e.target.value)} className={inputCls(false)} placeholder="optional" /></Field>
-              <Field label="Club kickback %"><input type="number" min="0" max="100" step="0.1" value={form.kickbackPct} onChange={e=>set('kickbackPct', e.target.value)} className={inputCls(false)} placeholder="optional" /></Field>
+              <Field label="Club commission %"><input type="number" min="0" max="100" step="0.1" value={form.kickbackPct} onChange={e=>set('kickbackPct', e.target.value)} className={inputCls(false)} placeholder="25" /></Field>
             </div>
+            <CommercialBreakdown form={form} />
           </div>
         )}
         {form.paymentModel === 'players_all' && (
           <div className="rounded-lg border border-[var(--border)] p-4 mb-2 bg-slate-50/60">
+            <p className="text-xs text-slate-500 mb-3">Players pay the Service Provider directly. The contract value is the projected player contribution (fee × months × expected players), net of the club commission — reconciled against actual enrolment.</p>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <Field label={`Player fee / month (${CURRENCY_SYMBOL[form.currency]})`}><input type="number" min="0" step="0.01" value={form.playerMonthlyFee} onChange={e=>set('playerMonthlyFee', e.target.value)} className={inputCls(false)} placeholder="15" /></Field>
               <Field label="Months"><input type="number" min="0" value={form.playerMonths} onChange={e=>set('playerMonths', e.target.value)} className={inputCls(false)} placeholder="10" /></Field>
+              <Field label="Expected players"><input type="number" min="0" value={form.expectedPlayers} onChange={e=>set('expectedPlayers', e.target.value)} className={inputCls(false)} placeholder="20" /></Field>
               <Field label="Minimum players"><input type="number" min="0" value={form.minPlayers} onChange={e=>set('minPlayers', e.target.value)} className={inputCls(false)} placeholder="optional" /></Field>
-              <Field label="Club commission %"><input type="number" min="0" max="100" step="0.1" value={form.kickbackPct} onChange={e=>set('kickbackPct', e.target.value)} className={inputCls(false)} placeholder="optional" /></Field>
+              <Field label="Club commission %"><input type="number" min="0" max="100" step="0.1" value={form.kickbackPct} onChange={e=>set('kickbackPct', e.target.value)} className={inputCls(false)} placeholder="25" /></Field>
             </div>
-            <p className="text-xs text-slate-500 mt-3 pt-3 border-t border-[var(--border)]">Players pay the Service Provider directly. The club commission ({form.kickbackPct || 0}% of fees actually collected, settled per season) is stated as a term — it does not drive the contract value or installments.</p>
+            <CommercialBreakdown form={form} />
           </div>
         )}
 
         <div className="font-heading text-sm mt-6 mb-3 pt-5 border-t border-[var(--border)] text-[var(--navy-deep)]">Value & Dates</div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Field label="Value" required error={errors.value}>
-            <input disabled={form.billingBasis !== 'player_funded'} type="number" step="0.01" value={form.value} onChange={e=>set('value',e.target.value)} className={inputCls(errors.value)} placeholder="12000.00" />
+            <input disabled type="number" step="0.01" value={form.value} onChange={e=>set('value',e.target.value)} className={inputCls(errors.value)} placeholder="12000.00" />
           </Field>
           <Field label="Currency">
             <select value={form.currency} onChange={e=>set('currency',e.target.value)} className={inputCls(false)}>
@@ -1171,7 +1208,7 @@ function ContractForm({ navigate, editContractId }) {
             </select>
           </Field>
         </div>
-        <p className="text-xs text-slate-400 -mt-3 mb-4">{form.paymentModel === 'club_players' ? 'Enter the fixed amount agreed with the Client. Players fund the remainder (stated as terms in the Commercial Model — not added here).' : form.paymentModel === 'players_all' ? 'Players pay directly — enter the Client-payable value (if any) manually.' : 'Value is computed automatically from the services above.'}</p>
+        <p className="text-xs text-slate-400 -mt-3 mb-4">{form.paymentModel === 'club_players' ? 'Computed automatically: club fixed fee + projected player revenue, net of the club commission (see breakdown above).' : form.paymentModel === 'players_all' ? 'Computed automatically: projected player revenue, net of the club commission (see breakdown above).' : 'Value is computed automatically from the services above.'}</p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Field label="Start Date">
             <input type="date" value={form.startDate} onChange={e=>set('startDate',e.target.value)} className={inputCls(false)} />
@@ -3208,6 +3245,8 @@ function normalizeSnapshot(snapshot) {
     playerMonths: pick(c, 'playerMonths', 'player_months'),
     kickbackPct: pick(c, 'kickbackPct', 'kickback_pct'),
     minPlayers: pick(c, 'minPlayers', 'min_players'),
+    expectedPlayers: pick(c, 'expectedPlayers', 'expected_players'),
+    clubFixedFee: pick(c, 'clubFixedFee', 'club_fixed_fee'),
     slaBands: pick(c, 'slaBands', 'sla_bands') || [],
     slaHours: pick(c, 'slaHours', 'sla_hours'),
     documentHashBefore: pick(c, 'documentHashBefore', 'document_hash_before'),

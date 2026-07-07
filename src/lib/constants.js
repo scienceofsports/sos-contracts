@@ -176,35 +176,60 @@ export const PAYMENT_MODEL_LABELS = {
   players_all: 'Player-funded — fees are collected directly from players',
 };
 
+// Default club commission / kickback rate on player fees when none is entered.
+export const DEFAULT_KICKBACK_PCT = 25;
+
+// Compute the contract value + its component parts for the player-funded models
+// (Shared / Player-funded), from a projection: player fee x months x expected
+// players, of which the Service Provider keeps (100 - kickback%). The club
+// commission (kickback) is applied to the PLAYER revenue only; the club fixed
+// fee (Shared) is kept in full. Returns all parts so the UI + clause + PDFs show
+// an identical breakdown. NOTE: ported into both PDF generators — keep in sync.
+export function commercialValue(contract) {
+  const model = contract?.paymentModel || null;
+  const fee = Number(contract.playerMonthlyFee) || 0;
+  const months = Number(contract.playerMonths) || 0;
+  const players = Number(contract.expectedPlayers) || 0;
+  const pct = contract.kickbackPct === '' || contract.kickbackPct == null
+    ? DEFAULT_KICKBACK_PCT : Number(contract.kickbackPct) || 0;
+  const clubFee = Number(contract.clubFixedFee) || 0;
+  const playerGross = Math.round(fee * months * players * 100) / 100;
+  const clubShare = Math.round(playerGross * (pct / 100) * 100) / 100; // kickback to club
+  const sosPlayerShare = Math.round((playerGross - clubShare) * 100) / 100;
+  const includeClubFee = model === 'club_players';
+  const value = Math.round(((includeClubFee ? clubFee : 0) + sosPlayerShare) * 100) / 100;
+  return { clubFee: includeClubFee ? clubFee : 0, playerGross, pct, clubShare, sosPlayerShare, value, players, fee, months };
+}
+
 // Build the Commercial Terms clause parts from a contract + a money formatter
 // `fm(amount)`. Returns { intro, breakdown, commission } (any may be '').
-// Shared/Player-funded state player funding as TERMS — player numbers aren't
-// known in advance, so nothing is computed into the contract value.
-// NOTE: ported verbatim into both PDF generators — keep in sync.
+// The value is a PROJECTION from expected enrolment; player revenue is computed
+// in net of the club commission. NOTE: ported into both PDF generators.
 export function commercialModelText(contract, fm) {
   const basis = contract?.billingBasis || 'services';
   const model = contract?.paymentModel || null;
   if (basis !== 'player_funded' || !model) return { intro: '', breakdown: '', commission: '' };
-  const fee = Number(contract.playerMonthlyFee) || 0;
-  const months = Number(contract.playerMonths) || 0;
-  const pct = Number(contract.kickbackPct) || 0;
+  const cv = commercialValue(contract);
   const minP = Number(contract.minPlayers) || 0;
   const intro = PAYMENT_MODEL_LABELS[model] || '';
-  // Describe the player contribution (fee per player per month, optional minimum).
   const feeBits = [];
-  if (fee) feeBits.push(`${fm(fee)} per player per month`);
-  if (months) feeBits.push(`over ${months} months`);
+  if (cv.fee) feeBits.push(`${fm(cv.fee)} per player per month`);
+  if (cv.months) feeBits.push(`over ${cv.months} months`);
   const feeStr = feeBits.join(' ');
   const minStr = minP ? ` The Client undertakes to enrol a minimum of ${minP} players.` : '';
+  // Projected player revenue sentence, shown when we have the inputs to compute it.
+  const projStr = (cv.fee && cv.months && cv.players)
+    ? ` Based on an expected enrolment of ${cv.players} players, projected player fees total ${fm(cv.playerGross)}${cv.pct ? `, of which the Service Provider retains ${fm(cv.sosPlayerShare)} after the ${cv.pct}% club commission` : ''}.`
+    : '';
 
   if (model === 'club_players') {
-    const breakdown = `The Client shall pay the Service Provider a fixed fee of ${fm(contract.value)} as set out in the Fees & Payment section. Participating players shall fund the remainder of the programme, contributing${feeStr ? ` ${feeStr}` : ' a monthly fee agreed with the Client'}, collected by the Service Provider.${minStr}`;
-    const commission = pct ? `The Service Provider shall pay the Client a commission of ${pct}% of the player fees actually collected, reconciled and settled per football season.` : '';
+    const breakdown = `The Client shall pay the Service Provider a fixed fee of ${fm(cv.clubFee)}. Participating players shall fund the remainder of the programme, contributing${feeStr ? ` ${feeStr}` : ' a monthly fee agreed with the Client'}, collected by the Service Provider.${projStr} The contract value of ${fm(cv.value)} reflects the fixed fee plus the projected player contribution net of commission, and will be reconciled against actual enrolment.${minStr}`;
+    const commission = cv.pct ? `The Service Provider shall pay the Client a commission of ${cv.pct}% of the player fees actually collected, reconciled and settled per football season.` : '';
     return { intro, breakdown, commission };
   }
   // players_all — players pay SOS directly; commission on amounts collected.
-  const breakdown = `Access fees are collected by the Service Provider directly from participating players${feeStr ? `, at ${feeStr}` : ''}.${minStr}`;
-  const commission = pct ? `The Service Provider shall pay the Client a commission of ${pct}% of the fees actually collected from players enrolled through the Client, reconciled and settled per football season.` : '';
+  const breakdown = `Access fees are collected by the Service Provider directly from participating players${feeStr ? `, at ${feeStr}` : ''}.${projStr} The contract value of ${fm(cv.value)} reflects the projected player contribution net of commission, and will be reconciled against actual enrolment.${minStr}`;
+  const commission = cv.pct ? `The Service Provider shall pay the Client a commission of ${cv.pct}% of the fees actually collected from players enrolled through the Client, reconciled and settled per football season.` : '';
   return { intro, breakdown, commission };
 }
 
