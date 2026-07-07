@@ -214,6 +214,22 @@ function useContractsData() {
   return { contracts, clients, reload };
 }
 
+// Term length of a contract in years (>= 1), from its start/end dates. Falls
+// back to 1 year when dates are missing, so a value is never divided by 0.
+function contractTermYears(contract) {
+  if (!contract?.startDate || !contract?.endDate) return 1;
+  const days = daysBetween(contract.startDate, contract.endDate);
+  if (!(days > 0)) return 1;
+  return Math.max(1, days / 365);
+}
+// The per-YEAR value of a contract = total contract value ÷ term years. This is
+// what "annual revenue" views should sum, so a 3-year €164,500 deal contributes
+// ~€54,833/yr rather than distorting the annual figure with its whole lifetime
+// total. Rounded to cents.
+function annualisedValue(contract) {
+  return Math.round((Number(contract?.value || 0) / contractTermYears(contract)) * 100) / 100;
+}
+
 function MetricCard({ label, value, sub, color }) {
   return (
     <div className="bg-white rounded-xl border border-[var(--border)] p-5">
@@ -279,7 +295,11 @@ function Dashboard({ navigate }) {
   const clientMap = Object.fromEntries(clients.map(c => [c.id, c]));
   const now = new Date();
 
-  const totalActiveValue = contracts.filter(c => c.status === 'active').reduce((s,c) => s + Number(c.value||0), 0);
+  const activeContracts = contracts.filter(c => c.status === 'active');
+  const totalActiveValue = activeContracts.reduce((s,c) => s + Number(c.value||0), 0);
+  // Annualised = each active contract's value ÷ its term years, summed. This is
+  // the true yearly run-rate (a 3-year deal counts once per year, not in full).
+  const annualisedActiveValue = activeContracts.reduce((s,c) => s + annualisedValue(c), 0);
   const allPayments = contracts.flatMap(c => c.payments.map(p => ({ ...p, contractTitle: c.title, contractNumber: c.contractNumber, clientId: c.clientId })));
   const collectedYTD = allPayments.filter(p => p.status === 'paid' && new Date(p.paidAt).getFullYear() === now.getFullYear()).reduce((s,p) => s + Number(p.paidAmount||0), 0);
   // Overdue is COMPUTED live from due dates (a pending payment past due = overdue).
@@ -341,11 +361,13 @@ function Dashboard({ navigate }) {
 
   const exportBoardCSV = () => {
     const mrr = contracts.filter(c=>c.status==='active' && c.paymentType==='monthly').reduce((s,c)=>s+Number(c.value||0),0);
-    const arr = totalActiveValue;
+    // ARR = annualised (per-year) run-rate; multi-year deals count once per year.
+    const arr = annualisedActiveValue;
     const rows = [
       ['Metric','Value'],
       ['MRR', mrr.toFixed(2)],
-      ['ARR', arr.toFixed(2)],
+      ['ARR (annualised)', arr.toFixed(2)],
+      ['Total active contract value (lifetime)', totalActiveValue.toFixed(2)],
       ['YTD Revenue', collectedYTD.toFixed(2)],
       ['Outstanding', outstanding.toFixed(2)],
       ['Renewal Pipeline (60d)', renewalCount],
@@ -365,7 +387,7 @@ function Dashboard({ navigate }) {
       <ReminderBanners contracts={contracts} clients={clients} />
 
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
-        <MetricCard label="Total Active Contract Value" value={fmtMoney(totalActiveValue,'EUR')} />
+        <MetricCard label="Annual Contract Value" value={fmtMoney(annualisedActiveValue,'EUR')} sub={totalActiveValue !== annualisedActiveValue ? `${fmtMoney(totalActiveValue,'EUR')} total (lifetime)` : undefined} />
         <MetricCard label="Collected YTD" value={fmtMoney(collectedYTD,'EUR')} color="#10B981" />
         <MetricCard label="Outstanding" value={fmtMoney(outstanding,'EUR')} color="#F59E0B" />
         <MetricCard label="Overdue" value={fmtMoney(overdue,'EUR')} color="#EF4444" />
@@ -1687,7 +1709,7 @@ function ContractDetail({ contractId, navigate }) {
           <dl className="text-sm space-y-2">
             <div className="flex justify-between"><dt className="text-slate-500">Client</dt><dd className="font-medium">{client?.companyName}</dd></div>
             <div className="flex justify-between"><dt className="text-slate-500">Type</dt><dd className="capitalize">{contract.type.replace('_',' ')}</dd></div>
-            <div className="flex justify-between"><dt className="text-slate-500">Value</dt><dd className="font-data">{fmtMoney(contract.value, contract.currency)}</dd></div>
+            <div className="flex justify-between"><dt className="text-slate-500">Value</dt><dd className="font-data text-right">{fmtMoney(contract.value, contract.currency)}{contractTermYears(contract) >= 1.5 && <div className="text-xs text-slate-400 font-normal">≈ {fmtMoney(annualisedValue(contract), contract.currency)}/yr over {Math.round(contractTermYears(contract))} yrs</div>}</dd></div>
             <div className="flex justify-between"><dt className="text-slate-500">Payment Terms</dt><dd className="capitalize">{contract.paymentType.replace('_',' ')} · Net {contract.paymentTermsDays}</dd></div>
             <div className="flex justify-between"><dt className="text-slate-500">Start</dt><dd>{fmtDate(contract.startDate)}</dd></div>
             <div className="flex justify-between"><dt className="text-slate-500">End</dt><dd>{fmtDate(contract.endDate)}</dd></div>
@@ -3097,15 +3119,19 @@ function BoardExport() {
   if (!contracts) return <div className="p-6"><Skeleton className="h-64 w-full" /></div>;
 
   const now = new Date();
+  const active = contracts.filter(c=>c.status==='active');
   const mrr = contracts.filter(c=>c.status==='active' && c.paymentType==='monthly').reduce((s,c)=>s+Number(c.value||0),0);
-  const arr = contracts.filter(c=>c.status==='active').reduce((s,c)=>s+Number(c.value||0),0);
+  // ARR = annualised run-rate (each contract's value ÷ its term years); the
+  // lifetime total is reported separately so multi-year deals don't inflate ARR.
+  const arr = active.reduce((s,c)=>s+annualisedValue(c),0);
+  const lifetimeValue = active.reduce((s,c)=>s+Number(c.value||0),0);
   const allPayments = contracts.flatMap(c=>c.payments);
   const ytd = allPayments.filter(p=>p.status==='paid' && new Date(p.paidAt).getFullYear()===now.getFullYear()).reduce((s,p)=>s+Number(p.paidAmount||0),0);
   const outstanding = allPayments.filter(p=>p.status!=='paid').reduce((s,p)=>s+Number(p.totalAmount||0),0);
   const renewalPipeline = contracts.filter(c=>c.status==='active' && c.endDate && daysBetween(now,c.endDate)>=0 && daysBetween(now,c.endDate)<=60).length;
 
   const download = () => {
-    const rows = [['Metric','Value'],['MRR',mrr.toFixed(2)],['ARR',arr.toFixed(2)],['YTD Revenue',ytd.toFixed(2)],['Outstanding',outstanding.toFixed(2)],['Renewal Pipeline (60d)',renewalPipeline]];
+    const rows = [['Metric','Value'],['MRR',mrr.toFixed(2)],['ARR (annualised)',arr.toFixed(2)],['Total active value (lifetime)',lifetimeValue.toFixed(2)],['YTD Revenue',ytd.toFixed(2)],['Outstanding',outstanding.toFixed(2)],['Renewal Pipeline (60d)',renewalPipeline]];
     downloadFile('﻿'+rows.map(r=>r.join(',')).join('\r\n'), 'sos-board-export.csv');
     toast.push('Board export downloaded.', 'success');
   };
@@ -3116,7 +3142,8 @@ function BoardExport() {
       <div className="bg-white rounded-xl border border-[var(--border)] p-6 max-w-lg">
         <dl className="text-sm space-y-3 mb-6">
           <div className="flex justify-between"><dt className="text-slate-500">MRR</dt><dd className="font-data">{fmtMoney(mrr,'EUR')}</dd></div>
-          <div className="flex justify-between"><dt className="text-slate-500">ARR</dt><dd className="font-data">{fmtMoney(arr,'EUR')}</dd></div>
+          <div className="flex justify-between"><dt className="text-slate-500">ARR (annualised)</dt><dd className="font-data">{fmtMoney(arr,'EUR')}</dd></div>
+          <div className="flex justify-between"><dt className="text-slate-500">Total active value (lifetime)</dt><dd className="font-data">{fmtMoney(lifetimeValue,'EUR')}</dd></div>
           <div className="flex justify-between"><dt className="text-slate-500">YTD Revenue</dt><dd className="font-data">{fmtMoney(ytd,'EUR')}</dd></div>
           <div className="flex justify-between"><dt className="text-slate-500">Outstanding</dt><dd className="font-data">{fmtMoney(outstanding,'EUR')}</dd></div>
           <div className="flex justify-between"><dt className="text-slate-500">Renewal Pipeline (60d)</dt><dd className="font-data">{renewalPipeline}</dd></div>
