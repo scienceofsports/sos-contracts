@@ -3208,7 +3208,9 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
   const [sigCompany, setSigCompany] = useState('');
   const [typedSig, setTypedSig] = useState('');
   // Signature capture mode: 'type' | 'draw' | 'upload' (three mutually-exclusive choices).
-  const [sigMode, setSigMode] = useState('draw');
+  // Signature capture mode. Default to 'type' — the easiest, most reliable
+  // option for a signer on any device (drawing is fiddly on a trackpad/phone).
+  const [sigMode, setSigMode] = useState('type');
   const useTyped = sigMode === 'type';
   // Uploaded signature image (base64 data URL) when sigMode === 'upload'.
   const [uploadedSigDataUrl, setUploadedSigDataUrl] = useState(null);
