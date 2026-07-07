@@ -1619,7 +1619,7 @@ function ContractDetail({ contractId, navigate }) {
             <div className="flex justify-between"><dt className="text-slate-500">Governing Law</dt><dd>{contract.governingLaw}</dd></div>
           </dl>
           {(() => {
-            const bullets = contract.services ? summarizeAgreement(contract.services, contract.slaHours) : [];
+            const bullets = contract.services ? summarizeAgreement(contract) : [];
             if (!bullets.length) return null;
             return (
               <div className="mt-4 pt-4 border-t border-[var(--border)]">

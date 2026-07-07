@@ -333,11 +333,33 @@ export function vatSummary(contract, fm, client) {
   return { applies: false, sentence: noteText, amountLabel: 'Amount', note: noteText };
 }
 
+// Build a short SLA bullet that respects per-team SLA bands (not just the single
+// slaHours). Single SLA -> "24-hour SLA on key analytical outputs after each
+// match"; mixed -> "SLA: 24h (U17, U19, Men's); 72h (U14, U15, U16)".
+function slaSummaryLine(contract) {
+  const bands = Array.isArray(contract?.slaBands)
+    ? contract.slaBands.filter(b => b && Array.isArray(b.teams) && b.teams.length && Number(b.hours)) : [];
+  if (!bands.length) {
+    const h = Number(contract?.slaHours) || 24;
+    return `${h}-hour SLA on key analytical outputs after each match`;
+  }
+  const distinct = [...new Set(bands.map(b => Number(b.hours)))];
+  if (distinct.length === 1) {
+    return `${distinct[0]}-hour SLA on key analytical outputs after each match`;
+  }
+  const sorted = [...bands].sort((a, b) => Number(a.hours) - Number(b.hours));
+  return 'SLA: ' + sorted.map(b => `${Number(b.hours)}h (${b.teams.join(', ')})`).join('; ');
+}
+
 // Short, scannable bullet summary of the agreement for the admin Contract
-// Details panel — just WHAT is included, no marketing prose. Returns an array of
-// one-line strings, e.g. ["Platform access — 3 Directors, 5 Coaches, Unlimited
-// Players", "Match Team & Player Reports (included)", "24-hour SLA"].
-export function summarizeAgreement(services, slaHours) {
+// Details panel — just WHAT is included, no marketing prose. Pass the whole
+// contract (or an object with .services, .slaBands, .slaHours). Returns an array
+// of one-line strings.
+export function summarizeAgreement(contract, slaHoursLegacy) {
+  // Back-compat: earlier callers passed (services, slaHours). Detect that shape.
+  const isContract = contract && (contract.services || contract.slaBands);
+  const services = isContract ? contract.services : contract;
+  const slaCtx = isContract ? contract : { slaHours: slaHoursLegacy };
   const items = computeServiceLineItems(services);
   if (!items.length) return [];
   const out = items.map(i => {
@@ -350,11 +372,10 @@ export function summarizeAgreement(services, slaHours) {
     } else if (i.unit === 'per_unit') {
       line += ` (${i.qty})`;
     }
-    if (i.included && i.unit !== 'included') line += ' (included)';
-    else if (i.unit === 'included') line += ' (included)';
+    if (i.included) line += ' (included)';
     return line;
   });
-  out.push(`${slaHours || 24}-hour SLA on key analytical outputs after each match`);
+  out.push(slaSummaryLine(slaCtx));
   return out;
 }
 
