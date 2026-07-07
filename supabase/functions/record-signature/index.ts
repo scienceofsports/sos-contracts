@@ -369,21 +369,48 @@ Deno.serve(async (req) => {
       } catch (_) { /* alerting is best-effort */ }
     }
 
-    // If the document hash changed between send and sign, surface it to staff so
-    // a genuine anomaly is never silently activated (a benign mismatch happens
-    // when the signer filled previously-blank party details — staff can confirm).
+    // The document hash changes between send and sign whenever the signer
+    // completes their own party details (company / address / VAT / registration).
+    // That is the NORMAL case and must NOT alarm staff. We only email when the
+    // change is SUSPICIOUS: a party field that was ALREADY populated at send time
+    // was altered during signing (i.e. not just a blank being filled in). Either
+    // way the mismatch is recorded on the certificate + in the ledger; the email
+    // is reserved for the genuine anomaly so it stays meaningful.
     if (!integrityOk) {
-      try {
-        const alertTo = await resolveStaffEmail(admin, request.contract_id);
-        if (alertTo) {
-          await sendEmail({
-            to: alertTo,
-            subject: `⚠ Integrity note — document hash changed on signing: ${contractNumber || contractTitle}`,
-            html: `<p>The contract <strong>${contractTitle}</strong> was signed, but its document hash differs from the send-time hash.</p>
-                   <p>This is expected & harmless when the signer confirmed previously-blank details (address / VAT / registration). If those were already set, review the contract.</p>`,
-          });
-        }
-      } catch (_) { /* best-effort */ }
+      const origClient = (request.document_snapshot?.client ?? {}) as Record<string, unknown>;
+      const pick = (o: Record<string, unknown>, ...keys: string[]) => {
+        for (const k of keys) { const v = o?.[k]; if (typeof v === 'string' && v.trim()) return v.trim(); }
+        return '';
+      };
+      // For each party field: was it non-empty at send AND changed at sign?
+      const suspicious = (
+        [
+          [['company_name', 'companyName'], clientDetails?.companyName],
+          [['address'], clientDetails?.address],
+          [['vat_number', 'vatNumber'], clientDetails?.vatNumber],
+          [['registration_number', 'registrationNumber'], clientDetails?.registrationNumber],
+        ] as [string[], string | undefined][]
+      ).some(([keys, confirmed]) => {
+        const before = pick(origClient, ...keys);
+        const after = (confirmed ?? '').trim();
+        return before !== '' && after !== '' && before !== after; // pre-set value overwritten
+      });
+
+      if (suspicious) {
+        try {
+          const alertTo = await resolveStaffEmail(admin, request.contract_id);
+          if (alertTo) {
+            await sendEmail({
+              to: alertTo,
+              subject: `⚠ Review needed — party details CHANGED on signing: ${contractNumber || contractTitle}`,
+              html: `<p>The contract <strong>${contractTitle}</strong> was signed, but a party detail that was <strong>already filled in</strong> when you sent it (company name / address / VAT / registration) was <strong>changed</strong> by the signer during signing.</p>
+                     <p>This is unusual — please review the executed document and confirm the change is legitimate. The full evidence (both hashes) is recorded on the Certificate of Completion.</p>`,
+            });
+          }
+        } catch (_) { /* best-effort */ }
+      }
+      // Benign case (signer filled previously-blank fields): no email — the
+      // mismatch is still captured on the certificate and in the ledger.
     }
 
     // 11. Done.
