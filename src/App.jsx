@@ -352,17 +352,7 @@ function Dashboard({ navigate }) {
     const list = contracts.filter(c => c.status === 'active' && c.endDate && daysBetween(now, c.endDate) >= 0 && daysBetween(now, c.endDate) <= w);
     return { window: w, count: list.length, value: list.reduce((s,c)=>s+Number(c.value||0),0) };
   });
-
-  const clientHealth = clients.map(cl => {
-    const clientContracts = contracts.filter(c => c.clientId === cl.id);
-    const activeC = clientContracts.find(c => c.status === 'active');
-    const overdueP = clientContracts.flatMap(c=>c.payments).some(p => effectiveStatus(p) === 'overdue');
-    const pendingP = clientContracts.flatMap(c=>c.payments).filter(p => effectiveStatus(p) === 'pending').sort((a,b)=>new Date(a.dueDate)-new Date(b.dueDate))[0];
-    let health = 'green';
-    if (overdueP) health = 'red';
-    else if (!activeC && clientContracts.some(c => effectiveContractStatus(c) === 'sent')) health = 'amber';
-    return { client: cl, status: activeC ? activeC.status : (clientContracts[0] ? clientContracts[0].status : 'draft'), health, nextDue: pendingP ? pendingP.dueDate : null };
-  });
+  const hasRenewals = riskWindows.some(r => r.count > 0);
 
   const activityFeed = contracts.flatMap(c => c.auditLog.map(a => ({ ...a, contractTitle: c.title }))).sort((a,b) => new Date(b.at) - new Date(a.at)).slice(0,10);
 
@@ -451,7 +441,7 @@ function Dashboard({ navigate }) {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+      <div className={`grid grid-cols-1 gap-4 mb-6 ${hasRenewals ? 'lg:grid-cols-3' : 'lg:grid-cols-2'}`}>
         <div className="bg-white rounded-xl border border-[var(--border)] p-5">
           <div className="font-heading mb-4 text-base">Contract Pipeline Funnel</div>
           <div className="space-y-3">
@@ -490,61 +480,29 @@ function Dashboard({ navigate }) {
           </div>
         </div>
 
-        <div className="bg-white rounded-xl border border-[var(--border)] p-5">
-          <div className="font-heading mb-4 text-base">Renewal Risk Radar</div>
-          <div className="space-y-3">
-            {riskWindows.map(r => (
-              <div key={r.window} className="flex items-center justify-between p-3 rounded-lg bg-slate-50">
-                <div>
-                  <div className="text-sm font-medium">{r.window} days</div>
-                  <div className="text-xs text-slate-500">{r.count} contract(s)</div>
-                </div>
-                <div className="font-data text-sm">{fmtMoney(r.value,'EUR')}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
-        <div className="bg-white rounded-xl border border-[var(--border)] p-5">
-          <div className="font-heading mb-4 text-base">Client Health</div>
-          {clientHealth.length === 0 ? <EmptyState title="No clients yet" ctaLabel="Add a client" onCta={()=>navigate('clients')} /> : (
-            <div className="space-y-2">
-              {clientHealth.map(h => (
-                <div key={h.client.id} className="flex items-center justify-between py-2 border-b border-[var(--border)] last:border-0">
-                  <div className="flex items-center gap-2.5">
-                    <span className={`w-2.5 h-2.5 rounded-full ${h.health==='green'?'bg-emerald-500':h.health==='amber'?'bg-amber-400':'bg-red-500'}`}></span>
-                    <div>
-                      <div className="text-sm font-medium">{h.client.companyName}</div>
-                      <div className="text-xs text-slate-400">Next due: {h.nextDue ? fmtDate(h.nextDue) : '—'}</div>
-                    </div>
-                  </div>
-                  <Badge status={h.status} />
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div className="bg-white rounded-xl border border-[var(--border)] p-5">
-          <div className="font-heading mb-4 text-base">Recent Activity</div>
-          {activityFeed.length === 0 ? <EmptyState title="No activity yet" icon="🕓" /> : (
+        {hasRenewals && (
+          <div className="bg-white rounded-xl border border-[var(--border)] p-5">
+            <div className="font-heading mb-4 text-base">Renewal Risk Radar</div>
             <div className="space-y-3">
-              {activityFeed.map(a => (
-                <div key={a.id} className="text-sm">
-                  <div className="text-slate-700">{a.message}</div>
-                  <div className="text-xs text-slate-400">{a.contractTitle} · {fmtDateTime(a.at)}</div>
+              {riskWindows.map(r => (
+                <div key={r.window} className="flex items-center justify-between p-3 rounded-lg bg-slate-50">
+                  <div>
+                    <div className="text-sm font-medium">{r.window} days</div>
+                    <div className="text-xs text-slate-500">{r.count} contract(s)</div>
+                  </div>
+                  <div className="font-data text-sm">{fmtMoney(r.value,'EUR')}</div>
                 </div>
               ))}
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
-      <div className="bg-white rounded-xl border border-[var(--border)] p-5 mb-6">
-        <div className="sos-pill mb-4">Unsigned Contracts Aging</div>
-        {unsignedAging.length === 0 ? <EmptyState title="Nothing pending signature" icon="✅" /> : (
+      {/* Unsigned Contracts Aging — the "chase these to sign" list. Only shown
+          when something is actually pending signature (otherwise it's noise). */}
+      {unsignedAging.length > 0 && (
+        <div className="bg-white rounded-xl border border-[var(--border)] p-5 mb-6">
+          <div className="sos-pill mb-4">Unsigned Contracts Aging</div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead><tr className="text-left text-xs text-slate-400 border-b border-[var(--border)]"><th className="py-2 pr-4">Contract</th><th className="py-2 pr-4">Client</th><th className="py-2 pr-4">Sent</th><th className="py-2 pr-4">Days Since</th></tr></thead>
@@ -560,8 +518,23 @@ function Dashboard({ navigate }) {
               </tbody>
             </table>
           </div>
-        )}
-      </div>
+        </div>
+      )}
+
+      {/* Recent Activity — only shown once there's actual activity to report. */}
+      {activityFeed.length > 0 && (
+        <div className="bg-white rounded-xl border border-[var(--border)] p-5 mb-6">
+          <div className="font-heading mb-4 text-base">Recent Activity</div>
+          <div className="space-y-3">
+            {activityFeed.map(a => (
+              <div key={a.id} className="text-sm">
+                <div className="text-slate-700">{a.message}</div>
+                <div className="text-xs text-slate-400">{a.contractTitle} · {fmtDateTime(a.at)}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="bg-white rounded-xl border border-[var(--border)] p-5">
         <div className="sos-pill mb-4">Top Clients by Value</div>
