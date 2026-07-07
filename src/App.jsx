@@ -806,19 +806,22 @@ function ContractForm({ navigate, editContractId }) {
   };
   const milestoneTotal = installments.reduce((s,r) => s + (Number(r.amount) || 0), 0);
 
-  // Build the standard 3-instalment milestone schedule from a start date + total:
-  // due +1 week / +2 months / +4 months, split 34% / 33% / 33% (last row absorbs
-  // rounding so it always sums to the total exactly).
+  // Build the standard 3-instalment milestone schedule from a start date + total.
+  // Dates are CHAINED: 1st = start + 1 week; 2nd = 2 months after the 1st; 3rd =
+  // 2 months after the 2nd. Split 34% / 33% / 33% (last row absorbs rounding so
+  // it always sums to the total exactly).
   const buildDefaultMilestones = (startStr, total) => {
     const t = Number(total) || 0;
-    const mk = (fn) => { const d = new Date(startStr); fn(d); return ymd(d); };
+    const d1 = new Date(startStr); d1.setDate(d1.getDate() + 7);
+    const d2 = new Date(d1); d2.setMonth(d2.getMonth() + 2);
+    const d3 = new Date(d2); d3.setMonth(d3.getMonth() + 2);
     const i1 = round2(t * 0.34);
     const i2 = round2(t * 0.33);
     const i3 = round2(t - i1 - i2);
     return [
-      { date: mk(d => d.setDate(d.getDate() + 7)),  amount: String(i1) },
-      { date: mk(d => d.setMonth(d.getMonth() + 2)), amount: String(i2) },
-      { date: mk(d => d.setMonth(d.getMonth() + 4)), amount: String(i3) },
+      { date: ymd(d1), amount: String(i1) },
+      { date: ymd(d2), amount: String(i2) },
+      { date: ymd(d3), amount: String(i3) },
     ];
   };
   // Whether the user has manually edited the milestone rows yet. Until they do,
