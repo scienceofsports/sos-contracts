@@ -753,10 +753,8 @@ function ContractForm({ navigate, editContractId }) {
           setOneTimeDate(existing.payments[0].dueDate.slice(0,10));
         } else if (existing.paymentType === 'milestone') {
           setInstallments(existing.payments.map(p => ({ date: p.dueDate.slice(0,10), amount: String(p.amount) })));
-          // A saved schedule is a real, deliberate schedule — treat it as
-          // user-set so re-opening the contract doesn't wipe it. If the user
-          // then changes the value, the "must add up" validation nudges them.
-          amountsTouched.current = true;
+          // A saved schedule has deliberate DATES — keep them (don't re-roll from
+          // the start date). Amounts still re-split if the user changes the value.
           datesTouched.current = true;
         } else {
           setFirstDueDate(existing.payments[0].dueDate.slice(0,10));
@@ -805,20 +803,19 @@ function ContractForm({ navigate, editContractId }) {
   };
 
   const addInstallmentRow = () => {
-    // Adding/removing a row changes the structure -> stop auto-generating both.
-    amountsTouched.current = true;
+    // Adding/removing a row changes the structure -> keep the user's dates.
+    // (Amounts still re-split to the contract value on the next value change.)
     datesTouched.current = true;
     setInstallments(rows => [...rows, { date: '', amount: '' }]);
   };
   const updateInstallmentRow = (i, patch) => {
-    // Only lock what the user actually edited: typing an amount stops the
-    // value-driven re-split; typing a date stops the start-date-driven dates.
-    if ('amount' in patch) amountsTouched.current = true;
+    // Editing a date locks the dates from start-date re-flow. Amounts are NOT
+    // locked — the contract value always drives the split (that's what the user
+    // wants: change the price, the instalments recalculate).
     if ('date' in patch) datesTouched.current = true;
     setInstallments(rows => rows.map((r, idx) => idx === i ? { ...r, ...patch } : r));
   };
   const removeInstallmentRow = (i) => {
-    amountsTouched.current = true;
     datesTouched.current = true;
     setInstallments(rows => rows.filter((_, idx) => idx !== i));
   };
@@ -848,25 +845,31 @@ function ContractForm({ navigate, editContractId }) {
   // the dates keep re-flowing from the start date until you pick a date. This is
   // what makes "edit the value -> installments update automatically" work even
   // after the schedule was first pre-filled.
-  const amountsTouched = useRef(false);
   const datesTouched = useRef(false);
   useEffect(() => {
     if (form.paymentType !== 'milestone') return;
-    // If the user has hand-edited BOTH amounts and dates, leave the rows alone.
-    // (On an edit, a saved schedule marks both touched — so it's preserved; but
-    // an untouched auto schedule still re-splits when the value changes.)
-    if (amountsTouched.current && datesTouched.current) return;
     if (!form.startDate || !(Number(form.value) > 0)) return;
     const gen = buildDefaultMilestones(form.startDate, form.value);
     setInstallments(rows => {
       // First fill (no rows yet): take the whole generated schedule.
       if (!rows.length) return gen;
-      // Otherwise re-flow only the parts the user hasn't locked, keeping the
-      // row count the user has (fall back to generated length on first fill).
-      return gen.map((g, i) => ({
-        date: datesTouched.current ? (rows[i]?.date ?? g.date) : g.date,
-        amount: amountsTouched.current ? (rows[i]?.amount ?? g.amount) : g.amount,
-      }));
+      // The contract value drives the split: whenever it changes, the amounts
+      // ALWAYS re-split across the existing rows (keeping the user's row count).
+      // Dates are only re-flowed on the first fill — once shown, we keep whatever
+      // dates are there (default or user-picked). Re-split proportionally so a
+      // custom split's shape is preserved; even split if the old total was zero.
+      const oldTotal = rows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+      const newTotal = Number(form.value) || 0;
+      let acc = 0;
+      return rows.map((r, i) => {
+        const share = oldTotal > 0 ? (Number(r.amount) || 0) / oldTotal : 1 / rows.length;
+        let amt = i === rows.length - 1 ? round2(newTotal - acc) : round2(newTotal * share);
+        acc = round2(acc + amt);
+        return {
+          date: r.date || gen[i]?.date || '',
+          amount: String(amt),
+        };
+      });
     });
   }, [form.paymentType, form.startDate, form.value]);
 
