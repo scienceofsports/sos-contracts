@@ -615,7 +615,7 @@ export function generateContractPdf({ contract, client, company }) {
       : (contract.paymentType || '').replace('_', ' ');
     ensure(40);
     pillHeader(feesNum, 'Fees & Payment');
-    const vs = vatSummary(contract, (a) => fmtMoney(a, contract.currency));
+    const vs = vatSummary(contract, (a) => fmtMoney(a, contract.currency), client);
     text(`In consideration of the services provided under this Agreement, the Client shall pay the Service Provider a total of ${fmtMoney(contract.value, contract.currency)}${vs.applies ? ' (exclusive of VAT)' : ''}, payable ${payWord}, net ${contract.paymentTermsDays} days from the date of a valid invoice.`, { size: 10, gap: vs.sentence ? 3 : 6 });
     if (vs.sentence) text(vs.sentence, { size: 10, gap: 6 });
     // Instalment schedule table (only when more than one payment).

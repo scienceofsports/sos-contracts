@@ -2056,7 +2056,7 @@ function ContractDocumentBody({ contract, client, company }) {
                 </React.Fragment>
               )}
 
-              {(() => { const vs = vatSummary(contract, (a) => fmtMoney(a, contract.currency)); return (
+              {(() => { const vs = vatSummary(contract, (a) => fmtMoney(a, contract.currency), client); return (
               <React.Fragment>
               <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{feesNum}.</span> Fees & Payment</div>
               <p className="text-sm text-slate-700 mb-2">In consideration of the services provided under this Agreement, the Client shall pay the Service Provider a total of <strong>{fmtMoney(contract.value, contract.currency)}</strong>{vs.applies ? ' (exclusive of VAT)' : ''}, payable <strong>{contract.paymentType === 'one_time' ? 'in a single payment' : contract.paymentType === 'milestone' ? 'in instalments' : contract.paymentType.replace('_',' ')}</strong>, net {contract.paymentTermsDays} days from the date of a valid invoice.</p>
@@ -3321,6 +3321,12 @@ function normalizeSnapshot(snapshot) {
     contactEmail: pick(co, 'contactEmail', 'contact_email'),
     vatNumber: pick(co, 'vatNumber', 'vat_number'),
     registrationNumber: pick(co, 'registrationNumber', 'registration_number'),
+    // Bank details — without these the review PDF's bank-details box was
+    // silently dropped while the signed PDF showed it (they read the SAME
+    // snapshot but the normalizer omitted the bank fields).
+    bankName: pick(co, 'bankName', 'bank_name'),
+    bankIBAN: pick(co, 'bankIBAN', 'bank_iban'),
+    bankSWIFT: pick(co, 'bankSWIFT', 'bank_swift'),
     signatoryName: pick(co, 'signatoryName', 'signatory_name'),
     signatoryTitle: pick(co, 'signatoryTitle', 'signatory_title'),
     signatorySignature: pick(co, 'signatorySignature', 'signatory_signature'),

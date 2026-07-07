@@ -282,10 +282,16 @@ export function serviceLevelsLines(contract) {
 // - amountLabel: header/label for the instalment Amount column.
 // - note: reverse-charge / out-of-scope note (from the payment rows), or ''.
 // `fm(amount)` formats money. NOTE: ported into both PDF generators.
-export function vatSummary(contract, fm) {
+export function vatSummary(contract, fm, client) {
+  const EU = ['AT','BE','BG','HR','CY','CZ','DK','EE','FI','FR','DE','GR','HU','IE','IT','LV','LT','LU','MT','NL','PL','PT','RO','SK','SI','ES','SE'];
+  // Client country/VAT — accept it from an explicit client arg OR a nested/flat
+  // field on the contract, so every renderer resolves the same value.
+  const country = client?.country || contract?.client?.country || contract?.clientCountry || null;
+  const hasVatNo = client?.vatNumber || client?.vat_number || contract?.client?.vatNumber || contract?.clientVatNumber || null;
+
   const pays = Array.isArray(contract?.payments) ? contract.payments : [];
   const num = (v) => Number(v) || 0;
-  let net = 0, vat = 0, gross = 0, rate = 0, note = '';
+  let net = 0, vat = 0, gross = 0, rate = 0;
   if (pays.length) {
     pays.forEach(p => {
       const a = num(p.amount ?? p.total_amount);
@@ -297,6 +303,19 @@ export function vatSummary(contract, fm) {
     net = num(contract?.value); gross = net;
   }
   net = Math.round(net * 100) / 100; vat = Math.round(vat * 100) / 100; gross = Math.round(gross * 100) / 100;
+
+  // AUTHORITATIVE FALLBACK: if the payment rows carry no VAT split but the client
+  // is domestic Cyprus (or an EU client with no reverse-charge VAT number), VAT
+  // still applies at 19%. This guarantees the review copy and the signed copy
+  // show identical VAT regardless of whether the frozen payment rows happened to
+  // carry a vat_amount — the earlier "review shows no VAT, signed shows VAT" bug.
+  const chargeable = (country === 'CY') || (country && EU.includes(country) && !hasVatNo);
+  if (vat <= 0.005 && chargeable && net > 0) {
+    rate = rate || 0.19;
+    vat = Math.round(net * rate * 100) / 100;
+    gross = Math.round((net + vat) * 100) / 100;
+  }
+
   const applies = vat > 0.005;
   const ratePct = rate ? Math.round(rate * 100) : 19;
   if (applies) {
@@ -308,9 +327,6 @@ export function vatSummary(contract, fm) {
     };
   }
   // No VAT charged — note why (reverse charge or out of scope), if we can tell.
-  const country = contract?.client?.country || contract?.clientCountry;
-  const hasVatNo = contract?.client?.vatNumber || contract?.clientVatNumber;
-  const EU = ['AT','BE','BG','HR','CY','CZ','DK','EE','FI','FR','DE','GR','HU','IE','IT','LV','LT','LU','MT','NL','PL','PT','RO','SK','SI','ES','SE'];
   let noteText = '';
   if (country && EU.includes(country) && country !== 'CY' && hasVatNo) noteText = 'The VAT reverse-charge mechanism applies (Article 196, EU VAT Directive); the Client shall self-account for VAT.';
   else if (country && !EU.includes(country)) noteText = 'This supply is outside the scope of Cyprus VAT.';

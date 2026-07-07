@@ -120,7 +120,11 @@ function computeServiceLineItems(services: Any): Array<Any> {
 
 // Port of vatSummary — derive net/VAT/gross from payment rows. Keep in sync
 // with src/lib/constants.js.
-function vatSummary(contract: Any, fm: (a: Any) => string): { applies: boolean; sentence: string; amountLabel: string; note: string } {
+function vatSummary(contract: Any, fm: (a: Any) => string, client?: Any): { applies: boolean; sentence: string; amountLabel: string; note: string } {
+  const EU = ['AT','BE','BG','HR','CY','CZ','DK','EE','FI','FR','DE','GR','HU','IE','IT','LV','LT','LU','MT','NL','PL','PT','RO','SK','SI','ES','SE'];
+  const country = client?.country || contract?.client?.country || contract?.clientCountry || null;
+  const hasVatNo = client?.vatNumber || client?.vat_number || contract?.client?.vatNumber || contract?.clientVatNumber || null;
+
   const pays = Array.isArray(contract?.payments) ? contract.payments : [];
   const num = (v: Any) => Number(v) || 0;
   let net = 0, vat = 0, gross = 0, rate = 0;
@@ -135,14 +139,23 @@ function vatSummary(contract: Any, fm: (a: Any) => string): { applies: boolean; 
     net = num(contract?.value); gross = net;
   }
   net = Math.round(net * 100) / 100; vat = Math.round(vat * 100) / 100; gross = Math.round(gross * 100) / 100;
+
+  // Authoritative fallback (keep in sync with src/lib/constants.js): domestic CY
+  // (or EU client without a reverse-charge VAT number) always owes 19% even if
+  // the frozen payment rows carry no vat_amount — so the review copy and the
+  // signed copy always show identical VAT.
+  const chargeable = (country === 'CY') || (country && EU.includes(country) && !hasVatNo);
+  if (vat <= 0.005 && chargeable && net > 0) {
+    rate = rate || 0.19;
+    vat = Math.round(net * rate * 100) / 100;
+    gross = Math.round((net + vat) * 100) / 100;
+  }
+
   const applies = vat > 0.005;
   const ratePct = rate ? Math.round(rate * 100) : 19;
   if (applies) {
     return { applies: true, sentence: `The above amount is exclusive of VAT. VAT at ${ratePct}% (${fm(vat)}) applies, giving a total amount payable of ${fm(gross)}.`, amountLabel: 'Amount (incl. VAT)', note: '' };
   }
-  const country = contract?.client?.country || contract?.clientCountry;
-  const hasVatNo = contract?.client?.vatNumber || contract?.clientVatNumber;
-  const EU = ['AT','BE','BG','HR','CY','CZ','DK','EE','FI','FR','DE','GR','HU','IE','IT','LV','LT','LU','MT','NL','PL','PT','RO','SK','SI','ES','SE'];
   let noteText = '';
   if (country && EU.includes(country) && country !== 'CY' && hasVatNo) noteText = 'The VAT reverse-charge mechanism applies (Article 196, EU VAT Directive); the Client shall self-account for VAT.';
   else if (country && !EU.includes(country)) noteText = 'This supply is outside the scope of Cyprus VAT.';
@@ -856,7 +869,7 @@ export async function buildContractPdf(input: {
   {
     ensure(40);
     pillHeader(feesNum, 'Fees & Payment');
-    const vs = vatSummary(c, (a: Any) => fmtMoney(a, currency));
+    const vs = vatSummary(c, (a: Any) => fmtMoney(a, currency), cl);
     text(`In consideration of the services provided under this Agreement, the Client shall pay the Service Provider a total of ${fmtMoney(value, currency)}${vs.applies ? ' (exclusive of VAT)' : ''}, payable ${paymentType}, net ${paymentTermsDays} days from the date of a valid invoice.`, { size: 10, gap: vs.sentence ? 3 : 6 });
     if (vs.sentence) text(vs.sentence, { size: 10, gap: 6 });
     // Instalment schedule table (only when more than one payment).
