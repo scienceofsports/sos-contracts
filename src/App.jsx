@@ -230,6 +230,22 @@ function annualisedValue(contract) {
   return Math.round((Number(contract?.value || 0) / contractTermYears(contract)) * 100) / 100;
 }
 
+// A large, prominent hero metric for the top-of-dashboard glance row. Bigger
+// than MetricCard, with an accent strip and an optional click-through.
+function HeroCard({ label, value, sub, accent, onClick }) {
+  return (
+    <div
+      onClick={onClick}
+      className={`relative bg-white rounded-xl border border-[var(--border)] p-5 overflow-hidden ${onClick ? 'cursor-pointer hover:border-slate-300 transition' : ''}`}
+    >
+      <div className="absolute left-0 top-0 bottom-0 w-1" style={{ background: accent || 'var(--cyan-deep)' }}></div>
+      <div className="text-[10px] uppercase tracking-wide text-slate-500 font-medium">{label}</div>
+      <div className="font-data text-2xl md:text-3xl font-bold mt-1.5 leading-tight" style={{ color: accent || 'var(--navy-deep)' }}>{value}</div>
+      {sub && <div className="text-xs text-slate-400 mt-1.5">{sub}</div>}
+    </div>
+  );
+}
+
 function MetricCard({ label, value, sub, color }) {
   return (
     <div className="bg-white rounded-xl border border-[var(--border)] p-5">
@@ -296,6 +312,8 @@ function Dashboard({ navigate }) {
   const now = new Date();
 
   const activeContracts = contracts.filter(c => c.status === 'active');
+  const activeClientCount = new Set(activeContracts.map(c => c.clientId)).size;
+  const awaitingSignature = contracts.filter(c => effectiveContractStatus(c) === 'sent').length;
   const totalActiveValue = activeContracts.reduce((s,c) => s + Number(c.value||0), 0);
   // Annualised = each active contract's value ÷ its term years, summed. This is
   // the true yearly run-rate (a 3-year deal counts once per year, not in full).
@@ -386,12 +404,51 @@ function Dashboard({ navigate }) {
 
       <ReminderBanners contracts={contracts} clients={clients} />
 
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
-        <MetricCard label="Annual Contract Value" value={fmtMoney(annualisedActiveValue,'EUR')} sub={totalActiveValue !== annualisedActiveValue ? `${fmtMoney(totalActiveValue,'EUR')} total (lifetime)` : undefined} />
-        <MetricCard label="Collected YTD" value={fmtMoney(collectedYTD,'EUR')} color="#10B981" />
-        <MetricCard label="Outstanding" value={fmtMoney(outstanding,'EUR')} color="#F59E0B" />
-        <MetricCard label="Overdue" value={fmtMoney(overdue,'EUR')} color="#EF4444" />
-        <MetricCard label="Renewals (60 days)" value={renewalCount} />
+      {/* HERO ROW — the at-a-glance summary. The four numbers that matter most,
+          large, each with a context line. Everything else lives below. */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+        <HeroCard
+          label="Annual Revenue (run-rate)"
+          value={fmtMoney(annualisedActiveValue,'EUR')}
+          sub={totalActiveValue !== annualisedActiveValue ? `${fmtMoney(totalActiveValue,'EUR')} total across all years` : 'annualised across active contracts'}
+          accent="var(--cyan-deep)"
+        />
+        <HeroCard
+          label="Active Business"
+          value={`${activeContracts.length} contract${activeContracts.length===1?'':'s'}`}
+          sub={`${activeClientCount} active client${activeClientCount===1?'':'s'}${awaitingSignature ? ` · ${awaitingSignature} awaiting signature` : ''}`}
+          accent="#0A1A3F"
+        />
+        <HeroCard
+          label="Collected YTD"
+          value={fmtMoney(collectedYTD,'EUR')}
+          sub={`${new Date().getFullYear()} to date`}
+          accent="#10B981"
+        />
+        <HeroCard
+          label={overdue > 0 ? 'Outstanding · incl. overdue' : 'Outstanding'}
+          value={fmtMoney(outstanding,'EUR')}
+          sub={overdue > 0 ? `${fmtMoney(overdue,'EUR')} overdue — needs chasing` : 'all current — nothing overdue'}
+          accent={overdue > 0 ? '#EF4444' : '#F59E0B'}
+          onClick={()=>navigate('payments:receivables')}
+        />
+      </div>
+
+      {/* NEXT 3 MONTHS CASHFLOW — expected money in, at a glance. */}
+      <div className="bg-white rounded-xl border border-[var(--border)] p-4 mb-6">
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-[11px] uppercase tracking-wide text-slate-500 font-medium">Next 3 months — expected in</div>
+          {renewalCount > 0 && <button onClick={()=>navigate('contracts:all')} className="text-xs text-amber-600 hover:underline">🔄 {renewalCount} renewal{renewalCount===1?'':'s'} due (60d)</button>}
+        </div>
+        <div className="grid grid-cols-3 gap-4">
+          {cashFlow.map(c => (
+            <div key={c.label} className="text-center">
+              <div className="text-xs text-slate-400 mb-1">{c.label}</div>
+              <div className="font-data text-xl font-bold text-[var(--navy-deep)]">{fmtMoney(c.expected,'EUR')}</div>
+              {c.received > 0 && <div className="text-[11px] text-emerald-600 mt-0.5">{fmtMoney(c.received,'EUR')} received</div>}
+            </div>
+          ))}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
