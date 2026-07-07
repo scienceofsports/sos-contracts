@@ -677,6 +677,9 @@ function ContractForm({ navigate, editContractId }) {
           (existing.analysisTeams || []).forEach(t => { if (!map[t]) map[t] = Number(existing.slaHours) || 72; });
           return map;
         })(),
+        // packageKey/packageEdited are UI-only (not persisted). An existing draft
+        // is shown on its own merits, with no package badge.
+        packageKey: '', packageEdited: false,
       });
       setServices(existing.services ? { ...defaultServicesState(), ...existing.services } : defaultServicesState());
       setSpecialTermsList(parseSpecialTerms(existing.specialTerms));
@@ -782,6 +785,12 @@ function ContractForm({ navigate, editContractId }) {
   const toggleService = (key, patch) => {
     setServices(s => {
       const next = { ...s, [key]: { ...s[key], ...patch } };
+      // A package sets its price via the platform-access rate and pre-selects a
+      // set of services. Any manual change to platform-access (rate/selection)
+      // or to which services are ticked means the deal no longer matches the
+      // package as-picked — flag it "edited" so the label never mis-states it.
+      const changesPackagePrice = key === 'platform_access' && ('rate' in patch || 'selected' in patch);
+      const changesPackageServices = 'selected' in patch;
       setForm(f => ({
         ...f,
         // Services drive the value only for a services-based deal; for a
@@ -790,6 +799,7 @@ function ContractForm({ navigate, editContractId }) {
         value: f.billingBasis === 'player_funded' ? f.value : String(computeServiceLineItems(next).reduce((sum,i)=>sum+i.amount,0)),
         description: generateDescriptionFromServices(next, f.slaHours),
         title: titleEdited ? f.title : generateTitle(f.clientId, next),
+        packageEdited: (f.packageKey && (changesPackagePrice || changesPackageServices)) ? true : f.packageEdited,
       }));
       return next;
     });
@@ -3046,9 +3056,11 @@ function TrustPanel() {
   );
 }
 
-// Compact 4-step progress indicator for the signing card (Verify · Review · Confirm · Sign).
+// Compact 4-step progress indicator for the signing card. The signer confirms
+// their own details BEFORE reviewing the document, so the document they attest
+// to reading already reflects their corrections (Verify · Confirm · Review · Sign).
 function SigningSteps({ current }) {
-  const steps = ['Verify', 'Review', 'Confirm', 'Sign'];
+  const steps = ['Verify', 'Confirm', 'Review', 'Sign'];
   return (
     <div className="flex items-center justify-center gap-2 px-8 pt-5 pb-1">
       {steps.map((label, i) => {
@@ -3249,7 +3261,9 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
         setSigCompany(updated.companyName);
         await contractService.addAuditEntry(contract.id, { type:'client_update', message:`Client updated their company details via the signing link (${updated.companyName})`, by: null });
       }
-      setScreen(4);
+      // Details confirmed — now show the document (rebuilt with the corrected
+      // client details) for review before signing.
+      setScreen(2);
     } catch (err) {
       toast.push(err.message, 'error');
     } finally {
@@ -3339,10 +3353,12 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
       }
       return;
     }
-    setScreen(2);
+    // Non-server: skip OTP, go straight to confirming the signer's own details.
+    setScreen(3);
   };
 
-  // SERVER MODE: verify the emailed 6-digit code, then advance to the document review.
+  // SERVER MODE: verify the emailed 6-digit code, then confirm the signer's own
+  // details BEFORE they review the document (so the reviewed copy is corrected).
   const verifyOtp = async () => {
     const code = otpCode.trim();
     if (code.length < 4) { setOtpError('Enter the code from your email.'); return; }
@@ -3350,7 +3366,7 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
     try {
       await signingService.verifyOtp(reqToken, code);
       setOtpError('');
-      setScreen(2);
+      setScreen(3);
     } catch (err) {
       setOtpError(err.message || 'Incorrect code.');
     } finally {
@@ -3587,7 +3603,7 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
           <div className="bg-white rounded-xl shadow-2xl overflow-hidden">
             <div className="sos-rainbow" />
             {(screen === 1 || screen === 6 || screen === 2 || screen === 3 || screen === 4) && (
-              <SigningSteps current={screen === 6 ? 1 : screen === 2 ? 2 : screen === 3 ? 3 : screen === 4 ? 4 : 1} />
+              <SigningSteps current={screen === 6 ? 1 : screen === 3 ? 2 : screen === 2 ? 3 : screen === 4 ? 4 : 1} />
             )}
             {screen === 1 && (
               <div className="p-8">
@@ -3645,8 +3661,9 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
                 <div className="flex items-center justify-between gap-3">
                   <button type="button" onClick={()=>downloadContractPdf({ contract, client, company })} className="text-xs text-blue-600 hover:underline inline-flex items-center gap-1">⬇ Download PDF</button>
                   <div className="flex items-center gap-2">
+                    <button type="button" onClick={()=>setScreen(3)} className="px-4 py-2.5 text-sm rounded-lg border border-[var(--border)] text-slate-600 hover:bg-slate-50 transition">Back</button>
                     {isServer && <button type="button" onClick={()=>setShowDeclinePanel(true)} className="px-4 py-2.5 text-sm rounded-lg border border-[var(--border)] text-slate-600 hover:bg-slate-50 transition">Decline / Request changes</button>}
-                    <button disabled={!(scrolledToBottom || readConfirmed)} onClick={()=>setScreen(3)} className="px-5 py-2.5 sos-btn-cyan rounded-lg text-sm font-medium transition disabled:opacity-40 disabled:cursor-not-allowed">
+                    <button disabled={!(scrolledToBottom || readConfirmed)} onClick={()=>setScreen(4)} className="px-5 py-2.5 sos-btn-cyan rounded-lg text-sm font-medium transition disabled:opacity-40 disabled:cursor-not-allowed">
                       {(scrolledToBottom || readConfirmed) ? 'Proceed to Sign' : 'Scroll to the bottom to continue'}
                     </button>
                   </div>
@@ -3719,11 +3736,10 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
                 </div>
 
                 <div className="flex justify-between mt-6">
-                  <button onClick={()=>setScreen(2)} className="px-4 py-2 text-sm rounded-lg border border-[var(--border)] hover:bg-slate-50">Back</button>
                   <div className="flex items-center gap-2">
                     {isServer && <button type="button" onClick={()=>setShowDeclinePanel(true)} className="px-4 py-2.5 text-sm rounded-lg border border-[var(--border)] text-slate-600 hover:bg-slate-50 transition">Decline / Request changes</button>}
-                    <button disabled={savingClientDetails} onClick={continueToSignature} className="px-5 py-2.5 sos-btn-cyan rounded-lg text-sm font-medium transition disabled:opacity-50">{savingClientDetails ? 'Saving…' : 'Continue to Signature'}</button>
                   </div>
+                  <button disabled={savingClientDetails} onClick={continueToSignature} className="px-5 py-2.5 sos-btn-cyan rounded-lg text-sm font-medium transition disabled:opacity-50">{savingClientDetails ? 'Saving…' : 'Continue to Review'}</button>
                 </div>
                 {isServer && showDeclinePanel && <DeclinePanel reason={declineReason} setReason={setDeclineReason} onCancel={()=>{ setShowDeclinePanel(false); setDeclineReason(''); }} onConfirm={submitDecline} busy={decliningBusy} />}
               </div>
@@ -3814,7 +3830,7 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
                 </div>
 
                 <div className="flex justify-between">
-                  <button onClick={()=>setScreen(3)} className="px-4 py-2 text-sm rounded-lg border border-[var(--border)] hover:bg-slate-50">Back</button>
+                  <button onClick={()=>setScreen(2)} className="px-4 py-2 text-sm rounded-lg border border-[var(--border)] hover:bg-slate-50">Back</button>
                   <button disabled={!allConsentsChecked || !hasSignature || busy} onClick={submitSignature} className="px-5 py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition disabled:opacity-40 disabled:cursor-not-allowed">
                     {busy ? 'Signing…' : 'Sign Agreement'}
                   </button>
