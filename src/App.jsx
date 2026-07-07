@@ -1618,6 +1618,44 @@ function SentLinkModal({ url, clientName, clientEmail, onClose }) {
 const MAX_ATTACHMENT_BYTES = 3 * 1024 * 1024;
 const MAX_LOGO_BYTES = 1 * 1024 * 1024;
 
+// Normalize an uploaded logo file to a PNG data URL. Browsers accept WEBP/GIF/
+// SVG via <input accept="image/*">, but the PDF generators (pdf-lib / jsPDF)
+// can only embed PNG or JPEG — a WEBP logo silently falls back to text in the
+// sent/signed PDFs. Rendering the image onto a canvas and exporting PNG makes
+// every logo embeddable everywhere. Falls back to the original data URL if the
+// browser can't decode it (very rare).
+function fileToPngDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Could not read the image.'));
+    reader.onload = () => {
+      const src = reader.result;
+      const img = new Image();
+      img.onload = () => {
+        try {
+          // Cap dimensions so the stored PNG stays lightweight (logos are small).
+          const maxDim = 600;
+          let { width, height } = img;
+          if (width > maxDim || height > maxDim) {
+            const s = maxDim / Math.max(width, height);
+            width = Math.round(width * s); height = Math.round(height * s);
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = width; canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL('image/png'));
+        } catch (_) {
+          resolve(src); // keep the original if canvas export fails
+        }
+      };
+      img.onerror = () => resolve(src); // e.g. SVG the canvas can't rasterize — keep original
+      img.src = src;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 function ContractAttachment({ contract, onChange }) {
   const auth = useAuth();
   const toast = useToast();
@@ -2637,12 +2675,9 @@ function ClientFormModal({ client, readOnly, onClose, onDone }) {
     }
     setLogoBusy(true);
     try {
-      const base64 = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = () => reject(new Error('Could not read the image.'));
-        reader.readAsDataURL(file);
-      });
+      // Normalize to PNG so the logo embeds in the sent/signed PDFs (pdf-lib
+      // can't embed WEBP/GIF/SVG — it would silently fall back to a text name).
+      const base64 = await fileToPngDataUrl(file);
       setLogoBase64(base64);
     } catch (err) {
       toast.push(err.message, 'error');
@@ -2864,12 +2899,9 @@ function CompanyProfileSettings() {
     if (!file) return;
     if (!file.type.startsWith('image/')) { toast.push('Logo must be an image file.', 'error'); return; }
     if (file.size > 1024 * 1024) { toast.push('Logo must be under 1MB.', 'error'); return; }
-    const base64 = await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = () => reject(new Error('Could not read the file.'));
-      reader.readAsDataURL(file);
-    });
+    // Normalize to PNG so the logo embeds in the sent/signed PDFs (pdf-lib can't
+    // embed WEBP/GIF/SVG).
+    const base64 = await fileToPngDataUrl(file);
     const updated = await companyService.update({ logo: base64 });
     setForm(updated);
     toast.push('Logo updated.', 'success');
