@@ -258,8 +258,12 @@ function commercialValue(c: Any) {
   const clubShare = Math.round(playerGross * (pct / 100) * 100) / 100;
   const sosPlayerShare = Math.round((playerGross - clubShare) * 100) / 100;
   const includeClubFee = model === 'club_players';
-  const value = Math.round(((includeClubFee ? clubFee : 0) + sosPlayerShare) * 100) / 100;
-  return { clubFee: includeClubFee ? clubFee : 0, playerGross, pct, clubShare, sosPlayerShare, value, players, fee, months };
+  const computed = Math.round(((includeClubFee ? clubFee : 0) + sosPlayerShare) * 100) / 100;
+  // Fall back to the stored value for legacy contracts without projection inputs.
+  const hasProjectionInputs = fee > 0 && months > 0 && players > 0;
+  const stored = Number(c?.value) || 0;
+  const value = hasProjectionInputs ? computed : stored;
+  return { clubFee: includeClubFee ? clubFee : 0, playerGross, pct, clubShare, sosPlayerShare, value, players, fee, months, hasProjectionInputs };
 }
 function commercialModelText(c: Any, fm: (a: Any) => string): { intro: string; breakdown: string; commission: string } {
   const basis = (c?.billingBasis ?? c?.billing_basis) || 'services';
@@ -273,17 +277,24 @@ function commercialModelText(c: Any, fm: (a: Any) => string): { intro: string; b
   if (cv.months) feeBits.push(`over ${cv.months} months`);
   const feeStr = feeBits.join(' ');
   const minStr = minP ? ` The Client undertakes to enrol a minimum of ${minP} players.` : '';
-  const projStr = (cv.fee && cv.months && cv.players)
+  const proj = cv.hasProjectionInputs;
+  const projStr = proj
     ? ` Based on an expected enrolment of ${cv.players} players, projected player fees total ${fm(cv.playerGross)}${cv.pct ? `, of which the Service Provider retains ${fm(cv.sosPlayerShare)} after the ${cv.pct}% club commission` : ''}.`
     : '';
+  const valStr = proj
+    ? ` The contract value of ${fm(cv.value)} reflects ${model === 'club_players' ? 'the fixed fee plus the projected player contribution' : 'the projected player contribution'} net of commission, and will be reconciled against actual enrolment.`
+    : '';
+  const rawPct = c?.kickbackPct ?? c?.kickback_pct;
+  const hasPct = (rawPct !== '' && rawPct != null && Number(rawPct) > 0) || (proj && cv.pct > 0);
 
   if (model === 'club_players') {
-    const breakdown = `The Client shall pay the Service Provider a fixed fee of ${fm(cv.clubFee)}. Participating players shall fund the remainder of the programme, contributing${feeStr ? ` ${feeStr}` : ' a monthly fee agreed with the Client'}, collected by the Service Provider.${projStr} The contract value of ${fm(cv.value)} reflects the fixed fee plus the projected player contribution net of commission, and will be reconciled against actual enrolment.${minStr}`;
-    const commission = cv.pct ? `The Service Provider shall pay the Client a commission of ${cv.pct}% of the player fees actually collected, reconciled and settled per football season.` : '';
+    const fixedFee = proj ? cv.clubFee : cv.value;
+    const breakdown = `The Client shall pay the Service Provider a fixed fee of ${fm(fixedFee)}${proj ? '' : ' as set out in the Fees & Payment section'}. Participating players shall fund the remainder of the programme, contributing${feeStr ? ` ${feeStr}` : ' a monthly fee agreed with the Client'}, collected by the Service Provider.${projStr}${valStr}${minStr}`;
+    const commission = hasPct ? `The Service Provider shall pay the Client a commission of ${cv.pct}% of the player fees actually collected, reconciled and settled per football season.` : '';
     return { intro, breakdown, commission };
   }
-  const breakdown = `Access fees are collected by the Service Provider directly from participating players${feeStr ? `, at ${feeStr}` : ''}.${projStr} The contract value of ${fm(cv.value)} reflects the projected player contribution net of commission, and will be reconciled against actual enrolment.${minStr}`;
-  const commission = cv.pct ? `The Service Provider shall pay the Client a commission of ${cv.pct}% of the fees actually collected from players enrolled through the Client, reconciled and settled per football season.` : '';
+  const breakdown = `Access fees are collected by the Service Provider directly from participating players${feeStr ? `, at ${feeStr}` : ''}.${projStr}${valStr}${minStr}`;
+  const commission = hasPct ? `The Service Provider shall pay the Client a commission of ${cv.pct}% of the fees actually collected from players enrolled through the Client, reconciled and settled per football season.` : '';
   return { intro, breakdown, commission };
 }
 

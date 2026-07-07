@@ -197,8 +197,15 @@ export function commercialValue(contract) {
   const clubShare = Math.round(playerGross * (pct / 100) * 100) / 100; // kickback to club
   const sosPlayerShare = Math.round((playerGross - clubShare) * 100) / 100;
   const includeClubFee = model === 'club_players';
-  const value = Math.round(((includeClubFee ? clubFee : 0) + sosPlayerShare) * 100) / 100;
-  return { clubFee: includeClubFee ? clubFee : 0, playerGross, pct, clubShare, sosPlayerShare, value, players, fee, months };
+  const computed = Math.round(((includeClubFee ? clubFee : 0) + sosPlayerShare) * 100) / 100;
+  // Whether this contract carries the new projection inputs at all. LEGACY /
+  // in-progress contracts (created before the projection model, or not yet
+  // filled) have no fee/players — for those we must fall back to the stored
+  // `value` so an existing figure is never clobbered to 0 on display or edit.
+  const hasProjectionInputs = fee > 0 && months > 0 && players > 0;
+  const stored = Number(contract.value) || 0;
+  const value = hasProjectionInputs ? computed : stored;
+  return { clubFee: includeClubFee ? clubFee : 0, playerGross, pct, clubShare, sosPlayerShare, value, players, fee, months, hasProjectionInputs };
 }
 
 // Build the Commercial Terms clause parts from a contract + a money formatter
@@ -217,19 +224,30 @@ export function commercialModelText(contract, fm) {
   if (cv.months) feeBits.push(`over ${cv.months} months`);
   const feeStr = feeBits.join(' ');
   const minStr = minP ? ` The Client undertakes to enrol a minimum of ${minP} players.` : '';
-  // Projected player revenue sentence, shown when we have the inputs to compute it.
-  const projStr = (cv.fee && cv.months && cv.players)
+  // Projected player revenue sentence — only when we have the inputs to compute
+  // it (new contracts). LEGACY contracts render the original wording so an old
+  // signed document never shows a €0 projection it never agreed to.
+  const proj = cv.hasProjectionInputs;
+  const projStr = proj
     ? ` Based on an expected enrolment of ${cv.players} players, projected player fees total ${fm(cv.playerGross)}${cv.pct ? `, of which the Service Provider retains ${fm(cv.sosPlayerShare)} after the ${cv.pct}% club commission` : ''}.`
     : '';
+  const valStr = proj
+    ? ` The contract value of ${fm(cv.value)} reflects ${model === 'club_players' ? 'the fixed fee plus the projected player contribution' : 'the projected player contribution'} net of commission, and will be reconciled against actual enrolment.`
+    : '';
+  // Only assert a commission % when it was actually configured (legacy rows may
+  // have none — don't invent a 25% clause they never signed).
+  const hasPct = (contract.kickbackPct !== '' && contract.kickbackPct != null && Number(contract.kickbackPct) > 0) || (proj && cv.pct > 0);
 
   if (model === 'club_players') {
-    const breakdown = `The Client shall pay the Service Provider a fixed fee of ${fm(cv.clubFee)}. Participating players shall fund the remainder of the programme, contributing${feeStr ? ` ${feeStr}` : ' a monthly fee agreed with the Client'}, collected by the Service Provider.${projStr} The contract value of ${fm(cv.value)} reflects the fixed fee plus the projected player contribution net of commission, and will be reconciled against actual enrolment.${minStr}`;
-    const commission = cv.pct ? `The Service Provider shall pay the Client a commission of ${cv.pct}% of the player fees actually collected, reconciled and settled per football season.` : '';
+    // Legacy: the stored value IS the fixed fee. New: cv.clubFee.
+    const fixedFee = proj ? cv.clubFee : cv.value;
+    const breakdown = `The Client shall pay the Service Provider a fixed fee of ${fm(fixedFee)}${proj ? '' : ' as set out in the Fees & Payment section'}. Participating players shall fund the remainder of the programme, contributing${feeStr ? ` ${feeStr}` : ' a monthly fee agreed with the Client'}, collected by the Service Provider.${projStr}${valStr}${minStr}`;
+    const commission = hasPct ? `The Service Provider shall pay the Client a commission of ${cv.pct}% of the player fees actually collected, reconciled and settled per football season.` : '';
     return { intro, breakdown, commission };
   }
   // players_all — players pay SOS directly; commission on amounts collected.
-  const breakdown = `Access fees are collected by the Service Provider directly from participating players${feeStr ? `, at ${feeStr}` : ''}.${projStr} The contract value of ${fm(cv.value)} reflects the projected player contribution net of commission, and will be reconciled against actual enrolment.${minStr}`;
-  const commission = cv.pct ? `The Service Provider shall pay the Client a commission of ${cv.pct}% of the fees actually collected from players enrolled through the Client, reconciled and settled per football season.` : '';
+  const breakdown = `Access fees are collected by the Service Provider directly from participating players${feeStr ? `, at ${feeStr}` : ''}.${projStr}${valStr}${minStr}`;
+  const commission = hasPct ? `The Service Provider shall pay the Client a commission of ${cv.pct}% of the fees actually collected from players enrolled through the Client, reconciled and settled per football season.` : '';
   return { intro, breakdown, commission };
 }
 
