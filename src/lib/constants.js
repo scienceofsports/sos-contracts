@@ -189,23 +189,37 @@ export function commercialValue(contract) {
   const model = contract?.paymentModel || null;
   const fee = Number(contract.playerMonthlyFee) || 0;
   const months = Number(contract.playerMonths) || 0;
-  const players = Number(contract.expectedPlayers) || 0;
   const pct = contract.kickbackPct === '' || contract.kickbackPct == null
     ? DEFAULT_KICKBACK_PCT : Number(contract.kickbackPct) || 0;
   const clubFee = Number(contract.clubFixedFee) || 0;
-  const playerGross = Math.round(fee * months * players * 100) / 100;
-  const clubShare = Math.round(playerGross * (pct / 100) * 100) / 100; // kickback to club
-  const sosPlayerShare = Math.round((playerGross - clubShare) * 100) / 100;
   const includeClubFee = model === 'club_players';
-  const computed = Math.round(((includeClubFee ? clubFee : 0) + sosPlayerShare) * 100) / 100;
-  // Whether this contract carries the new projection inputs at all. LEGACY /
-  // in-progress contracts (created before the projection model, or not yet
-  // filled) have no fee/players — for those we must fall back to the stored
-  // `value` so an existing figure is never clobbered to 0 on display or edit.
-  const hasProjectionInputs = fee > 0 && months > 0 && players > 0;
+  // NEW MODEL (per-player, no guessed headcount): the contract value is the
+  // GUARANTEED, up-front money only — the club fixed fee (Shared). Player fees
+  // are a per-player-per-month RATE billed monthly on ACTUAL enrolment, so they
+  // are variable and are NOT baked into the signed value. This removes both the
+  // old bugs: (1) the value no longer needs a made-up "expected players" count,
+  // and (2) the total always equals the components shown (no stale fallback).
+  const guaranteed = Math.round((includeClubFee ? clubFee : 0) * 100) / 100;
+  // `hasPlayerFees` = there is a per-player charge to describe in the clause.
+  const hasPlayerFees = fee > 0;
+  // Pure player-funded (no club fee) has no fixed up-front value — it's billed
+  // entirely on enrolment. `variableOnly` flags that so the UI/clause say
+  // "billed monthly on actual enrolment" instead of a misleading fixed number.
+  const variableOnly = !includeClubFee || guaranteed <= 0;
+  // Legacy contracts created under the OLD projection model stored a computed
+  // value; if this row has no club fee but does have a stored value, keep it so
+  // an existing signed figure is never clobbered.
   const stored = Number(contract.value) || 0;
-  const value = hasProjectionInputs ? computed : stored;
-  return { clubFee: includeClubFee ? clubFee : 0, playerGross, pct, clubShare, sosPlayerShare, value, players, fee, months, hasProjectionInputs };
+  const value = guaranteed > 0 ? guaranteed : stored;
+  return {
+    clubFee: includeClubFee ? clubFee : 0,
+    pct, value, fee, months,
+    hasPlayerFees, variableOnly,
+    // Back-compat fields some callers/PDFs still read; player revenue is no
+    // longer projected into the value, so these describe the RATE only.
+    players: 0, playerGross: 0, clubShare: 0, sosPlayerShare: 0,
+    hasProjectionInputs: hasPlayerFees,
+  };
 }
 
 // Build the Commercial Terms clause parts from a contract + a money formatter
@@ -219,34 +233,28 @@ export function commercialModelText(contract, fm) {
   const cv = commercialValue(contract);
   const minP = Number(contract.minPlayers) || 0;
   const intro = PAYMENT_MODEL_LABELS[model] || '';
-  const feeBits = [];
-  if (cv.fee) feeBits.push(`${fm(cv.fee)} per player per month`);
-  if (cv.months) feeBits.push(`over ${cv.months} months`);
-  const feeStr = feeBits.join(' ');
+  // Per-player RATE sentence — no guessed headcount, no projected total. Player
+  // fees are billed monthly on actual enrolment and reconciled per season.
+  const rateStr = cv.fee ? `${fm(cv.fee)} per player per month` : 'a monthly fee agreed with the Client';
   const minStr = minP ? ` The Client undertakes to enrol a minimum of ${minP} players.` : '';
-  // Projected player revenue sentence — only when we have the inputs to compute
-  // it (new contracts). LEGACY contracts render the original wording so an old
-  // signed document never shows a €0 projection it never agreed to.
-  const proj = cv.hasProjectionInputs;
-  const projStr = proj
-    ? ` Based on an expected enrolment of ${cv.players} players, projected player fees total ${fm(cv.playerGross)}${cv.pct ? `, of which the Service Provider retains ${fm(cv.sosPlayerShare)} after the ${cv.pct}% club commission` : ''}.`
-    : '';
-  const valStr = proj
-    ? ` The contract value of ${fm(cv.value)} reflects ${model === 'club_players' ? 'the fixed fee plus the projected player contribution' : 'the projected player contribution'} net of commission, and will be reconciled against actual enrolment.`
-    : '';
+  const reconStr = ' Player fees are billed monthly on actual enrolment and reconciled per football season; no fixed number of players is guaranteed.';
   // Only assert a commission % when it was actually configured (legacy rows may
   // have none — don't invent a 25% clause they never signed).
-  const hasPct = (contract.kickbackPct !== '' && contract.kickbackPct != null && Number(contract.kickbackPct) > 0) || (proj && cv.pct > 0);
+  const hasPct = (contract.kickbackPct !== '' && contract.kickbackPct != null && Number(contract.kickbackPct) > 0) || cv.pct > 0;
 
   if (model === 'club_players') {
-    // Legacy: the stored value IS the fixed fee. New: cv.clubFee.
-    const fixedFee = proj ? cv.clubFee : cv.value;
-    const breakdown = `The Client shall pay the Service Provider a fixed fee of ${fm(fixedFee)}${proj ? '' : ' as set out in the Fees & Payment section'}. Participating players shall fund the remainder of the programme, contributing${feeStr ? ` ${feeStr}` : ' a monthly fee agreed with the Client'}, collected by the Service Provider.${projStr}${valStr}${minStr}`;
+    // Shared: the club fixed fee is the guaranteed contract value; players fund
+    // the rest at the per-player rate, variable on actual enrolment.
+    const feeClause = cv.clubFee > 0
+      ? `The Client shall pay the Service Provider a fixed fee of ${fm(cv.clubFee)} per season.`
+      : `The Client shall pay the Service Provider the fixed fee set out in the Fees & Payment section.`;
+    const breakdown = `${feeClause} Participating players shall fund the remainder of the programme, contributing ${rateStr}, collected by the Service Provider.${reconStr}${minStr}`;
     const commission = hasPct ? `The Service Provider shall pay the Client a commission of ${cv.pct}% of the player fees actually collected, reconciled and settled per football season.` : '';
     return { intro, breakdown, commission };
   }
-  // players_all — players pay SOS directly; commission on amounts collected.
-  const breakdown = `Access fees are collected by the Service Provider directly from participating players${feeStr ? `, at ${feeStr}` : ''}.${projStr}${valStr}${minStr}`;
+  // players_all — players pay SOS directly at the per-player rate; commission on
+  // amounts actually collected. No up-front fixed value.
+  const breakdown = `Access fees are collected by the Service Provider directly from participating players, at ${rateStr}.${reconStr}${minStr}`;
   const commission = hasPct ? `The Service Provider shall pay the Client a commission of ${cv.pct}% of the fees actually collected from players enrolled through the Client, reconciled and settled per football season.` : '';
   return { intro, breakdown, commission };
 }
