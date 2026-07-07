@@ -333,6 +333,31 @@ export function vatSummary(contract, fm, client) {
   return { applies: false, sentence: noteText, amountLabel: 'Amount', note: noteText };
 }
 
+// Short, scannable bullet summary of the agreement for the admin Contract
+// Details panel — just WHAT is included, no marketing prose. Returns an array of
+// one-line strings, e.g. ["Platform access — 3 Directors, 5 Coaches, Unlimited
+// Players", "Match Team & Player Reports (included)", "24-hour SLA"].
+export function summarizeAgreement(services, slaHours) {
+  const items = computeServiceLineItems(services);
+  if (!items.length) return [];
+  const out = items.map(i => {
+    let line = i.label;
+    if (i.key === 'platform_access') {
+      const seats = platformSeatsSummary(services.platform_access);
+      if (seats) line += ` — ${seats}`;
+    } else if (i.unit === 'per_match') {
+      line += ` (${i.qty} matches)`;
+    } else if (i.unit === 'per_unit') {
+      line += ` (${i.qty})`;
+    }
+    if (i.included && i.unit !== 'included') line += ' (included)';
+    else if (i.unit === 'included') line += ' (included)';
+    return line;
+  });
+  out.push(`${slaHours || 24}-hour SLA on key analytical outputs after each match`);
+  return out;
+}
+
 export function generateDescriptionFromServices(services, slaHours) {
   const items = computeServiceLineItems(services);
   if (!items.length) return '';

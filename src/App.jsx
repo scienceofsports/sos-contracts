@@ -10,6 +10,7 @@ import {
   computeServiceLineItems,
   platformSeatsSummary,
   generateDescriptionFromServices,
+  summarizeAgreement,
   analysisScopeText,
   seasonLabelFromDates,
   commercialModelText,
@@ -1617,7 +1618,20 @@ function ContractDetail({ contractId, navigate }) {
             <div className="flex justify-between"><dt className="text-slate-500">End</dt><dd>{fmtDate(contract.endDate)}</dd></div>
             <div className="flex justify-between"><dt className="text-slate-500">Governing Law</dt><dd>{contract.governingLaw}</dd></div>
           </dl>
-          {contract.description && <p className="text-sm text-slate-600 mt-4 pt-4 border-t border-[var(--border)]">{contract.description}</p>}
+          {(() => {
+            const bullets = contract.services ? summarizeAgreement(contract.services, contract.slaHours) : [];
+            if (!bullets.length) return null;
+            return (
+              <div className="mt-4 pt-4 border-t border-[var(--border)]">
+                <div className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-2">What's included</div>
+                <ul className="text-sm text-slate-600 space-y-1">
+                  {bullets.map((b, i) => (
+                    <li key={i} className="flex gap-2"><span className="text-[var(--cyan)] shrink-0">•</span><span>{b}</span></li>
+                  ))}
+                </ul>
+              </div>
+            );
+          })()}
         </div>
 
         <div className="bg-white rounded-xl border border-[var(--border)] p-5">
