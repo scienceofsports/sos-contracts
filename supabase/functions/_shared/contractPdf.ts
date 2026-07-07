@@ -261,7 +261,7 @@ const PAYMENT_MODEL_LABELS: Record<string, string> = {
 // enrolment (variable, never baked into the signed value). Keep in sync with
 // src/lib/constants.js.
 const DEFAULT_KICKBACK_PCT = 25;
-function commercialValue(c: Any) {
+function commercialValue(c: Any, servicesTotal?: number) {
   const model = (c?.paymentModel ?? c?.payment_model) || null;
   const fee = Number(c?.playerMonthlyFee ?? c?.player_monthly_fee) || 0;
   const months = Number(c?.playerMonths ?? c?.player_months) || 0;
@@ -269,13 +269,20 @@ function commercialValue(c: Any) {
   const pct = (rawPct === '' || rawPct == null) ? DEFAULT_KICKBACK_PCT : Number(rawPct) || 0;
   const clubFee = Number(c?.clubFixedFee ?? c?.club_fixed_fee) || 0;
   const includeClubFee = model === 'club_players';
-  const guaranteed = Math.round((includeClubFee ? clubFee : 0) * 100) / 100;
+  const svc = Math.round((
+    servicesTotal != null
+      ? Number(servicesTotal) || 0
+      : computeServiceLineItems(c?.services).reduce((s: number, i: Any) => s + i.amount, 0)
+  ) * 100) / 100;
+  // Guaranteed value = chargeable services + club fixed fee (Shared).
+  const guaranteed = Math.round((svc + (includeClubFee ? clubFee : 0)) * 100) / 100;
   const hasPlayerFees = fee > 0;
-  const variableOnly = !includeClubFee || guaranteed <= 0;
+  const variableOnly = guaranteed <= 0;
   const stored = Number(c?.value) || 0;
   const value = guaranteed > 0 ? guaranteed : stored;
   return {
     clubFee: includeClubFee ? clubFee : 0,
+    servicesTotal: svc,
     pct, value, fee, months, hasPlayerFees, variableOnly,
     players: 0, playerGross: 0, clubShare: 0, sosPlayerShare: 0,
     hasProjectionInputs: hasPlayerFees,

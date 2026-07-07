@@ -185,7 +185,12 @@ export const DEFAULT_KICKBACK_PCT = 25;
 // commission (kickback) is applied to the PLAYER revenue only; the club fixed
 // fee (Shared) is kept in full. Returns all parts so the UI + clause + PDFs show
 // an identical breakdown. NOTE: ported into both PDF generators — keep in sync.
-export function commercialValue(contract) {
+// `servicesTotal` = the chargeable services catalogue total the CLIENT pays on
+// top of the funding model (camera install, reports, etc.). When omitted it is
+// derived from contract.services, so the PDFs (which carry services in the
+// snapshot) compute it automatically. A Shared deal that also sells services
+// must charge BOTH — services + club fixed fee — so they are summed here.
+export function commercialValue(contract, servicesTotal) {
   const model = contract?.paymentModel || null;
   const fee = Number(contract.playerMonthlyFee) || 0;
   const months = Number(contract.playerMonths) || 0;
@@ -193,26 +198,27 @@ export function commercialValue(contract) {
     ? DEFAULT_KICKBACK_PCT : Number(contract.kickbackPct) || 0;
   const clubFee = Number(contract.clubFixedFee) || 0;
   const includeClubFee = model === 'club_players';
-  // NEW MODEL (per-player, no guessed headcount): the contract value is the
-  // GUARANTEED, up-front money only — the club fixed fee (Shared). Player fees
-  // are a per-player-per-month RATE billed monthly on ACTUAL enrolment, so they
-  // are variable and are NOT baked into the signed value. This removes both the
-  // old bugs: (1) the value no longer needs a made-up "expected players" count,
-  // and (2) the total always equals the components shown (no stale fallback).
-  const guaranteed = Math.round((includeClubFee ? clubFee : 0) * 100) / 100;
-  // `hasPlayerFees` = there is a per-player charge to describe in the clause.
+  const svc = Math.round((
+    servicesTotal != null
+      ? Number(servicesTotal) || 0
+      : computeServiceLineItems(contract.services).reduce((s, i) => s + i.amount, 0)
+  ) * 100) / 100;
+  // NEW MODEL (per-player, no guessed headcount): the GUARANTEED contract value
+  // is the up-front money the client owes regardless of enrolment — the
+  // chargeable SERVICES total PLUS the club fixed fee (Shared). Player fees are a
+  // per-player-per-month RATE billed monthly on ACTUAL enrolment, so they are
+  // variable and are NOT baked into the signed value. This removes the old bugs:
+  // no made-up "expected players", the total always equals the components shown,
+  // and services are no longer dropped from a Shared/Player-funded deal.
+  const guaranteed = Math.round((svc + (includeClubFee ? clubFee : 0)) * 100) / 100;
   const hasPlayerFees = fee > 0;
-  // Pure player-funded (no club fee) has no fixed up-front value — it's billed
-  // entirely on enrolment. `variableOnly` flags that so the UI/clause say
-  // "billed monthly on actual enrolment" instead of a misleading fixed number.
-  const variableOnly = !includeClubFee || guaranteed <= 0;
-  // Legacy contracts created under the OLD projection model stored a computed
-  // value; if this row has no club fee but does have a stored value, keep it so
-  // an existing signed figure is never clobbered.
+  // Pure player-funded with no guaranteed money at all -> value is variable.
+  const variableOnly = guaranteed <= 0;
   const stored = Number(contract.value) || 0;
   const value = guaranteed > 0 ? guaranteed : stored;
   return {
     clubFee: includeClubFee ? clubFee : 0,
+    servicesTotal: svc,
     pct, value, fee, months,
     hasPlayerFees, variableOnly,
     // Back-compat fields some callers/PDFs still read; player revenue is no

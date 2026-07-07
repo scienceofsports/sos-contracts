@@ -627,22 +627,24 @@ function CollapsibleSection({ title, summary, open, onToggle, children }) {
 // Live breakdown of how the player-funded (Shared / Player-funded) contract
 // value is computed, so the figure is never a mystery: club fee + player gross
 // − club commission = value. Mirrors commercialValue() exactly.
-function CommercialBreakdown({ form }) {
-  const cv = commercialValue(form);
+function CommercialBreakdown({ form, servicesTotal = 0 }) {
+  const cv = commercialValue(form, servicesTotal);
   const cur = form.currency;
-  if (!cv.clubFee && !cv.fee) {
+  if (!cv.servicesTotal && !cv.clubFee && !cv.fee) {
     return <p className="text-xs text-slate-400 mt-3 pt-3 border-t border-[var(--border)]">Enter the club fixed fee and/or the per-player monthly fee.</p>;
   }
+  const guaranteed = cv.value; // services + club fixed fee
   return (
     <div className="mt-3 pt-3 border-t border-[var(--border)] text-xs text-slate-600 space-y-1">
+      {cv.servicesTotal > 0 && <div className="flex justify-between"><span>Services (from selection above)</span><span className="font-data">{fmtMoney(cv.servicesTotal, cur)}</span></div>}
       {cv.clubFee > 0 && <div className="flex justify-between"><span>Club fixed fee (per season)</span><span className="font-data">{fmtMoney(cv.clubFee, cur)}</span></div>}
       {cv.fee > 0 && <div className="flex justify-between text-slate-500"><span>Player fee (billed on actual enrolment)</span><span className="font-data">{fmtMoney(cv.fee, cur)} / player / mo</span></div>}
       {cv.pct > 0 && <div className="flex justify-between text-slate-500"><span>Club commission on player fees</span><span className="font-data">{cv.pct}%</span></div>}
       <div className="flex justify-between font-semibold text-[var(--navy-deep)] pt-1 border-t border-[var(--border)]">
         <span>Contract value{cv.fee > 0 ? ' (guaranteed)' : ''}</span>
-        <span className="font-data">{cv.clubFee > 0 ? fmtMoney(cv.clubFee, cur) : (cv.fee > 0 ? 'Variable' : fmtMoney(cv.value, cur))}</span>
+        <span className="font-data">{guaranteed > 0 ? fmtMoney(guaranteed, cur) : (cv.fee > 0 ? 'Variable' : fmtMoney(cv.value, cur))}</span>
       </div>
-      <p className="text-[11px] text-slate-400 pt-1">{cv.fee > 0 ? 'The guaranteed value is the club fixed fee. Player fees are billed monthly on actual enrolment and reconciled per season — no fixed player count is assumed.' : 'Club fixed fee per season.'}</p>
+      <p className="text-[11px] text-slate-400 pt-1">{cv.fee > 0 ? 'The guaranteed value is the services total plus the club fixed fee. Player fees are billed monthly on actual enrolment and reconciled per season — no fixed player count is assumed.' : 'Services total plus the club fixed fee.'}</p>
     </div>
   );
 }
@@ -991,13 +993,11 @@ function ContractForm({ navigate, editContractId }) {
   const lineItemsTotal = lineItems.reduce((s,i)=>s+i.amount,0);
 
   // Commercial Model. Value sources per model (all AUTO-computed now):
-  //  - Club-funded (services basis): value = services catalog total.
-  //  - Shared: value = club fixed fee + (player fee x months x expected players
-  //    x (1 - kickback%)). The club fee is kept in full; the kickback reduces the
-  //    player revenue only.
-  //  - Player-funded: value = player fee x months x expected players x (1 - kickback%).
-  //  All are projections reconciled against actual enrolment (stated in the clause).
-  const commercialProjection = form.billingBasis === 'player_funded' ? commercialValue(form) : null;
+  //  - Club-funded (services basis): value = services catalogue total.
+  //  - Shared: value = services total + club fixed fee (the guaranteed money the
+  //    club owes). Player fees are variable, billed on actual enrolment.
+  //  - Player-funded: value = services total (if any); player fees are variable.
+  const commercialProjection = form.billingBasis === 'player_funded' ? commercialValue(form, lineItemsTotal) : null;
   useEffect(() => {
     if (form.billingBasis === 'services') {
       const total = String(lineItemsTotal);
@@ -1337,7 +1337,7 @@ function ContractForm({ navigate, editContractId }) {
               <Field label="Minimum players (optional)"><input type="number" min="0" value={form.minPlayers} onChange={e=>set('minPlayers', e.target.value)} className={inputCls(false)} placeholder="optional" /></Field>
               <Field label="Club commission %"><input type="number" min="0" max="100" step="0.1" value={form.kickbackPct} onChange={e=>set('kickbackPct', e.target.value)} className={inputCls(false)} placeholder="25" /></Field>
             </div>
-            <CommercialBreakdown form={form} />
+            <CommercialBreakdown form={form} servicesTotal={lineItemsTotal} />
           </div>
         )}
         {form.paymentModel === 'players_all' && (
@@ -1348,7 +1348,7 @@ function ContractForm({ navigate, editContractId }) {
               <Field label="Minimum players (optional)"><input type="number" min="0" value={form.minPlayers} onChange={e=>set('minPlayers', e.target.value)} className={inputCls(false)} placeholder="optional" /></Field>
               <Field label="Club commission %"><input type="number" min="0" max="100" step="0.1" value={form.kickbackPct} onChange={e=>set('kickbackPct', e.target.value)} className={inputCls(false)} placeholder="25" /></Field>
             </div>
-            <CommercialBreakdown form={form} />
+            <CommercialBreakdown form={form} servicesTotal={lineItemsTotal} />
           </div>
         )}
 
