@@ -1276,6 +1276,11 @@ function ContractDetail({ contractId, navigate }) {
   // Inline invoice-ref editing: { id, value } while a row is being edited.
   const [editingRef, setEditingRef] = useState(null);
   const [savingRef, setSavingRef] = useState(false);
+  // The signing link captured from the last send/resend, so it can be copied
+  // and shared (e.g. WhatsApp) alongside the email. Cleared on recall to draft.
+  const [signLink, setSignLink] = useState('');
+  const [copyingLink, setCopyingLink] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
 
   const load = useCallback(async () => {
     const c = await contractService.getById(contractId);
@@ -1324,7 +1329,8 @@ function ContractDetail({ contractId, navigate }) {
     setShowSendModal(false);
     try {
       const origin = window.location.origin;
-      await signingService.createSigningRequest(contract.id, origin);
+      const res = await signingService.createSigningRequest(contract.id, origin);
+      if (res?.signUrl) setSignLink(res.signUrl);
       toast.push(`Signing request sent to ${client.contactEmail}.`, 'success');
       load(); // contract is now status 'sent'
     } catch (err) {
@@ -1334,7 +1340,8 @@ function ContractDetail({ contractId, navigate }) {
 
   const resendContract = async () => {
     try {
-      await signingService.createSigningRequest(contract.id, window.location.origin);
+      const res = await signingService.createSigningRequest(contract.id, window.location.origin);
+      if (res?.signUrl) setSignLink(res.signUrl);
       toast.push('New signing link sent.', 'success');
       load();
     } catch (err) {
@@ -1342,9 +1349,35 @@ function ContractDetail({ contractId, navigate }) {
     }
   };
 
+  // Copy the client's signing link to the clipboard for sharing (WhatsApp, SMS).
+  // If we don't already have the link in memory (e.g. the contract was sent in a
+  // previous session), issue a fresh link and copy that — a new link also emails
+  // the client, which is the safe, auditable behaviour.
+  const copySignLink = async () => {
+    setCopyingLink(true);
+    try {
+      let url = signLink;
+      if (!url) {
+        const res = await signingService.createSigningRequest(contract.id, window.location.origin);
+        url = res?.signUrl || '';
+        if (url) setSignLink(url);
+      }
+      if (!url) throw new Error('Could not generate a signing link.');
+      await navigator.clipboard.writeText(url);
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2500);
+      toast.push('Signing link copied — paste it into WhatsApp or a message.', 'success');
+    } catch (err) {
+      toast.push(err.message || 'Could not copy the signing link.', 'error');
+    } finally {
+      setCopyingLink(false);
+    }
+  };
+
   const reviseContract = async () => {
     try {
       await contractService.updateStatus(contract.id, 'draft');
+      setSignLink('');
       toast.push('Contract recalled to draft — you can now edit and resend.', 'success');
       load();
     } catch (err) {
@@ -1405,7 +1438,18 @@ function ContractDetail({ contractId, navigate }) {
         <div className="bg-amber-50 rounded-xl border border-amber-200 p-5 mb-6 no-print">
           <div className="font-heading text-base mb-1 text-amber-800">📧 Sent for signature — awaiting the client</div>
           <p className="text-sm text-amber-700">A signing request has been emailed to <strong>{client?.contactEmail}</strong>. The client will verify their email with a one-time code, review the agreement, and sign. You'll be notified by email the moment they sign, and this contract will move to <strong>Active</strong> automatically.</p>
-          <p className="text-xs text-amber-600 mt-2">Sent to the wrong address? Update the client's email under Clients, then use “Resend / New link” above.</p>
+          {/* Copyable signing link — share via WhatsApp / message as well as email. */}
+          <div className="mt-3 pt-3 border-t border-amber-200">
+            <div className="text-xs font-medium text-amber-800 mb-1.5">Share the signing link directly</div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button onClick={copySignLink} disabled={copyingLink} className="inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg bg-[var(--blue-primary)] text-white hover:bg-blue-700 transition disabled:opacity-50">
+                {copyingLink ? 'Preparing…' : linkCopied ? '✓ Copied' : '🔗 Copy signing link'}
+              </button>
+              {signLink && <span className="text-xs text-amber-700 font-mono truncate max-w-full sm:max-w-md" title={signLink}>{signLink}</span>}
+            </div>
+            <p className="text-[11px] text-amber-600 mt-1.5">The link is unique to this client and asks them to verify their email before signing.{!signLink && ' Generating it here also re-emails the link to the client.'}</p>
+          </div>
+          <p className="text-xs text-amber-600 mt-3">Sent to the wrong address? Update the client's email under Clients, then use “Resend / New link” above.</p>
         </div>
       )}
 
