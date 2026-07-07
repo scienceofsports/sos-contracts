@@ -900,7 +900,7 @@ export async function buildContractPdf(input: {
       }
       y += 8;
     }
-    text(`All payments shall be made by bank transfer following the issuance of a valid invoice by the Service Provider, in accordance with applicable VAT regulations. A late payment penalty of ${latePaymentPenalty}% per month applies to overdue amounts. If any undisputed invoice remains unpaid for more than fourteen (14) days after written notice, the Service Provider may suspend access and deliverables until payment is received, without liability and without relieving the Client of its payment obligations. The Client shall reimburse the Service Provider's reasonable costs of recovering overdue amounts, including legal and collection fees.`, { size: 10, gap: 10 });
+    text(`All payments shall be made by bank transfer following the issuance of a valid invoice by the Service Provider, in accordance with applicable VAT regulations. A late payment penalty of ${latePaymentPenalty}% per month applies to overdue amounts.`, { size: 10, gap: 10 });
   }
   {
     const bankName = pick(co, 'bankName', 'bank_name');
@@ -948,7 +948,7 @@ export async function buildContractPdf(input: {
   calloutClause(confidentialityNum, 'Confidentiality & Data Protection',
     'Confidentiality & GDPR.',
     'The Service Provider shall process personal data strictly in accordance with the GDPR, the applicable Cyprus data protection legislation (Law 125(I)/2018), and Regulation (EU) 2016/679, and solely on documented instructions from the Client and exclusively for the purposes of this Agreement.',
-    'In respect of personal data processed under this Agreement, the Client acts as data controller and the Service Provider as data processor. The Service Provider shall process such data only as needed to provide the services, keep it secure, not transfer it outside the EEA without safeguards, assist the Client with data-subject requests, and delete or return the data on termination. Where the data concerns minors, the Client is responsible for obtaining any necessary parental or guardian consent, and shall indemnify the Service Provider against any claim, penalty or loss arising from the Client\'s failure to obtain such consent.',
+    'In respect of personal data processed under this Agreement, the Client acts as data controller and the Service Provider as data processor. The Service Provider shall process such data only as needed to provide the services, keep it secure, not transfer it outside the EEA without safeguards, assist the Client with data-subject requests, and delete or return the data on termination. Where the data concerns minors, the Client is responsible for obtaining any necessary parental or guardian consent.',
     "All match analysis, reports, video clips, data outputs, and technical insights produced under this Agreement shall be treated as strictly confidential and used solely for the Client's internal purposes.");
 
   // --- Intellectual Property Rights ----------------------------------------
@@ -962,12 +962,12 @@ export async function buildContractPdf(input: {
 
   // --- Termination ---------------------------------------------------------
   clause(terminationNum, 'Termination',
-    "Either Party may terminate this Agreement with three (3) months' written notice, or immediately in the event of a material breach not remedied within thirty (30) days. Where the Client terminates for convenience before the end of the then-current term, all fees for the remainder of that term shall become immediately due and payable.",
+    "Either Party may terminate this Agreement with three (3) months' written notice, or immediately in the event of a material breach not remedied within thirty (30) days.",
     'Upon termination or expiration of this Agreement for any reason, the Service Provider shall promptly deliver to the Client all Deliverables produced under this Agreement.');
 
   // --- Limitation of Liability ---------------------------------------------
   clause(liabilityNum, 'Limitation of Liability',
-    "The Service Provider shall not be responsible for sporting results, team selection decisions, or competition outcomes. The Service Provider's total liability to the Client under this Agreement shall not exceed the fees paid during the preceding twelve (12) months; this limitation applies to the Service Provider's liability only and does not limit the Client's obligation to pay fees due under this Agreement. This limitation shall not apply to breaches of confidentiality, data protection obligations, or unauthorized use of the Client's data or intellectual property.");
+    "The Service Provider shall not be responsible for sporting results, team selection decisions, or competition outcomes. Total liability under this Agreement shall not exceed the fees paid during the preceding twelve (12) months. This limitation shall not apply to breaches of confidentiality, data protection obligations, or unauthorized use of the Client's data or intellectual property.");
 
   // --- Force Majeure -------------------------------------------------------
   clause(forceMajeureNum, 'Force Majeure',
