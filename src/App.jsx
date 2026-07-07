@@ -583,7 +583,27 @@ const CONTRACT_PACKAGES = [
     teamSla: Object.fromEntries(ALL_TEAMS.map(t => [t, 72])) },
 ];
 function defaultServicesState() {
-  return Object.fromEntries(SERVICE_CATALOG.map(s => [s.key, { selected: DEFAULT_SELECTED_SERVICES.includes(s.key), qty:s.defaultQty, rate:s.defaultRate, included:false, ...(s.key === 'platform_access' ? { directorSeats:0, coachSeats:0, playerSeats:0 } : {}) }]));
+  // New contracts pre-fill the platform seats we use as standard (3 Directors,
+  // 5 Coaches, Unlimited Players). All editable per contract.
+  return Object.fromEntries(SERVICE_CATALOG.map(s => [s.key, { selected: DEFAULT_SELECTED_SERVICES.includes(s.key), qty:s.defaultQty, rate:s.defaultRate, included:false, ...(s.key === 'platform_access' ? { directorSeats:3, coachSeats:5, playerSeats:-1 } : {}) }]));
+}
+
+// Local YYYY-MM-DD for a Date (avoids UTC off-by-one from toISOString()).
+function ymd(d) {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+// Today, as YYYY-MM-DD (the default contract start date).
+function todayYmd() { return ymd(new Date()); }
+// End of the football season a given start date falls in: 30 June of the season
+// that ends after that date. A contract starting Jul–Dec 2026 or Jan–Jun 2027
+// both map to 30/06/2027. Auto-rolls each year so it never goes stale.
+function seasonEndYmd(startStr) {
+  const d = startStr ? new Date(startStr) : new Date();
+  const y = d.getFullYear();
+  // If start is in Jan–Jun, the season ends 30 June of the SAME year; otherwise
+  // (Jul–Dec) it ends 30 June of the NEXT year.
+  const endYear = d.getMonth() <= 5 ? y : y + 1;
+  return `${endYear}-06-30`;
 }
 
 // Collapsible form section: a bordered card with a clickable header (title +
@@ -633,7 +653,11 @@ function ContractForm({ navigate, editContractId }) {
   const [services, setServices] = useState(defaultServicesState);
   const [form, setForm] = useState({
     title:'', clientId:'', type:'platform_subscription', value:'', currency:'EUR',
-    startDate:'', endDate:'', paymentType:'one_time', paymentTermsDays:30, latePaymentPenalty:1.5,
+    // New-contract defaults (all editable): start = today, end = 30 June of the
+    // season it starts in, payment = milestone. Ignored when editing — the load
+    // effect below overwrites `form` with the existing contract's saved values.
+    startDate: isEdit ? '' : todayYmd(), endDate: isEdit ? '' : seasonEndYmd(todayYmd()),
+    paymentType: isEdit ? 'one_time' : 'milestone', paymentTermsDays:30, latePaymentPenalty:1.5,
     governingLaw:'Republic of Cyprus', jurisdiction:'Nicosia, Cyprus', description:'', slaHours:24, specialTerms:'',
     analysisTeams:[], oppMatchFootage:false, oppTeamAnalysis:false, oppPlayerAnalysis:false,
     billingBasis:'services', paymentModel:'club_all', playerMonthlyFee:'', playerMonths:'', kickbackPct:'', minPlayers:'', expectedPlayers:'', clubFixedFee:'', slaBands:[], teamSla:{},
@@ -769,15 +793,45 @@ function ContractForm({ navigate, editContractId }) {
   };
 
   const addInstallmentRow = () => {
+    milestonesTouched.current = true;
     setInstallments(rows => [...rows, { date: '', amount: '' }]);
   };
   const updateInstallmentRow = (i, patch) => {
+    milestonesTouched.current = true;
     setInstallments(rows => rows.map((r, idx) => idx === i ? { ...r, ...patch } : r));
   };
   const removeInstallmentRow = (i) => {
+    milestonesTouched.current = true;
     setInstallments(rows => rows.filter((_, idx) => idx !== i));
   };
   const milestoneTotal = installments.reduce((s,r) => s + (Number(r.amount) || 0), 0);
+
+  // Build the standard 3-instalment milestone schedule from a start date + total:
+  // due +1 week / +2 months / +4 months, split 34% / 33% / 33% (last row absorbs
+  // rounding so it always sums to the total exactly).
+  const buildDefaultMilestones = (startStr, total) => {
+    const t = Number(total) || 0;
+    const mk = (fn) => { const d = new Date(startStr); fn(d); return ymd(d); };
+    const i1 = round2(t * 0.34);
+    const i2 = round2(t * 0.33);
+    const i3 = round2(t - i1 - i2);
+    return [
+      { date: mk(d => d.setDate(d.getDate() + 7)),  amount: String(i1) },
+      { date: mk(d => d.setMonth(d.getMonth() + 2)), amount: String(i2) },
+      { date: mk(d => d.setMonth(d.getMonth() + 4)), amount: String(i3) },
+    ];
+  };
+  // Whether the user has manually edited the milestone rows yet. Until they do,
+  // we keep the rows in sync with the start date + value for NEW contracts, so
+  // the standard schedule pre-fills without the user typing anything.
+  const milestonesTouched = useRef(false);
+  useEffect(() => {
+    if (isEdit) return;                                   // never auto-fill an edit
+    if (form.paymentType !== 'milestone') return;
+    if (milestonesTouched.current) return;                // respect manual edits
+    if (!form.startDate || !(Number(form.value) > 0)) return;
+    setInstallments(buildDefaultMilestones(form.startDate, form.value));
+  }, [isEdit, form.paymentType, form.startDate, form.value]);
 
   const generateTitle = (clientId, services) => {
     const clientName = clients?.find(c => c.id === clientId)?.companyName;
