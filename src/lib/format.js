@@ -82,3 +82,67 @@ export function daysOverdue(payment) {
   if (effectiveStatus(payment) !== 'overdue' || !payment?.dueDate) return 0;
   return Math.floor((Date.now() - new Date(payment.dueDate).getTime()) / 86400000);
 }
+
+// How many days a signing link stays valid after a contract is sent.
+export const SIGNING_LINK_DAYS = 7;
+
+// Effective contract status, computed live: a 'sent' contract whose 7-day
+// signing link has lapsed reads as 'expired' everywhere in the admin UI — no
+// cron needed. Every other status is respected as-is. The signing page itself
+// enforces expiry server-side; this is purely the admin-side view.
+export function effectiveContractStatus(contract) {
+  if (!contract) return 'draft';
+  const s = contract.status || 'draft';
+  if (s === 'sent' && contract.sentAt) {
+    const expiry = new Date(contract.sentAt).getTime() + SIGNING_LINK_DAYS * 86400000;
+    if (Date.now() > expiry) return 'expired';
+  }
+  return s;
+}
+
+// AR aging bucket for a payment, by days past due. 'current' = not yet overdue.
+// Buckets follow the standard accounts-receivable aging: 1–30 / 31–60 / 61–90 / 90+.
+export function agingBucket(payment) {
+  const d = daysOverdue(payment);
+  if (d <= 0) return 'current';
+  if (d <= 30) return 'd1_30';
+  if (d <= 60) return 'd31_60';
+  if (d <= 90) return 'd61_90';
+  return 'd90_plus';
+}
+
+export const AGING_LABELS = {
+  current: 'Current',
+  d1_30: '1–30 days',
+  d31_60: '31–60 days',
+  d61_90: '61–90 days',
+  d90_plus: '90+ days',
+};
+
+// Serialize an array of row objects to a CSV string. `columns` is an array of
+// { key, label } (or { label, value: row=>… } for computed cells). Values are
+// quoted and internal quotes doubled, per RFC 4180.
+export function toCSV(rows, columns) {
+  const esc = (v) => {
+    const s = v == null ? '' : String(v);
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const header = columns.map(c => esc(c.label)).join(',');
+  const body = rows.map(row =>
+    columns.map(c => esc(c.value ? c.value(row) : row[c.key])).join(',')
+  ).join('\n');
+  return `${header}\n${body}`;
+}
+
+// Trigger a browser download of `content` as a file named `filename`.
+export function downloadFile(content, filename, mime = 'text/csv;charset=utf-8') {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}

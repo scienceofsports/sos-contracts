@@ -31,6 +31,11 @@ import {
   round2,
   effectiveStatus,
   daysOverdue,
+  effectiveContractStatus,
+  agingBucket,
+  AGING_LABELS,
+  toCSV,
+  downloadFile,
 } from './lib/format.js';
 import { decodePortablePayload } from './lib/portable.js';
 import { downloadContractPdf } from './lib/contractPdf.js';
@@ -286,7 +291,8 @@ function Dashboard({ navigate }) {
 
   const stages = ['draft','sent','signed','active','expired'];
   const funnel = stages.map(s => {
-    const list = contracts.filter(c => c.status === s);
+    // Bucket by effective status so lapsed 'sent' links land under 'expired'.
+    const list = contracts.filter(c => effectiveContractStatus(c) === s);
     return { stage: s, count: list.length, value: list.reduce((sum,c)=>sum+Number(c.value||0),0) };
   });
   const renewalDue = contracts.filter(c => c.status === 'active' && c.endDate && daysBetween(now,c.endDate) >= 0 && daysBetween(now,c.endDate) <= 60);
@@ -314,7 +320,7 @@ function Dashboard({ navigate }) {
     const pendingP = clientContracts.flatMap(c=>c.payments).filter(p => effectiveStatus(p) === 'pending').sort((a,b)=>new Date(a.dueDate)-new Date(b.dueDate))[0];
     let health = 'green';
     if (overdueP) health = 'red';
-    else if (!activeC && clientContracts.some(c => c.status === 'sent')) health = 'amber';
+    else if (!activeC && clientContracts.some(c => effectiveContractStatus(c) === 'sent')) health = 'amber';
     return { client: cl, status: activeC ? activeC.status : (clientContracts[0] ? clientContracts[0].status : 'draft'), health, nextDue: pendingP ? pendingP.dueDate : null };
   });
 
@@ -343,7 +349,7 @@ function Dashboard({ navigate }) {
       ['Renewal Pipeline (60d)', renewalCount],
     ];
     const csv = rows.map(r => r.join(',')).join('\r\n');
-    downloadFile('sos-board-export.csv', '﻿' + csv, 'text/csv');
+    downloadFile('﻿' + csv, 'sos-board-export.csv');
     toast.push('Board export downloaded.', 'success');
   };
 
@@ -499,15 +505,6 @@ function Dashboard({ navigate }) {
   );
 }
 
-function downloadFile(filename, content, mime) {
-  const blob = new Blob([content], { type: mime });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = filename;
-  document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
-
 /* =========================================================================
    CONTRACTS LIST + FORM + DETAIL
    ========================================================================= */
@@ -521,7 +518,9 @@ function ContractsList({ navigate, filterStatus }) {
   const clientMap = Object.fromEntries(clients.map(c => [c.id, c]));
 
   const filtered = contracts.filter(c => {
-    if (statusFilter !== 'all' && c.status !== statusFilter) return false;
+    // Filter and display against the EFFECTIVE status so a lapsed 'sent' link
+    // reads as 'expired' consistently with its badge.
+    if (statusFilter !== 'all' && effectiveContractStatus(c) !== statusFilter) return false;
     const client = clientMap[c.clientId];
     const q = search.toLowerCase();
     return !q || c.title.toLowerCase().includes(q) || c.contractNumber.toLowerCase().includes(q) || (client && client.companyName.toLowerCase().includes(q));
@@ -553,7 +552,7 @@ function ContractsList({ navigate, filterStatus }) {
                   <td className="py-3 px-4">{c.title}</td>
                   <td className="py-3 px-4">{clientMap[c.clientId]?.companyName || '—'}</td>
                   <td className="py-3 px-4 font-data">{fmtMoney(c.value, c.currency)}</td>
-                  <td className="py-3 px-4"><Badge status={c.status} /></td>
+                  <td className="py-3 px-4"><Badge status={effectiveContractStatus(c)} /></td>
                   <td className="py-3 px-4">{c.endDate ? fmtDate(c.endDate) : '—'}</td>
                 </tr>
               ))}
@@ -2072,21 +2071,32 @@ function AddPaymentModal({ contract, client, onClose, onDone }) {
 function MarkPaidModal({ contract, payment, onClose, onDone }) {
   const auth = useAuth();
   const toast = useToast();
+  const due = Number(payment.totalAmount || 0);
   const [amount, setAmount] = useState(payment.totalAmount);
   const [paidDate, setPaidDate] = useState(() => new Date().toISOString().slice(0,10));
   const [errors, setErrors] = useState({});
   const [busy, setBusy] = useState(false);
 
+  const amt = Number(amount);
+  const validAmount = amount !== '' && !isNaN(amt) && amt > 0;
+  // A short payment (with a small rounding tolerance) leaves a balance — warn so
+  // the user knows this closes the payment for less than what was due.
+  const isPartial = validAmount && amt < due - 0.01;
+
   const submit = async () => {
     const e = {};
     if (!paidDate) e.paidDate = 'Date received is required.';
+    else if (new Date(paidDate) > new Date()) e.paidDate = 'Date received cannot be in the future.';
+    if (amount === '' || isNaN(amt)) e.amount = 'Enter the amount received.';
+    else if (amt <= 0) e.amount = 'Amount must be greater than zero.';
+    else if (amt > due + 0.01) e.amount = `Amount cannot exceed the ${fmtMoney(due, payment.currency)} due.`;
     setErrors(e);
     if (Object.keys(e).length) return;
     setBusy(true);
     try {
       const paidAt = new Date(paidDate).toISOString();
-      await paymentService.markPaid(contract.id, payment.id, Number(amount), auth.user.id, paidAt);
-      await contractService.addAuditEntry(contract.id, { type:'payment', message:`${payment.description} marked as paid (${fmtMoney(amount, payment.currency)}) — received ${fmtDate(paidAt)}`, by: auth.user.id });
+      await paymentService.markPaid(contract.id, payment.id, amt, auth.user.id, paidAt);
+      await contractService.addAuditEntry(contract.id, { type:'payment', message:`${payment.description} marked as paid (${fmtMoney(amt, payment.currency)}${isPartial ? ` of ${fmtMoney(due, payment.currency)} due` : ''}) — received ${fmtDate(paidAt)}`, by: auth.user.id });
       toast.push('Payment marked as paid.', 'success');
       onDone();
     } catch (err) {
@@ -2100,16 +2110,20 @@ function MarkPaidModal({ contract, payment, onClose, onDone }) {
     <Modal open onClose={onClose} title="Mark Payment as Paid" footer={
       <React.Fragment>
         <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-[var(--border)] hover:bg-slate-50">Cancel</button>
-        <button disabled={busy} onClick={submit} className="px-4 py-2 text-sm rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">Confirm Paid</button>
+        <button disabled={busy} onClick={submit} className="px-4 py-2 text-sm rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50">Confirm Paid</button>
       </React.Fragment>
     }>
-      <p className="text-sm text-slate-600 mb-4">Confirm payment received for <strong>{payment.description}</strong>.</p>
+      <p className="text-sm text-slate-600 mb-1">Confirm payment received for <strong>{payment.description}</strong>.</p>
+      <p className="text-xs text-slate-400 mb-4">Amount due: <span className="font-data">{fmtMoney(due, payment.currency)}</span></p>
       <Field label="Date Received" required error={errors.paidDate}>
-        <input type="date" value={paidDate} onChange={e=>setPaidDate(e.target.value)} className={inputCls(errors.paidDate)} />
+        <input type="date" max={new Date().toISOString().slice(0,10)} value={paidDate} onChange={e=>setPaidDate(e.target.value)} className={inputCls(errors.paidDate)} />
       </Field>
-      <Field label="Amount Received">
-        <input type="number" step="0.01" value={amount} onChange={e=>setAmount(e.target.value)} className={inputCls(false)} />
+      <Field label="Amount Received" required error={errors.amount}>
+        <input type="number" step="0.01" min="0" value={amount} onChange={e=>setAmount(e.target.value)} className={inputCls(errors.amount)} />
       </Field>
+      {isPartial && !errors.amount && (
+        <p className="text-xs text-amber-600 mt-1">This is a partial payment — {fmtMoney(due - amt, payment.currency)} will remain unpaid. Marking it paid closes this line; log the balance as a separate payment if needed.</p>
+      )}
     </Modal>
   );
 }
@@ -2131,24 +2145,66 @@ function PaymentsReceivables({ navigate }) {
   // Summary totals for the chase list.
   const totalOutstanding = rows.reduce((s,p)=>s+Number(p.totalAmount||0), 0);
   const totalOverdue = rows.filter(p=>effectiveStatus(p)==='overdue').reduce((s,p)=>s+Number(p.totalAmount||0), 0);
-  const weekMs = Date.now() + 7*86400000;
-  const dueThisWeek = rows.filter(p=>{ const d=p.dueDate?new Date(p.dueDate).getTime():0; return effectiveStatus(p)!=='overdue' && d>0 && d<=weekMs; }).reduce((s,p)=>s+Number(p.totalAmount||0), 0);
   const cur = rows[0]?.currency || 'EUR';
+
+  // AR aging: total per bucket (Current / 1–30 / 31–60 / 61–90 / 90+), driving the
+  // aging tiles and the exported chase list.
+  const agingTotals = { current: 0, d1_30: 0, d31_60: 0, d61_90: 0, d90_plus: 0 };
+  rows.forEach(p => { agingTotals[agingBucket(p)] += Number(p.totalAmount || 0); });
+  const AGING_ORDER = ['current', 'd1_30', 'd31_60', 'd61_90', 'd90_plus'];
+
+  // Export the chase list as a CSV your accountant can work from directly.
+  const exportChaseList = () => {
+    const csv = toCSV(rows, [
+      { label: 'Client', value: p => clientMap[p.contract.clientId]?.companyName || '' },
+      { label: 'Contract', value: p => p.contract.title || '' },
+      { label: 'Contract No.', value: p => p.contract.contractNumber || '' },
+      { label: 'Description', value: p => p.description || '' },
+      { label: 'Due Date', value: p => fmtDate(p.dueDate) },
+      { label: 'Amount', value: p => Number(p.totalAmount || 0).toFixed(2) },
+      { label: 'Currency', value: p => p.currency || cur },
+      { label: 'Status', value: p => effectiveStatus(p) },
+      { label: 'Days Overdue', value: p => String(daysOverdue(p)) },
+      { label: 'Aging Bucket', value: p => AGING_LABELS[agingBucket(p)] },
+      { label: 'Contact', value: p => clientMap[p.contract.clientId]?.contactName || '' },
+      { label: 'Contact Email', value: p => clientMap[p.contract.clientId]?.contactEmail || '' },
+    ]);
+    const stamp = fmtDate(nowISO()).replace(/\//g, '-');
+    downloadFile(csv, `SOS-receivables-chase-list-${stamp}.csv`);
+  };
 
   return (
     <div className="p-4 md:p-6">
-      <div className="font-display mb-4 text-[var(--navy-deep)]">Receivables</div>
+      <div className="flex items-center justify-between mb-4">
+        <div className="font-display text-[var(--navy-deep)]">Receivables</div>
+        {rows.length > 0 && (
+          <button onClick={exportChaseList} className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-lg border border-[var(--border)] hover:bg-slate-50 transition">⬇ Export chase list (CSV)</button>
+        )}
+      </div>
       {rows.length > 0 && (
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
-          <div className="bg-white rounded-xl border border-[var(--border)] p-4"><div className="text-xs text-slate-400 mb-1">Total Outstanding</div><div className="font-display text-xl text-[var(--navy-deep)]">{fmtMoney(totalOutstanding, cur)}</div></div>
-          <div className="bg-white rounded-xl border border-red-200 p-4"><div className="text-xs text-red-500 mb-1">Overdue</div><div className="font-display text-xl text-red-600">{fmtMoney(totalOverdue, cur)}</div></div>
-          <div className="bg-white rounded-xl border border-[var(--border)] p-4"><div className="text-xs text-slate-400 mb-1">Due this week</div><div className="font-display text-xl text-[var(--navy-deep)]">{fmtMoney(dueThisWeek, cur)}</div></div>
-        </div>
+        <>
+          <div className="grid grid-cols-2 sm:grid-cols-2 gap-3 mb-3">
+            <div className="bg-white rounded-xl border border-[var(--border)] p-4"><div className="text-xs text-slate-400 mb-1">Total Outstanding</div><div className="font-display text-xl text-[var(--navy-deep)]">{fmtMoney(totalOutstanding, cur)}</div></div>
+            <div className="bg-white rounded-xl border border-red-200 p-4"><div className="text-xs text-red-500 mb-1">Overdue</div><div className="font-display text-xl text-red-600">{fmtMoney(totalOverdue, cur)}</div></div>
+          </div>
+          {/* AR aging breakdown */}
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-6">
+            {AGING_ORDER.map(key => {
+              const overdueBucket = key !== 'current';
+              return (
+                <div key={key} className={`bg-white rounded-xl border p-3 ${key === 'd90_plus' && agingTotals[key] > 0 ? 'border-red-300' : 'border-[var(--border)]'}`}>
+                  <div className={`text-[11px] mb-1 ${overdueBucket && agingTotals[key] > 0 ? 'text-red-500' : 'text-slate-400'}`}>{AGING_LABELS[key]}</div>
+                  <div className={`font-display text-base ${overdueBucket && agingTotals[key] > 0 ? 'text-red-600' : 'text-[var(--navy-deep)]'}`}>{fmtMoney(agingTotals[key], cur)}</div>
+                </div>
+              );
+            })}
+          </div>
+        </>
       )}
       {rows.length === 0 ? <EmptyState title="Nothing outstanding" icon="🎉" /> : (
         <div className="bg-white rounded-xl border border-[var(--border)] overflow-x-auto">
           <table className="w-full text-sm">
-            <thead><tr className="text-left text-xs text-slate-400 border-b border-[var(--border)]"><th className="py-3 px-4">Description</th><th className="py-3 px-4">Client</th><th className="py-3 px-4">Due</th><th className="py-3 px-4">Total</th><th className="py-3 px-4">Status</th><th className="py-3 px-4"></th></tr></thead>
+            <thead><tr className="text-left text-xs text-slate-400 border-b border-[var(--border)]"><th className="py-3 px-4">Description</th><th className="py-3 px-4">Client</th><th className="py-3 px-4">Due</th><th className="py-3 px-4">Total</th><th className="py-3 px-4">Aging</th><th className="py-3 px-4">Status</th><th className="py-3 px-4"></th></tr></thead>
             <tbody>
               {rows.map(p => (
                 <tr key={p.id} className="border-b border-[var(--border)] last:border-0 hover:bg-slate-50">
@@ -2156,6 +2212,7 @@ function PaymentsReceivables({ navigate }) {
                   <td className="py-3 px-4">{clientMap[p.contract.clientId]?.companyName}</td>
                   <td className="py-3 px-4">{fmtDate(p.dueDate)}</td>
                   <td className="py-3 px-4 font-data">{fmtMoney(p.totalAmount, p.currency)}</td>
+                  <td className="py-3 px-4 text-xs text-slate-500">{AGING_LABELS[agingBucket(p)]}</td>
                   <td className="py-3 px-4"><Badge status={effectiveStatus(p)} />{daysOverdue(p) > 0 && <span className="ml-1 text-[10px] text-red-500">{daysOverdue(p)}d</span>}</td>
                   <td className="py-3 px-4 space-x-2">
                     <button onClick={()=>setReminderPayment(p)} className="text-blue-600 hover:underline text-xs">Send Reminder</button>
@@ -2595,7 +2652,7 @@ function BoardExport() {
 
   const download = () => {
     const rows = [['Metric','Value'],['MRR',mrr.toFixed(2)],['ARR',arr.toFixed(2)],['YTD Revenue',ytd.toFixed(2)],['Outstanding',outstanding.toFixed(2)],['Renewal Pipeline (60d)',renewalPipeline]];
-    downloadFile('sos-board-export.csv', '﻿'+rows.map(r=>r.join(',')).join('\r\n'), 'text/csv');
+    downloadFile('﻿'+rows.map(r=>r.join(',')).join('\r\n'), 'sos-board-export.csv');
     toast.push('Board export downloaded.', 'success');
   };
 
