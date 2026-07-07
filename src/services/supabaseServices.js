@@ -124,6 +124,21 @@ export const clientService = {
     );
     return clientFromRow(updated);
   },
+
+  // Delete a client. The DB FK (contracts.client_id ... on delete restrict)
+  // guarantees this fails if ANY contract still references the client, so a
+  // client tied to a real deal can never be removed here — only genuinely
+  // empty (e.g. test) clients. We surface a friendly message on that block.
+  delete: async (id) => {
+    const { error } = await supabase.from('clients').delete().eq('id', id);
+    if (error) {
+      // Postgres FK violation (23503) -> the client still has contracts.
+      if (error.code === '23503' || /foreign key|violates/i.test(error.message || '')) {
+        throw new Error('This client still has one or more contracts. Remove or reassign them first — a client attached to a contract cannot be deleted.');
+      }
+      throw new Error(error.message || 'Could not delete the client.');
+    }
+  },
 };
 
 /* ============================== CONTRACTS ============================== */

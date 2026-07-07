@@ -2992,14 +2992,35 @@ function ClientsPage({ navigate }) {
         </>
       )}
       {showForm && <ClientFormModal onClose={()=>setShowForm(false)} onDone={()=>{ setShowForm(false); load(); }} />}
-      {editClient && <ClientFormModal client={editClient} readOnly={!auth.isAdmin} onClose={()=>setEditClient(null)} onDone={()=>{ setEditClient(null); load(); }} />}
+      {editClient && <ClientFormModal
+        client={editClient}
+        readOnly={!auth.isAdmin}
+        canDelete={auth.isAdmin && !statsByClient[editClient.id]}
+        onDeleted={()=>{ setEditClient(null); load(); }}
+        onClose={()=>setEditClient(null)}
+        onDone={()=>{ setEditClient(null); load(); }}
+      />}
     </div>
   );
 }
 
-function ClientFormModal({ client, readOnly, onClose, onDone }) {
+function ClientFormModal({ client, readOnly, canDelete, onDeleted, onClose, onDone }) {
   const toast = useToast();
   const isEdit = !!client;
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const doDelete = async () => {
+    setDeleting(true);
+    try {
+      await clientService.delete(client.id);
+      toast.push('Client deleted.', 'success');
+      onDeleted && onDeleted();
+    } catch (err) {
+      toast.push(err.message || 'Could not delete the client.', 'error');
+      setDeleting(false);
+      setConfirmDelete(false);
+    }
+  };
   const [form, setForm] = useState(client ? {
     companyName: client.companyName || '', contactName: client.contactName || '', contactEmail: client.contactEmail || '',
     contactPhone: client.contactPhone || '', address: client.address || '', country: client.country || 'CY',
@@ -3071,10 +3092,23 @@ function ClientFormModal({ client, readOnly, onClose, onDone }) {
 
   return (
     <Modal open onClose={onClose} title={isEdit ? form.companyName : 'New Client'} footer={
-      <React.Fragment>
-        <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-[var(--border)] hover:bg-slate-50">{readOnly ? 'Close' : 'Cancel'}</button>
-        {!readOnly && <button disabled={busy} onClick={submit} className="px-4 py-2 text-sm rounded-lg bg-[var(--blue-primary)] text-white hover:bg-blue-700">{busy ? 'Saving…' : (isEdit ? 'Save Changes' : 'Create')}</button>}
-      </React.Fragment>
+      <div className="flex items-center justify-between w-full gap-2">
+        <div>
+          {canDelete && (confirmDelete ? (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-red-600">Delete this client?</span>
+              <button disabled={deleting} onClick={doDelete} className="px-3 py-2 text-sm rounded-lg bg-red-600 text-white hover:bg-red-700">{deleting ? 'Deleting…' : 'Yes, delete'}</button>
+              <button disabled={deleting} onClick={()=>setConfirmDelete(false)} className="px-3 py-2 text-sm rounded-lg border border-[var(--border)] hover:bg-slate-50">Keep</button>
+            </div>
+          ) : (
+            <button onClick={()=>setConfirmDelete(true)} className="px-3 py-2 text-sm rounded-lg border border-red-200 text-red-600 hover:bg-red-50">Delete client</button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-[var(--border)] hover:bg-slate-50">{readOnly ? 'Close' : 'Cancel'}</button>
+          {!readOnly && <button disabled={busy} onClick={submit} className="px-4 py-2 text-sm rounded-lg bg-[var(--blue-primary)] text-white hover:bg-blue-700">{busy ? 'Saving…' : (isEdit ? 'Save Changes' : 'Create')}</button>}
+        </div>
+      </div>
     }>
       <Field label="Club Logo">
         <div className="flex items-center gap-3">
