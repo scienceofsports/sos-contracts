@@ -239,6 +239,35 @@ export const contractService = {
     return { id: cert.id, sha256: cert.pdf_sha256, generatedAt: cert.generated_at, downloadUrl };
   },
 
+  // The FROZEN document that was actually sent/signed for this contract — the
+  // immutable snapshot captured at Send time (never a live re-render). Staff can
+  // read signing_requests directly (RLS: signing_requests_staff_read). Prefer a
+  // signed request; else the most recent one. Also resolves a short-lived signed
+  // URL to the server-generated executed PDF, when one exists in Storage.
+  // Returns { snapshot, status, signedPdfUrl } or null if the contract was never sent.
+  getFrozenSnapshot: async (contractId) => {
+    const rows = unwrap(
+      await supabase
+        .from('signing_requests')
+        .select('id, status, document_snapshot, created_at')
+        .eq('contract_id', contractId)
+        .order('created_at', { ascending: false })
+    );
+    if (!rows || rows.length === 0) return null;
+    // Prefer the signed request (the executed document); else the latest.
+    const req = rows.find((r) => r.status === 'signed') || rows[0];
+    if (!req || !req.document_snapshot) return null;
+    let signedPdfUrl = null;
+    if (req.status === 'signed') {
+      const path = `${contractId}/${req.id}-signed-contract.pdf`;
+      const { data } = await supabase.storage
+        .from('contract-attachments')
+        .createSignedUrl(path, 300);
+      signedPdfUrl = data?.signedUrl || null;
+    }
+    return { snapshot: req.document_snapshot, status: req.status, signedPdfUrl };
+  },
+
   create: async (data) => {
     // Server-side contract-number generation (avoids client-side race).
     const contractNumber = unwrap(await supabase.rpc('next_contract_number'));

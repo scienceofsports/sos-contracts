@@ -1714,7 +1714,13 @@ function ContractDetail({ contractId, navigate }) {
               {contract.signerIP ? (
                 <React.Fragment>
                   <div className="flex justify-between"><dt className="text-slate-500">IP Address</dt><dd className="font-data text-xs">{contract.signerIP}</dd></div>
-                  <div className="flex justify-between"><dt className="text-slate-500">Document Integrity</dt><dd className="text-emerald-600">{contract.documentHashBefore === contract.documentHashAfter ? '✓ Verified' : '⚠ Mismatch'}</dd></div>
+                  {/* Both hashes are the full canonical document hash (send-time vs
+                      executed). They are equal when nothing changed; they differ
+                      ONLY because the signer completed their own party details
+                      (company/VAT/address) on the signing page — a legitimate,
+                      expected act, not tampering. So a difference reads as
+                      "Confirmed on signing", never an alarming mismatch. */}
+                  <div className="flex justify-between"><dt className="text-slate-500">Document Integrity</dt><dd className="text-emerald-600">{contract.documentHashBefore === contract.documentHashAfter ? '✓ Verified' : '✓ Verified (details confirmed on signing)'}</dd></div>
                 </React.Fragment>
               ) : (
                 <div className="flex justify-between"><dt className="text-slate-500">Method</dt><dd className="text-slate-500 text-xs">Recorded manually (paper/offline signature)</dd></div>
@@ -2378,13 +2384,45 @@ function ContractDocument({ contractId, navigate }) {
   const [contract, setContract] = useState(null);
   const [client, setClient] = useState(null);
   const [company, setCompany] = useState(null);
+  // `frozen` = we are showing the immutable snapshot that was actually
+  // sent/signed (not a live re-render). `signedPdfUrl` = the authoritative
+  // executed PDF the client received, when the contract is signed.
+  const [frozen, setFrozen] = useState(false);
+  const [frozenStatus, setFrozenStatus] = useState(null);
+  const [signedPdfUrl, setSignedPdfUrl] = useState(null);
 
   useEffect(() => {
     (async () => {
       const c = await contractService.getById(contractId);
-      setContract(c);
-      if (c) setClient(await clientService.getById(c.clientId));
-      setCompany(await companyService.get());
+      // For any contract that has been sent onward (sent/active/signed/declined),
+      // the source of truth is the FROZEN document that was captured at Send —
+      // identical to what the client saw and (if signed) signed. Render that,
+      // never a live re-derivation from today's contract row. Drafts render live.
+      const isDraft = c && (c.status === 'draft' || !c.status);
+      let usedFrozen = false;
+      if (c && !isDraft) {
+        try {
+          const snap = await contractService.getFrozenSnapshot(contractId);
+          if (snap && snap.snapshot) {
+            const ns = normalizeSnapshot(snap.snapshot);
+            // Carry the live signer/execution fields onto the frozen contract so
+            // the signature block renders the client's name/date (these live on
+            // the contract row, not in the send-time snapshot).
+            setContract({ ...ns.contract, signedAt: c.signedAt, signerName: c.signerName, signerTitle: c.signerTitle, signerCompany: c.signerCompany, signerEmail: c.signerEmail });
+            setClient(ns.client);
+            setCompany(ns.company);
+            setFrozenStatus(snap.status);
+            setSignedPdfUrl(snap.signedPdfUrl || null);
+            usedFrozen = true;
+          }
+        } catch (_) { /* fall through to live render if the snapshot is unreadable */ }
+      }
+      if (!usedFrozen) {
+        setContract(c);
+        if (c) setClient(await clientService.getById(c.clientId));
+        setCompany(await companyService.get());
+      }
+      setFrozen(usedFrozen);
     })();
   }, [contractId]);
 
@@ -2394,12 +2432,27 @@ function ContractDocument({ contractId, navigate }) {
     <div className="p-4 md:p-6 max-w-4xl">
       <div className="flex items-center justify-between mb-4 no-print">
         <button onClick={()=>navigate('contract:'+contract.id)} className="text-sm text-slate-500 hover:text-slate-700">← Back to Contract</button>
-        <button onClick={()=>window.print()} className="px-4 py-2 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">Print / Save as PDF</button>
+        <div className="flex items-center gap-2">
+          {signedPdfUrl && (
+            <a href={signedPdfUrl} target="_blank" rel="noopener noreferrer" className="px-4 py-2 border border-[var(--border)] text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition">Download signed PDF</a>
+          )}
+          <button onClick={()=>window.print()} className="px-4 py-2 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">Print / Save as PDF</button>
+        </div>
       </div>
 
-      {contract.status !== 'active' && contract.status !== 'signed' && (
+      {!frozen && (
         <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm text-amber-700 mb-4 no-print">
           This is a template-generated draft. Review all clauses, values and dates carefully — and have it checked by a Cyprus lawyer — before sending it to a client for signature.
+        </div>
+      )}
+      {frozen && (
+        <div className="bg-slate-50 border border-[var(--border)] rounded-lg px-4 py-2.5 text-sm text-slate-600 mb-4 no-print flex items-center gap-2">
+          <span>🔒</span>
+          <span>
+            {frozenStatus === 'signed'
+              ? 'This is the executed document exactly as signed — identical to the copy sent to the client. It does not change if the contract is later edited.'
+              : 'This is the frozen document exactly as sent to the client for signature. It does not change if the contract is later edited.'}
+          </span>
         </div>
       )}
 
@@ -4024,7 +4077,11 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
         status: 'active',
         signerName: sigName, signerTitle: sigTitle, signerCompany: sigCompany, signerEmail: emailInput,
         signedAt, signerIP: '203.0.113.42',
-        documentHashAfter: hashAfter,
+        // NOTE: this local/demo fallback does NOT set documentHashAfter — the
+        // real evidence hash is the server's full canonical hashDocument (set by
+        // the record-signature Edge Function). Writing the old 3-field
+        // sha256(title+description+value) here would never equal the canonical
+        // document_hash_before and would show a false integrity difference.
         consentElectronic: consents.electronic, consentAuthorized: consents.authorized, consentRead: consents.read,
         ...contactPayload,
       });
