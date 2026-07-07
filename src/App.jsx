@@ -1655,6 +1655,19 @@ function SignatureLines({ signature, signatureImage, name, title, date }) {
   );
 }
 
+// Inline highlight for a client-supplied field that is still BLANK on the draft
+// / pre-sign document — a tinted "to be confirmed by the Client on signing"
+// marker so it's obvious what's outstanding. Once the client fills it in, the
+// real value replaces this and the document reads as plain text (no highlight),
+// so the executed contract looks clean and unmarked.
+function ClientFillHint({ children }) {
+  return (
+    <span className="inline-block rounded px-1.5 py-0.5 text-[0.92em] font-medium" style={{ background:'rgba(217,119,6,0.10)', color:'#B45309', border:'1px solid rgba(217,119,6,0.25)' }}>
+      [ {children} ]
+    </span>
+  );
+}
+
 // Shared, presentational rendering of the full contract document body.
 // Used by the admin ContractDocument view AND the client SigningFlow review
 // screen so both parties review EXACTLY the same legal document.
@@ -1706,7 +1719,15 @@ function ContractDocumentBody({ contract, client, company }) {
         </p>
         <p className="text-sm text-slate-700 mb-6">and</p>
         <p className="text-sm text-slate-700 mb-8">
-          <strong>{client.companyName}</strong>, {client.registrationNumber ? `a company registered with registration number ${client.registrationNumber}, ` : ''}having its registered office at {client.address || 'the address confirmed by the Client on signing'} (the "Client").
+          <strong>{client.companyName}</strong>,{' '}
+          {client.registrationNumber
+            ? `a company registered with registration number ${client.registrationNumber}, `
+            : <ClientFillHint>registration number to be confirmed by the Client on signing</ClientFillHint>}
+          {client.registrationNumber ? '' : ', '}having its registered office at{' '}
+          {client.address
+            ? client.address
+            : <ClientFillHint>to be confirmed by the Client on signing</ClientFillHint>}
+          {' '}(the "Client").
         </p>
         <p className="text-sm text-slate-700 mb-8">The above are hereinafter jointly referred to as the "Parties".</p>
 

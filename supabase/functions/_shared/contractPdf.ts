@@ -593,7 +593,13 @@ export async function buildContractPdf(input: {
   const companyAddr = pick(co, 'registeredAddress', 'registered_address') || '—';
   const clientName = pick(cl, 'companyName', 'company_name') || '—';
   const clientReg = pick(cl, 'registrationNumber', 'registration_number');
-  const clientAddr = cl.address || 'the address confirmed by the Client on signing';
+  // Blank client fields show a bracketed "[ … ]" placeholder on the pre-sign
+  // document; by signing time the client has confirmed them, so the SIGNED
+  // contract reads as plain text (no brackets, no highlight) — clean + unmarked.
+  const clientRegText = clientReg
+    ? `a company registered with registration number ${clientReg}, `
+    : '[ registration number to be confirmed by the Client on signing ], ';
+  const clientAddr = cl.address || '[ address to be confirmed by the Client on signing ]';
 
   // --- Title (split on the dash like the client PDF), centred navy bold. ----
   {
@@ -614,7 +620,7 @@ export async function buildContractPdf(input: {
   text(`This Agreement is made on ${fmtDate(madeOn)} between:`, { size: 10, gap: 4 });
   text(`${companyName}, a company registered under the laws of the Republic of Cyprus with registration number ${companyReg}, VAT number ${companyVat}, having its registered office at ${companyAddr} (the "Service Provider"),`, { size: 10, gap: 2 });
   text('and', { size: 10, gap: 2 });
-  text(`${clientName}, ${clientReg ? `a company registered with registration number ${clientReg}, ` : ''}having its registered office at ${clientAddr} (the "Client").`, { size: 10, gap: 2 });
+  text(`${clientName}, ${clientRegText}having its registered office at ${clientAddr} (the "Client").`, { size: 10, gap: 2 });
   text('The above are hereinafter jointly referred to as the "Parties".', { size: 10, gap: 10 });
 
   // --- About the Service Provider — navy pill header + intro + bullets. -----
