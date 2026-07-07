@@ -119,10 +119,14 @@ Deno.serve(async (req) => {
     });
 
     // 9. Email the signer. If it hiccups, keep the request and report emailSent:false.
+    //    BCC the company inbox (info@) so staff keep a record of exactly what the
+    //    client received — same wording, same link.
     const signUrl = `${appOrigin}/?req=${token}`;
+    const staffBcc = company.contact_email || 'info@scienceofsports.net';
     try {
       await sendEmail({
         to: client.contact_email,
+        bcc: staffBcc,
         subject: `Please review & sign: ${contract.title}`,
         html: signRequestEmail({
           clientContactName: client.contact_name,

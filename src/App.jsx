@@ -1281,6 +1281,8 @@ function ContractDetail({ contractId, navigate }) {
   const [signLink, setSignLink] = useState('');
   const [copyingLink, setCopyingLink] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
+  // Shows the "sent — here's the link" modal immediately after a send/resend.
+  const [sentLinkModal, setSentLinkModal] = useState(null); // { url } | null
 
   const load = useCallback(async () => {
     const c = await contractService.getById(contractId);
@@ -1330,7 +1332,7 @@ function ContractDetail({ contractId, navigate }) {
     try {
       const origin = window.location.origin;
       const res = await signingService.createSigningRequest(contract.id, origin);
-      if (res?.signUrl) setSignLink(res.signUrl);
+      if (res?.signUrl) { setSignLink(res.signUrl); setSentLinkModal({ url: res.signUrl }); }
       toast.push(`Signing request sent to ${client.contactEmail}.`, 'success');
       load(); // contract is now status 'sent'
     } catch (err) {
@@ -1341,7 +1343,7 @@ function ContractDetail({ contractId, navigate }) {
   const resendContract = async () => {
     try {
       const res = await signingService.createSigningRequest(contract.id, window.location.origin);
-      if (res?.signUrl) setSignLink(res.signUrl);
+      if (res?.signUrl) { setSignLink(res.signUrl); setSentLinkModal({ url: res.signUrl }); }
       toast.push('New signing link sent.', 'success');
       load();
     } catch (err) {
@@ -1576,7 +1578,40 @@ function ContractDetail({ contractId, navigate }) {
         confirmLabel="Cancel contract" danger />
       {showPaymentModal && <AddPaymentModal contract={contract} client={client} onClose={()=>setShowPaymentModal(false)} onDone={()=>{ setShowPaymentModal(false); load(); }} />}
       {showMarkPaidPayment && <MarkPaidModal contract={contract} payment={showMarkPaidPayment} onClose={()=>setShowMarkPaidPayment(null)} onDone={()=>{ setShowMarkPaidPayment(null); load(); }} />}
+      {sentLinkModal && <SentLinkModal url={sentLinkModal.url} clientName={client?.contactName} clientEmail={client?.contactEmail} onClose={()=>setSentLinkModal(null)} />}
     </div>
+  );
+}
+
+// Shown right after a contract is sent: confirms the email went out and offers
+// the signing link with a one-click Copy so it can also be shared via WhatsApp.
+function SentLinkModal({ url, clientName, clientEmail, onClose }) {
+  const toast = useToast();
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+      toast.push('Signing link copied — paste it into WhatsApp or a message.', 'success');
+    } catch (_) {
+      toast.push('Could not copy automatically — select and copy the link below.', 'error');
+    }
+  };
+  return (
+    <Modal open onClose={onClose} title="✅ Sent for signature" footer={
+      <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-[var(--border)] hover:bg-slate-50">Done</button>
+    }>
+      <p className="text-sm text-slate-600 mb-1">The signing request was emailed to <strong>{clientName || 'the client'}</strong>{clientEmail ? ` (${clientEmail})` : ''}, with a copy to your info@ inbox.</p>
+      <p className="text-sm text-slate-600 mb-4">Want to send it another way too? Copy the link and share it via WhatsApp or message:</p>
+      <div className="flex items-center gap-2 bg-slate-50 border border-[var(--border)] rounded-lg p-2">
+        <input readOnly value={url} onFocus={e=>e.target.select()} className="flex-1 bg-transparent text-xs font-mono text-slate-600 outline-none min-w-0" />
+        <button onClick={copy} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg bg-[var(--blue-primary)] text-white hover:bg-blue-700 transition">
+          {copied ? '✓ Copied' : '🔗 Copy'}
+        </button>
+      </div>
+      <p className="text-[11px] text-slate-400 mt-2">The link is unique to this client and asks them to verify their email before signing.</p>
+    </Modal>
   );
 }
 

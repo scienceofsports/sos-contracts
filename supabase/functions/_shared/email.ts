@@ -22,10 +22,15 @@ export async function sendEmail(opts: {
   subject: string;
   html: string;
   replyTo?: string;
+  bcc?: string | string[];  // silent copy (e.g. info@ on client-facing emails)
   attachments?: { filename: string; content: string }[]; // content = base64
 }): Promise<void> {
   const apiKey = Deno.env.get('RESEND_API_KEY');
   if (!apiKey) throw new Error('RESEND_API_KEY not configured');
+
+  const bccList = opts.bcc
+    ? (Array.isArray(opts.bcc) ? opts.bcc : [opts.bcc]).filter((b) => b && b !== opts.to)
+    : [];
 
   const res = await fetch(RESEND_ENDPOINT, {
     method: 'POST',
@@ -39,6 +44,7 @@ export async function sendEmail(opts: {
       subject: opts.subject,
       html: opts.html,
       ...(opts.replyTo ? { reply_to: opts.replyTo } : {}),
+      ...(bccList.length ? { bcc: bccList } : {}),
       ...(opts.attachments && opts.attachments.length ? { attachments: opts.attachments } : {}),
     }),
   });
