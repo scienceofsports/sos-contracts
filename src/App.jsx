@@ -613,6 +613,9 @@ function ContractsList({ navigate, filterStatus }) {
   const auth = useAuth();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState(filterStatus || 'all');
+  // Column sort: click a header to sort by it; click again to flip direction.
+  const [sort, setSort] = useState({ key: 'number', dir: 'asc' });
+  const toggleSort = (key) => setSort(s => s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' });
 
   if (!contracts) return <div className="p-6 space-y-3">{[1,2,3,4].map(i=><Skeleton key={i} className="h-14 w-full" />)}</div>;
   const clientMap = Object.fromEntries(clients.map(c => [c.id, c]));
@@ -625,6 +628,30 @@ function ContractsList({ navigate, filterStatus }) {
     const q = search.toLowerCase();
     return !q || c.title.toLowerCase().includes(q) || c.contractNumber.toLowerCase().includes(q) || (client && client.companyName.toLowerCase().includes(q));
   });
+
+  // Sort key extractors per column (value/date sort numerically; the rest by text).
+  const sortVal = (c) => {
+    switch (sort.key) {
+      case 'title':  return (c.title || '').toLowerCase();
+      case 'client': return (clientMap[c.clientId]?.companyName || '').toLowerCase();
+      case 'value':  return Number(c.value || 0);
+      case 'status': return effectiveContractStatus(c);
+      case 'endDate':return c.endDate ? new Date(c.endDate).getTime() : Infinity; // undated sinks last
+      default:       return (c.contractNumber || '').toLowerCase(); // 'number'
+    }
+  };
+  const sorted = [...filtered].sort((a, b) => {
+    const va = sortVal(a), vb = sortVal(b);
+    let cmp = typeof va === 'number' && typeof vb === 'number' ? va - vb : String(va).localeCompare(String(vb));
+    return sort.dir === 'asc' ? cmp : -cmp;
+  });
+
+  const SortHeader = ({ label, col, extra }) => (
+    <th className={`py-3 px-4 cursor-pointer select-none hover:text-slate-600 transition ${extra||''}`} onClick={()=>toggleSort(col)}>
+      {label}
+      <span className="ml-1 text-slate-400">{sort.key === col ? (sort.dir === 'asc' ? '▲' : '▼') : '↕'}</span>
+    </th>
+  );
 
   return (
     <div className="p-4 md:p-6">
@@ -644,9 +671,16 @@ function ContractsList({ navigate, filterStatus }) {
       ) : (
         <div className="bg-white rounded-xl border border-[var(--border)] overflow-x-auto">
           <table className="w-full text-sm">
-            <thead><tr className="text-left text-xs text-slate-400 border-b border-[var(--border)]"><th className="py-3 px-4">Number</th><th className="py-3 px-4">Title</th><th className="py-3 px-4">Client</th><th className="py-3 px-4">Value</th><th className="py-3 px-4">Status</th><th className="py-3 px-4">End Date</th></tr></thead>
+            <thead><tr className="text-left text-xs text-slate-400 border-b border-[var(--border)]">
+              <SortHeader label="Number" col="number" />
+              <SortHeader label="Title" col="title" />
+              <SortHeader label="Client" col="client" />
+              <SortHeader label="Value" col="value" />
+              <SortHeader label="Status" col="status" />
+              <SortHeader label="End Date" col="endDate" />
+            </tr></thead>
             <tbody>
-              {filtered.map(c => (
+              {sorted.map(c => (
                 <tr key={c.id} className="border-b border-[var(--border)] last:border-0 cursor-pointer hover:bg-slate-50" onClick={()=>navigate('contract:'+c.id)}>
                   <td className="py-3 px-4 font-data text-xs text-slate-500">{c.contractNumber}</td>
                   <td className="py-3 px-4">{c.title}</td>
