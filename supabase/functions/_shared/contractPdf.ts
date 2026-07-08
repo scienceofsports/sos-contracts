@@ -281,22 +281,31 @@ function commercialValue(c: Any, servicesTotal?: number) {
   const pct = (rawPct === '' || rawPct == null) ? DEFAULT_KICKBACK_PCT : Number(rawPct) || 0;
   const clubFee = Number(c?.clubFixedFee ?? c?.club_fixed_fee) || 0;
   const includeClubFee = model === 'club_players';
+  const minPlayers = Number(c?.minPlayers ?? c?.min_players) || 0;
   const svc = Math.round((
     servicesTotal != null
       ? Number(servicesTotal) || 0
       : computeServiceLineItems(c?.services).reduce((s: number, i: Any) => s + i.amount, 0)
   ) * 100) / 100;
-  // Guaranteed value = chargeable services + club fixed fee (Shared).
-  const guaranteed = Math.round((svc + (includeClubFee ? clubFee : 0)) * 100) / 100;
+  // The CLUB pays the whole value in every model. Sum the components, then deduct
+  // the club commission from the total. Keep in sync with src/lib/constants.js.
+  //   value = (services + clubFee[Shared] + minPlayers*fee*months) * (1 - pct%)
+  const playerPortion = Math.round(minPlayers * fee * months * 100) / 100;
+  const clubPortion = includeClubFee ? clubFee : 0;
+  const gross = Math.round((svc + clubPortion + playerPortion) * 100) / 100;
+  const commissionAmount = Math.round(gross * (pct / 100) * 100) / 100;
+  const guaranteed = Math.round((gross - commissionAmount) * 100) / 100;
   const hasPlayerFees = fee > 0;
-  const variableOnly = guaranteed <= 0;
+  const variableOnly = gross <= 0;
   const stored = Number(c?.value) || 0;
-  const value = guaranteed > 0 ? guaranteed : stored;
+  const value = gross > 0 ? guaranteed : stored;
   return {
-    clubFee: includeClubFee ? clubFee : 0,
+    clubFee: clubPortion,
     servicesTotal: svc,
+    minPlayers, playerPortion, gross, commissionAmount,
     pct, value, fee, months, hasPlayerFees, variableOnly,
-    players: 0, playerGross: 0, clubShare: 0, sosPlayerShare: 0,
+    players: minPlayers, playerGross: playerPortion, clubShare: commissionAmount,
+    sosPlayerShare: Math.round((playerPortion * (1 - pct / 100)) * 100) / 100,
     hasProjectionInputs: hasPlayerFees,
   };
 }
@@ -307,24 +316,27 @@ function commercialModelText(c: Any, fm: (a: Any) => string): { intro: string; b
   const cv = commercialValue(c);
   const minP = Number(c?.minPlayers ?? c?.min_players) || 0;
   const intro = PAYMENT_MODEL_LABELS[model] || '';
+  // Keep in sync with src/lib/constants.js: the CLUB pays the whole value; player
+  // fees fund the Client's payment; the commission is deducted from the total.
   const monthsStr = cv.months ? ` over ${cv.months} months` : '';
-  const rateStr = cv.fee ? `${fm(cv.fee)} per player per month${monthsStr}` : `a monthly fee agreed with the Client${monthsStr}`;
-  const minStr = minP ? ` The Client undertakes to enrol a minimum of ${minP} players.` : '';
-  const reconStr = ' Player fees are billed monthly on actual enrolment and reconciled per football season; no fixed number of players is guaranteed.';
+  const playerFeeStr = cv.fee
+    ? `a player-participation fee of ${fm(cv.fee)} per player per month${monthsStr}`
+    : `a player-participation fee agreed with the Client${monthsStr}`;
+  const minStr = minP ? `, calculated on a minimum of ${minP} players` : '';
   const rawPct = c?.kickbackPct ?? c?.kickback_pct;
   const hasPct = (rawPct !== '' && rawPct != null && Number(rawPct) > 0) || cv.pct > 0;
+  const commissionStr = hasPct ? ` A club commission of ${cv.pct}% is deducted from the total.` : '';
+  const fundStr = ' The full contract value is payable by the Client; player participation fees fund part of the Client\'s payment and are not collected separately from players.';
 
   if (model === 'club_players') {
     const feeClause = cv.clubFee > 0
-      ? `The Client shall pay the Service Provider a fixed fee of ${fm(cv.clubFee)} per season.`
-      : `The Client shall pay the Service Provider the fixed fee set out in the Fees & Payment section.`;
-    const breakdown = `${feeClause} Participating players shall fund the remainder of the programme, contributing ${rateStr}, collected by the Service Provider.${reconStr}${minStr}`;
-    const commission = hasPct ? `The Service Provider shall pay the Client a commission of ${cv.pct}% of the player fees actually collected, reconciled and settled per football season.` : '';
-    return { intro, breakdown, commission };
+      ? `The Client shall pay the Service Provider a fixed fee of ${fm(cv.clubFee)} per season, together with ${playerFeeStr}${minStr}.`
+      : `The Client shall pay the Service Provider the fixed fee set out in the Fees & Payment section, together with ${playerFeeStr}${minStr}.`;
+    const breakdown = `${feeClause}${commissionStr}${fundStr}`;
+    return { intro, breakdown, commission: '' };
   }
-  const breakdown = `Access fees are collected by the Service Provider directly from participating players, at ${rateStr}.${reconStr}${minStr}`;
-  const commission = hasPct ? `The Service Provider shall pay the Client a commission of ${cv.pct}% of the fees actually collected from players enrolled through the Client, reconciled and settled per football season.` : '';
-  return { intro, breakdown, commission };
+  const breakdown = `The Client shall pay the Service Provider ${playerFeeStr}${minStr}.${commissionStr}${fundStr}`;
+  return { intro, breakdown, commission: '' };
 }
 
 // Strip a data: URL prefix and decode base64 to bytes. Returns null on failure.

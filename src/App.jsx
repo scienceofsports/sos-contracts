@@ -779,18 +779,32 @@ function CommercialBreakdown({ form, servicesTotal = 0 }) {
   if (!cv.servicesTotal && !cv.clubFee && !cv.fee) {
     return <p className="text-xs text-slate-400 mt-3 pt-3 border-t border-[var(--border)]">Enter the club fixed fee and/or the per-player monthly fee.</p>;
   }
-  const guaranteed = cv.value; // services + club fixed fee
+  // The CLUB pays the whole value. Components sum to a gross, then the club
+  // commission is deducted to give the final contract value.
+  const playerLine = cv.playerPortion > 0;
   return (
     <div className="mt-3 pt-3 border-t border-[var(--border)] text-xs text-slate-600 space-y-1">
       {cv.servicesTotal > 0 && <div className="flex justify-between"><span>Services (from selection above)</span><span className="font-data">{fmtMoney(cv.servicesTotal, cur)}</span></div>}
       {cv.clubFee > 0 && <div className="flex justify-between"><span>Club fixed fee (per season)</span><span className="font-data">{fmtMoney(cv.clubFee, cur)}</span></div>}
-      {cv.fee > 0 && <div className="flex justify-between text-slate-500"><span>Player fee (billed on actual enrolment)</span><span className="font-data">{fmtMoney(cv.fee, cur)} / player / mo{cv.months > 0 ? ` × ${cv.months} mo` : ''}</span></div>}
-      {cv.pct > 0 && <div className="flex justify-between text-slate-500"><span>Club commission on player fees</span><span className="font-data">{cv.pct}%</span></div>}
+      {playerLine && (
+        <div className="flex justify-between">
+          <span>Player fees{cv.minPlayers > 0 ? ` (${cv.minPlayers} × ${fmtMoney(cv.fee, cur)}${cv.months > 0 ? ` × ${cv.months} mo` : ''})` : ''}</span>
+          <span className="font-data">{fmtMoney(cv.playerPortion, cur)}</span>
+        </div>
+      )}
+      {(cv.servicesTotal > 0 || cv.clubFee > 0) && playerLine && (
+        <div className="flex justify-between text-slate-500 pt-1 border-t border-dashed border-[var(--border)]"><span>Subtotal</span><span className="font-data">{fmtMoney(cv.gross, cur)}</span></div>
+      )}
+      {cv.pct > 0 && <div className="flex justify-between text-slate-500"><span>Less club commission ({cv.pct}%)</span><span className="font-data">− {fmtMoney(cv.commissionAmount, cur)}</span></div>}
       <div className="flex justify-between font-semibold text-[var(--navy-deep)] pt-1 border-t border-[var(--border)]">
-        <span>Contract value{cv.fee > 0 ? ' (guaranteed)' : ''}</span>
-        <span className="font-data">{guaranteed > 0 ? fmtMoney(guaranteed, cur) : (cv.fee > 0 ? 'Variable' : fmtMoney(cv.value, cur))}</span>
+        <span>Contract value (club pays)</span>
+        <span className="font-data">{cv.value > 0 ? fmtMoney(cv.value, cur) : 'Variable'}</span>
       </div>
-      <p className="text-[11px] text-slate-400 pt-1">{cv.fee > 0 ? 'The guaranteed value is the services total plus the club fixed fee. Player fees are billed monthly on actual enrolment and reconciled per season — no fixed player count is assumed.' : 'Services total plus the club fixed fee.'}</p>
+      <p className="text-[11px] text-slate-400 pt-1">
+        {playerLine
+          ? `The club pays the full contract value: services${cv.clubFee > 0 ? ' + club fixed fee' : ''} + the player-fee amount (minimum players × fee × months)${cv.pct > 0 ? `, less the ${cv.pct}% club commission` : ''}. Player fees fund the club's payment; they are not collected separately.`
+          : 'Services total plus the club fixed fee.'}
+      </p>
     </div>
   );
 }
@@ -1141,9 +1155,9 @@ function ContractForm({ navigate, editContractId }) {
 
   // Commercial Model. Value sources per model (all AUTO-computed now):
   //  - Club-funded (services basis): value = services catalogue total.
-  //  - Shared: value = services total + club fixed fee (the guaranteed money the
-  //    club owes). Player fees are variable, billed on actual enrolment.
-  //  - Player-funded: value = services total (if any); player fees are variable.
+  //  - Shared: value = (services + club fixed fee + player fees) less commission.
+  //  - Player-funded: value = (services + player fees) less commission.
+  //    Player fees = min players × fee × months; the CLUB pays the whole value.
   const commercialProjection = form.billingBasis === 'player_funded' ? commercialValue(form, lineItemsTotal) : null;
   useEffect(() => {
     if (form.billingBasis === 'services') {
@@ -1490,7 +1504,7 @@ function ContractForm({ navigate, editContractId }) {
         )}
         {form.paymentModel === 'players_all' && (
           <div className="rounded-lg border border-[var(--border)] p-4 mb-2 bg-slate-50/60">
-            <p className="text-xs text-slate-500 mb-3">Players pay the Service Provider directly at a per-player monthly rate. There is <strong>no fixed up-front value</strong> — fees are billed on actual enrolment and reconciled per season, with a commission paid to the Client.</p>
+            <p className="text-xs text-slate-500 mb-3">Player fees fund the club's payment: the <strong>club pays the full contract value</strong>, calculated as minimum players × fee × months, less the club commission. Set the figures below.</p>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <Field label={`Player fee / month (${CURRENCY_SYMBOL[form.currency]})`}><input type="number" min="0" step="0.01" value={form.playerMonthlyFee} onChange={e=>set('playerMonthlyFee', e.target.value)} className={inputCls(false)} placeholder="15" /></Field>
               <Field label="Months (billing period)"><input type="number" min="0" value={form.playerMonths} onChange={e=>set('playerMonths', e.target.value)} className={inputCls(false)} placeholder="10" /></Field>
@@ -1512,7 +1526,7 @@ function ContractForm({ navigate, editContractId }) {
             </select>
           </Field>
         </div>
-        <p className="text-xs text-slate-400 -mt-3 mb-4">{form.paymentModel === 'club_players' ? 'Computed automatically: club fixed fee + projected player revenue, net of the club commission (see breakdown above).' : form.paymentModel === 'players_all' ? 'Computed automatically: projected player revenue, net of the club commission (see breakdown above).' : 'Value is computed automatically from the services above.'}</p>
+        <p className="text-xs text-slate-400 -mt-3 mb-4">{form.paymentModel === 'club_players' ? 'Computed automatically: services + club fixed fee + player fees (min players × fee × months), less the club commission (see breakdown above).' : form.paymentModel === 'players_all' ? 'Computed automatically: services + player fees (min players × fee × months), less the club commission (see breakdown above).' : 'Value is computed automatically from the services above.'}</p>
 
         {/* VAT-inclusive concession: when a client objects to VAT on top, agree an
             all-in figure and treat the value as VAT-inclusive. VAT is still
