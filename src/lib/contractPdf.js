@@ -40,6 +40,7 @@ export function generateContractPdf({ contract, client, company }) {
   const GREY = [102, 115, 128];     // secondary
   const SOFT_GREY = [79, 89, 99];   // About / detail text
   const CHIP_BG = [231, 248, 252];  // light-cyan chip fill (Included)
+  const CYAN_BOX_BG = [227, 247, 251]; // light-cyan highlight fill (Access callout)
   const CHIP_GREEN_BG = [224, 246, 238]; // light-green chip fill (Complimentary)
   const CHIP_GREEN_TX = [5, 150, 105];   // #059669 green chip text
   const BOX_BG = [245, 247, 249];   // subtle navy tint for the bank box
@@ -354,6 +355,29 @@ export function generateContractPdf({ contract, client, company }) {
     return x + w;
   };
 
+  // Highlighted "Access:" callout — a light-cyan box with a cyan left accent and
+  // navy text so this contractually important seat line stands out. Advances y.
+  const accessCallout = (str, x, width) => {
+    const size = 9;
+    const padX = 6;
+    const lineH = size + 3;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(size);
+    const lines = doc.splitTextToSize(String(str ?? ''), width - padX * 2);
+    const boxH = lines.length * lineH + 8;
+    ensure(boxH + 4);
+    y += 4;
+    const boxTop = y;
+    doc.setFillColor(...CYAN_BOX_BG);
+    doc.roundedRect(x, boxTop, width, boxH, 2, 2, 'F');
+    doc.setFillColor(...CYAN);
+    doc.rect(x, boxTop, 2, boxH, 'F');
+    doc.setTextColor(...NAVY);
+    let ly = boxTop + 4 + size;
+    for (const ln of lines) { doc.text(ln, x + padX, ly); ly += lineH; }
+    y = boxTop + boxH + 2;
+  };
+
   // --- Data prep -----------------------------------------------------------
   const services = contract.services;
   const lineItems = services ? computeServiceLineItems(services) : [];
@@ -386,11 +410,18 @@ export function generateContractPdf({ contract, client, company }) {
   text('and', { size: 10, gap: 2 });
   // Blank client fields show a bracketed "[ … ]" placeholder so it's obvious
   // what the Client will confirm on signing; a filled value reads as plain text.
-  const clientReg = client?.registrationNumber
-    ? `a company registered with registration number ${client.registrationNumber}, `
-    : `[ registration number to be confirmed by the Client on signing ], `;
-  const clientAddr = client?.address || '[ address to be confirmed by the Client on signing ]';
-  text(`${client?.companyName || '—'}, ${clientReg}having its registered office at ${clientAddr} (the "Client").`, { size: 10, gap: 2 });
+  const TBC = '[ to be confirmed on signing ]';
+  // country may be a bare ISO code ("CY") from the admin record — expand to a
+  // readable country name for the legal party clause.
+  const ISO = { CY: 'Cyprus', GR: 'Greece', GB: 'United Kingdom', SA: 'Saudi Arabia', MT: 'Malta' };
+  const rawCountry = (client?.country || '').trim();
+  const clientCountry = rawCountry
+    ? (/^[A-Za-z]{2}$/.test(rawCountry) ? (ISO[rawCountry.toUpperCase()] || rawCountry.toUpperCase()) : rawCountry)
+    : '[ country to be confirmed on signing ]';
+  const clientReg = client?.registrationNumber || TBC;
+  const clientVat = client?.vatNumber || TBC;
+  const clientAddr = client?.address || TBC;
+  text(`${client?.companyName || '—'}, a company registered under the laws of ${clientCountry} with registration number ${clientReg}, VAT number ${clientVat}, having its registered office at ${clientAddr} (the "Client").`, { size: 10, gap: 2 });
   text('The above are hereinafter jointly referred to as the "Parties".', { size: 10, gap: 10 });
 
   // --- About the Service Provider — navy pill + intro + credential bullets. --
@@ -479,7 +510,7 @@ export function generateContractPdf({ contract, client, company }) {
         text(i.detail, { size: 9.5, color: SOFT_GREY, gap: 2, x: itemX, width: itemW });
         if (i.key === 'platform_access') {
           const seats = platformSeatsSummary(services?.platform_access);
-          if (seats) text(`Access: ${seats} (exact users to be confirmed with the client).`, { size: 9, color: SOFT_GREY, gap: 2, x: itemX + 10, width: itemW - 10 });
+          if (seats) accessCallout(`Access: ${seats} (exact users to be confirmed with the client).`, itemX + 10, itemW - 10);
         }
       });
       y += 6;
@@ -524,8 +555,10 @@ export function generateContractPdf({ contract, client, company }) {
       // Measure wrapped label height so the row + rule size correctly.
       doc.setFontSize(9.5);
       const labelLines = doc.splitTextToSize(i.label, svcColW - cellPadX * 2);
-      const subLines = subline ? doc.splitTextToSize(subline, svcColW - cellPadX * 2) : [];
-      const rowH = 10 + labelLines.length * 12 + (subLines.length ? subLines.length * 11 + 2 : 0);
+      const subLines = subline ? doc.splitTextToSize(subline, svcColW - cellPadX * 2 - 8) : [];
+      // Highlighted seats box carries extra vertical padding around the text.
+      const subBlockH = subLines.length ? subLines.length * 11 + 10 : 0;
+      const rowH = 10 + labelLines.length * 12 + subBlockH;
       ensure(rowH + 2);
       const rowTop = y;
 
@@ -535,12 +568,23 @@ export function generateContractPdf({ contract, client, company }) {
       doc.setTextColor(...BLACK);
       let ly = rowTop + 12;
       labelLines.forEach((ln) => { doc.text(ln, M + cellPadX, ly); ly += 12; });
-      // Seats subline (grey).
+      // Seats subline — highlighted callout: cyan-tinted box, cyan left accent,
+      // navy text so this contractually important line stands out.
       if (subLines.length) {
+        const boxX = M + cellPadX;
+        const boxW = svcColW - cellPadX * 2;
+        const boxTop = ly + 1;
+        const boxH = subLines.length * 11 + 6;
+        doc.setFillColor(...CYAN_BOX_BG);
+        doc.roundedRect(boxX, boxTop, boxW, boxH, 2, 2, 'F');
+        doc.setFillColor(...CYAN);
+        doc.rect(boxX, boxTop, 2, boxH, 'F');
+        doc.setFont('helvetica', 'bold');
         doc.setFontSize(8.5);
-        doc.setTextColor(...SOFT_GREY);
-        ly += 1;
-        subLines.forEach((ln) => { doc.text(ln, M + cellPadX, ly); ly += 11; });
+        doc.setTextColor(...NAVY);
+        let sy = boxTop + 9;
+        subLines.forEach((ln) => { doc.text(ln, boxX + 6, sy); sy += 11; });
+        ly = boxTop + boxH;
       }
       // Amount, right-aligned near the first label line. Included lines show the
       // list price struck through + "Incl." so the value is visible but unbilled.

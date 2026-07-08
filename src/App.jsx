@@ -2368,7 +2368,12 @@ function ContractDocumentBody({ contract, client, company }) {
                                 {chip && <span className="sos-chip sos-chip-green ml-2 align-middle" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}>{chip}</span>}
                                 <span className="text-slate-500"> — {i.detail}</span>
                                 {i.key === 'platform_access' && platformSeatsSummary(contract.services.platform_access) && (
-                                  <div className="text-xs text-slate-600 mt-0.5">Access: {platformSeatsSummary(contract.services.platform_access)} (exact users to be confirmed with the client)</div>
+                                  <div
+                                    className="text-xs mt-1 inline-block rounded px-2 py-1 border-l-2"
+                                    style={{ background:'rgba(34,199,230,.12)', borderColor:'var(--cyan)', color:'var(--navy-deep)', WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}
+                                  >
+                                    <span className="font-semibold">Access:</span> {platformSeatsSummary(contract.services.platform_access)} <span className="italic">(exact users to be confirmed with the client)</span>
+                                  </div>
                                 )}
                               </div>
                             );
@@ -2399,7 +2404,12 @@ function ContractDocumentBody({ contract, client, company }) {
                           <td className="py-2 px-3">
                             {i.label}
                             {i.key === 'platform_access' && platformSeatsSummary(contract.services.platform_access) && (
-                              <div className="text-xs text-slate-600">Access: {platformSeatsSummary(contract.services.platform_access)} (exact users to be confirmed with the client)</div>
+                              <div
+                                className="text-xs mt-1 inline-block rounded px-2 py-1 border-l-2"
+                                style={{ background:'rgba(34,199,230,.12)', borderColor:'var(--cyan)', color:'var(--navy-deep)', WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}
+                              >
+                                <span className="font-semibold">Access:</span> {platformSeatsSummary(contract.services.platform_access)} <span className="italic">(exact users to be confirmed with the client)</span>
+                              </div>
                             )}
                           </td>
                           <td className="py-2 px-3 text-right font-data whitespace-nowrap">

@@ -24,6 +24,7 @@ const BLACK = rgb(0.118, 0.133, 0.176);  // #1E222D (matches jsPDF body colour)
 const SOFT_GREY = rgb(0.31, 0.35, 0.39);
 const WHITE = rgb(1, 1, 1);
 const CHIP_BG = rgb(0.906, 0.973, 0.988);   // light-cyan chip fill (approx rgba(34,199,230,.15) on white)
+const CYAN_BOX_BG = rgb(0.890, 0.969, 0.984); // light-cyan highlight fill (Access callout)
 const CHIP_GREEN_BG = rgb(0.878, 0.965, 0.933); // light-green chip fill (Complimentary)
 const CHIP_GREEN_TX = rgb(0.020, 0.588, 0.412); // #059669 green chip text
 const BOX_BG = rgb(0.96, 0.968, 0.976);     // subtle navy tint for boxes
@@ -636,14 +637,14 @@ export async function buildContractPdf(input: {
   const companyVat = pick(co, 'vatNumber', 'vat_number') || '—';
   const companyAddr = pick(co, 'registeredAddress', 'registered_address') || '—';
   const clientName = pick(cl, 'companyName', 'company_name') || '—';
-  const clientReg = pick(cl, 'registrationNumber', 'registration_number');
   // Blank client fields show a bracketed "[ … ]" placeholder on the pre-sign
   // document; by signing time the client has confirmed them, so the SIGNED
   // contract reads as plain text (no brackets, no highlight) — clean + unmarked.
-  const clientRegText = clientReg
-    ? `a company registered with registration number ${clientReg}, `
-    : '[ registration number to be confirmed by the Client on signing ], ';
-  const clientAddr = cl.address || '[ address to be confirmed by the Client on signing ]';
+  const TBC = '[ to be confirmed on signing ]';
+  const clientCountry = cl.country || '[ country to be confirmed on signing ]';
+  const clientReg = pick(cl, 'registrationNumber', 'registration_number') || TBC;
+  const clientVat = pick(cl, 'vatNumber', 'vat_number') || TBC;
+  const clientAddr = cl.address || TBC;
 
   // --- Title (split on the dash like the client PDF), centred navy bold. ----
   {
@@ -664,7 +665,7 @@ export async function buildContractPdf(input: {
   text(`This Agreement is made on ${fmtDate(madeOn)} between:`, { size: 10, gap: 4 });
   text(`${companyName}, a company registered under the laws of the Republic of Cyprus with registration number ${companyReg}, VAT number ${companyVat}, having its registered office at ${companyAddr} (the "Service Provider"),`, { size: 10, gap: 2 });
   text('and', { size: 10, gap: 2 });
-  text(`${clientName}, ${clientRegText}having its registered office at ${clientAddr} (the "Client").`, { size: 10, gap: 2 });
+  text(`${clientName}, a company registered under the laws of ${clientCountry} with registration number ${clientReg}, VAT number ${clientVat}, having its registered office at ${clientAddr} (the "Client").`, { size: 10, gap: 2 });
   text('The above are hereinafter jointly referred to as the "Parties".', { size: 10, gap: 10 });
 
   // --- About the Service Provider — navy pill header + intro + bullets. -----
@@ -719,6 +720,33 @@ export async function buildContractPdf(input: {
     return x + w;
   };
 
+  // Highlighted "Access:" callout — light-cyan box, cyan left accent, navy text
+  // so this contractually important seat line stands out. Advances y downward.
+  const accessCallout = (str: string, x: number, width: number) => {
+    const size = 9;
+    const padX = 6;
+    const lineH = size + 3;
+    // Word-wrap against the box's inner width.
+    const words = String(str ?? '').split(/\s+/);
+    const lines: string[] = [];
+    let lineStr = '';
+    for (const w of words) {
+      const test = lineStr ? lineStr + ' ' + w : w;
+      if (bold.widthOfTextAtSize(test, size) > width - padX * 2 && lineStr) { lines.push(lineStr); lineStr = w; }
+      else lineStr = test;
+    }
+    if (lineStr) lines.push(lineStr);
+    const boxH = lines.length * lineH + 8;
+    ensure(boxH + 4);
+    y += 4;
+    const boxTop = y;                          // top edge (downward coords)
+    page.drawRectangle({ x, y: py(boxTop + boxH), width, height: boxH, color: CYAN_BOX_BG });
+    page.drawRectangle({ x, y: py(boxTop + boxH), width: 2, height: boxH, color: CYAN });
+    let ly = boxTop + 4 + size;                // first baseline
+    for (const ln of lines) { page.drawText(ln, { x: x + padX, y: py(ly), size, font: bold, color: NAVY }); ly += lineH; }
+    y = boxTop + boxH + 2;
+  };
+
   // --- Purpose — STRUCTURED by service group when services exist. ----------
   pillHeader(purposeNum, 'Purpose');
   if (lineItems.length > 0) {
@@ -756,7 +784,7 @@ export async function buildContractPdf(input: {
         text(i.detail, { size: 9.5, color: SOFT_GREY, gap: 2, x: itemX, width: itemW });
         if (i.key === 'platform_access') {
           const seats = platformSeatsSummary(services?.platform_access);
-          if (seats) text(`Access: ${seats} (exact users to be confirmed with the client).`, { size: 9, color: SOFT_GREY, gap: 2, x: itemX + 10, width: itemW - 10 });
+          if (seats) accessCallout(`Access: ${seats} (exact users to be confirmed with the client).`, itemX + 10, itemW - 10);
         }
       });
       y += 6;
@@ -806,16 +834,27 @@ export async function buildContractPdf(input: {
       const subline = seats ? `Access: ${seats} (exact users to be confirmed with the client)` : '';
 
       const labelLines = wrap(i.label, font, 9.5, svcColW - cellPadX * 2);
-      const subLines = subline ? wrap(subline, font, 8.5, svcColW - cellPadX * 2) : [];
-      const rowH = 10 + labelLines.length * 12 + (subLines.length ? subLines.length * 11 + 2 : 0);
+      const subLines = subline ? wrap(subline, bold, 8.5, svcColW - cellPadX * 2 - 8) : [];
+      // Highlighted seats box carries extra vertical padding around the text.
+      const subBlockH = subLines.length ? subLines.length * 11 + 10 : 0;
+      const rowH = 10 + labelLines.length * 12 + subBlockH;
       ensure(rowH + 2);
       const rowTop = y;
 
       let ly = rowTop + 12;
       for (const ln of labelLines) { page.drawText(ln, { x: M + cellPadX, y: py(ly), size: 9.5, font, color: BLACK }); ly += 12; }
+      // Seats subline — highlighted callout: cyan-tinted box, cyan left accent,
+      // navy text so this contractually important line stands out.
       if (subLines.length) {
-        ly += 1;
-        for (const ln of subLines) { page.drawText(ln, { x: M + cellPadX, y: py(ly), size: 8.5, font, color: SOFT_GREY }); ly += 11; }
+        const boxX = M + cellPadX;
+        const boxW = svcColW - cellPadX * 2;
+        const boxTop = ly + 1;
+        const boxH = subLines.length * 11 + 6;
+        page.drawRectangle({ x: boxX, y: py(boxTop + boxH), width: boxW, height: boxH, color: CYAN_BOX_BG });
+        page.drawRectangle({ x: boxX, y: py(boxTop + boxH), width: 2, height: boxH, color: CYAN });
+        let sy = boxTop + 9;
+        for (const ln of subLines) { page.drawText(ln, { x: boxX + 6, y: py(sy), size: 8.5, font: bold, color: NAVY }); sy += 11; }
+        ly = boxTop + boxH;
       }
       // Amount right-aligned. Included lines show the list price struck through
       // + "Incl." so the value is visible but unbilled.
