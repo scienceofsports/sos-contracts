@@ -3171,11 +3171,24 @@ function RevenueReport() {
   const clientMap = Object.fromEntries(clients.map(c => [c.id, c]));
   const allPayments = contracts.flatMap(c => c.payments.map(p => ({ ...p, clientId: c.clientId, contractType: c.type })));
   const paid = allPayments.filter(p => p.status === 'paid');
+  // Revenue is reported NET of VAT — VAT collected is not income, it's passed to
+  // the tax office. Derive the net portion of each collected amount from the
+  // payment's net:gross ratio (handles partial payments and VAT-exempt rows).
+  const netOf = (p) => {
+    const gross = Number(p.totalAmount || 0);
+    const net = Number(p.amount != null ? p.amount : gross);   // stored net
+    const received = Number(p.paidAmount || 0);
+    if (gross > 0 && net >= 0) return round2(received * (net / gross));
+    return received;   // no VAT info -> treat received as net
+  };
   const byType = {};
-  paid.forEach(p => { byType[p.contractType] = (byType[p.contractType]||0) + Number(p.paidAmount||0); });
+  paid.forEach(p => { byType[p.contractType] = (byType[p.contractType]||0) + netOf(p); });
   const byClient = {};
-  paid.forEach(p => { const name = clientMap[p.clientId]?.companyName || 'Unknown'; byClient[name] = (byClient[name]||0) + Number(p.paidAmount||0); });
-  const total = paid.reduce((s,p)=>s+Number(p.paidAmount||0),0);
+  paid.forEach(p => { const name = clientMap[p.clientId]?.companyName || 'Unknown'; byClient[name] = (byClient[name]||0) + netOf(p); });
+  const total = paid.reduce((s,p)=>s+netOf(p),0);
+  // VAT collected (gross received − net revenue) — shown separately for clarity.
+  const grossTotal = paid.reduce((s,p)=>s+Number(p.paidAmount||0),0);
+  const vatCollected = round2(grossTotal - total);
 
   return (
     <div className="p-4 md:p-6">
@@ -3208,8 +3221,13 @@ function RevenueReport() {
         </div>
       </div>
       <div className="bg-white rounded-xl border border-[var(--border)] p-5 mt-4">
-        <div className="text-xs text-slate-500">Total Revenue Collected</div>
+        <div className="text-xs text-slate-500">Total Revenue Collected (net of VAT)</div>
         <div className="font-data text-2xl mt-1">{fmtMoney(total,'EUR')}</div>
+        {vatCollected > 0 && (
+          <div className="text-xs text-slate-400 mt-1">
+            + {fmtMoney(vatCollected,'EUR')} VAT collected (passed to the tax office) · {fmtMoney(grossTotal,'EUR')} gross received
+          </div>
+        )}
       </div>
     </div>
   );
