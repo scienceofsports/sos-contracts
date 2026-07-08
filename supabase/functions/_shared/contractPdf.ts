@@ -332,7 +332,11 @@ function dataUrlToBytes(dataUrl: Any): Uint8Array | null {
 
 export async function buildContractPdf(input: {
   snapshot: { contract: Any; client: Any; company: Any };
-  signer: { name: string; title: string; company: string; email: string; signedAt: string };
+  signer: {
+    name: string; title: string; company: string; email: string; signedAt: string;
+    onBehalf?: boolean; representativeCompany?: string | null;
+    representativeRegistration?: string | null; authorityBasis?: string | null;
+  };
   signatureImageBytes: Uint8Array | null;
 }): Promise<{ bytes: Uint8Array; sha256: string }> {
   const { snapshot, signer } = input;
@@ -1107,7 +1111,32 @@ export async function buildContractPdf(input: {
     { sig: clientSig, sigFallback: signer.name, name: signer.name, title: signer.title || '', date: signedAtFmt },
   ];
 
-  ensure(190);
+  // Pre-compute the authorised-representative caption (client column only) so we
+  // can reserve the SAME vertical space in BOTH columns and keep the signature
+  // lines aligned. The party heading stays the Client (bound); the caption just
+  // records who actually signed and under what authority.
+  const wrap = (str: string, size: number, maxWidth: number, maxLines: number): string[] => {
+    const words = str.split(' ');
+    const lines: string[] = [];
+    let line = '';
+    for (const w of words) {
+      const trial = line ? `${line} ${w}` : w;
+      if (font.widthOfTextAtSize(trial, size) > maxWidth && line) { lines.push(line); line = w; }
+      else line = trial;
+      if (lines.length >= maxLines) break;
+    }
+    if (line && lines.length < maxLines) lines.push(line);
+    return lines;
+  };
+  let repLines: string[] = [];
+  if (signer.onBehalf && signer.representativeCompany) {
+    const reg = signer.representativeRegistration ? ` (Reg. No. ${signer.representativeRegistration})` : '';
+    repLines = wrap(`Signed by ${signer.representativeCompany}${reg}, as duly authorised representative`, 7, colW, 2);
+    if (signer.authorityBasis) repLines = repLines.concat(wrap(`Authority: ${signer.authorityBasis}`, 7, colW, 1));
+  }
+  const capReserve = repLines.length ? repLines.length * 8 + 4 : 0;
+
+  ensure(190 + capReserve);
   const blockTop = y;                   // downward cursor at block top
   let maxColBottom = y;
   cols.forEach((col, idx) => {
@@ -1116,7 +1145,16 @@ export async function buildContractPdf(input: {
     // Column header (downward baseline), navy uppercase.
     yy += 9;
     page.drawText(heads[idx].toUpperCase().slice(0, 60), { x, y: py(yy), size: 8.5, font: bold, color: NAVY });
-    yy += 16;
+    yy += 12;
+
+    // Draw the caption on the CLIENT column; reserve the same space on the other
+    // so both signature lines stay level.
+    if (idx === 1 && repLines.length) {
+      repLines.forEach((ln) => { page.drawText(ln, { x, y: py(yy), size: 7, font, color: GREY }); yy += 8; });
+      yy += 4;
+    } else {
+      yy += capReserve;
+    }
 
     // Signature area: reserve a tall band; draw a LARGE image (scaleToFit
     // ~180x64) sitting just above the signature line, else the italic name.
