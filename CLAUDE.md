@@ -12,7 +12,7 @@ Global identity/working-style lives in `~/.claude/CLAUDE.md`; SCIOS business con
 
 ## Stack
 
-- **Frontend:** React 18 + Vite, Tailwind v4. One large `src/App.jsx` (~3300 lines).
+- **Frontend:** React 18 + Vite, Tailwind v4. One large `src/App.jsx` (~4600 lines).
   Deployed to **GitHub Pages** at `contracts.scienceofsports.net` via GitHub Actions
   (`.github/workflows/deploy.yml`) — **push to `main` = deploy**.
 - **Backend:** Supabase (project ref `dljcowpbplqdqjulnvyy`, EU Frankfurt) — Postgres +
@@ -52,17 +52,40 @@ Also `invite-user`, `decline-signing-request`.
 - A change to the contract document's *look* usually means editing all of:
   `ContractDocumentBody` in App.jsx + `contractPdf.js` + `contractPdf.ts`.
 
-**Evidence protection:** migration `0004` adds a trigger `contracts_block_signed_delete`
-that blocks deleting a contract with a recorded signature. This is intentional. See memory
-for the SQL to force-delete TEST contracts.
+**Evidence protection (a signed/active contract is immutable):** migration `0004` blocks
+DELETE and `0017` (`contracts_block_signed_edit`) freezes the legal columns against UPDATE —
+so an executed contract can only be changed/removed via the Supabase service-role key.
+Intentional. See memory for the force-delete SQL for TEST contracts.
+
+**Admin "View Contract Document"** renders the FROZEN `document_snapshot` for sent/active/
+signed contracts (via `contractService.getFrozenSnapshot` + `normalizeSnapshot`), byte-
+identical to the emailed PDF — NOT a live re-render. Drafts render live.
 
 **`normalizeSnapshot`** (App.jsx) translates the frozen `document_snapshot` (snake/camel)
-for the signing page. **`computeServiceLineItems` + `SERVICE_GROUPS` + `platformSeatsSummary`**
-(`src/lib/constants.js`, ported into both PDF generators) build the structured service catalog.
+for the signing page and the admin frozen view. **`computeServiceLineItems` + `SERVICE_GROUPS`
++ `platformSeatsSummary`** (`src/lib/constants.js`, ported into both PDF generators) build the
+structured service catalog.
+
+## Money model (important — get the basis right)
+
+- **Contract `value` is NET** (ex-VAT). `computeVAT(client, amount, inclusive)` (format.js) adds
+  VAT on top unless `contract.vat_inclusive` is set, in which case the value is treated as GROSS
+  and net is backed out (net = value ÷ 1.19). CY / EU-without-VAT-no → 19%; EU+VATno → reverse
+  charge; non-EU → out of scope. Payment rows store `amount`=net, `totalAmount`=net+VAT.
+- **Basis rule:** INCOME figures are NET (Revenue Report [net/gross toggle], dashboard Annual
+  Revenue + Collected YTD via `netReceived()`); MONEY-OWED figures are GROSS (Receivables, Due
+  now, Outstanding).
+- **Commercial model** (`commercialValue`): value = services total + club fixed fee. Player fees
+  are a per-player RATE billed on actual enrolment, NEVER a guessed headcount × value. `min_players`
+  is clause text only (not a value floor). See [[contract-model-current-state]].
+- **Annualised value** (`annualisedValue` = value ÷ term years, or `annual_value_override`) drives
+  the dashboard "Annual Revenue" run-rate so multi-year deals don't distort it.
 
 ## Migrations
 
-`supabase/migrations/0001`–`0007` all run. Apply new ones via the Supabase SQL Editor or CLI.
+`supabase/migrations/0001`–`0019` all run. Notable recent: `0016` signing hardening, `0017`
+signed-contract edit lock, `0018` `vat_inclusive` column, `0019` `annual_value_override` column.
+Apply new ones via the Supabase SQL Editor (DDL) or CLI.
 
 ## Secrets — never commit
 
