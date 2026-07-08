@@ -54,12 +54,13 @@ export function ConfirmModal({ open, onClose, onConfirm, title, message, confirm
   );
 }
 
-export function Field({ label, error, children, required }) {
+export function Field({ label, error, warning, children, required }) {
   return (
     <div className="mb-4">
       <label className="block text-xs font-medium text-slate-600 mb-1.5">{label}{required && <span className="text-red-500 ml-0.5">*</span>}</label>
       {children}
       {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
+      {!error && warning && <p className="text-xs text-amber-600 mt-1">{warning}</p>}
     </div>
   );
 }

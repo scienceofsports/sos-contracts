@@ -29,6 +29,8 @@ import {
   daysBetween,
   sha256,
   validateEmail,
+  looksLikeVatNumber,
+  looksLikeRegistrationNumber,
   computeVAT,
   round2,
   effectiveStatus,
@@ -2249,6 +2251,9 @@ function ClientFillHint({ children }) {
 function ContractDocumentBody({ contract, client, company }) {
   const lineItems = contract.services ? computeServiceLineItems(contract.services) : [];
   const termYears = contract.startDate && contract.endDate ? Math.max(1, Math.round(daysBetween(contract.startDate, contract.endDate)/365)) : null;
+  // Client country as readable prose: admin stores an ISO code ("CY") for VAT;
+  // render the full name in the legal party clause. Blank ⇒ show a fill hint.
+  const clientCountryLabel = client.country ? countryLabelForSigning(client.country) : null;
 
   return (
     <React.Fragment>
@@ -2294,14 +2299,22 @@ function ContractDocumentBody({ contract, client, company }) {
         </p>
         <p className="text-sm text-slate-700 mb-6">and</p>
         <p className="text-sm text-slate-700 mb-8">
-          <strong>{client.companyName}</strong>,{' '}
+          <strong>{client.companyName}</strong>, a company registered under the laws of{' '}
+          {clientCountryLabel
+            ? clientCountryLabel
+            : <ClientFillHint>country to be confirmed on signing</ClientFillHint>}
+          {' '}with registration number{' '}
           {client.registrationNumber
-            ? `a company registered with registration number ${client.registrationNumber}, `
-            : <ClientFillHint>registration number to be confirmed by the Client on signing</ClientFillHint>}
-          {client.registrationNumber ? '' : ', '}having its registered office at{' '}
+            ? client.registrationNumber
+            : <ClientFillHint>to be confirmed on signing</ClientFillHint>}
+          , VAT number{' '}
+          {client.vatNumber
+            ? client.vatNumber
+            : <ClientFillHint>to be confirmed on signing</ClientFillHint>}
+          , having its registered office at{' '}
           {client.address
             ? client.address
-            : <ClientFillHint>to be confirmed by the Client on signing</ClientFillHint>}
+            : <ClientFillHint>to be confirmed on signing</ClientFillHint>}
           {' '}(the "Client").
         </p>
         <p className="text-sm text-slate-700 mb-8">The above are hereinafter jointly referred to as the "Parties".</p>
@@ -3744,6 +3757,17 @@ function UserFormModal({ onClose, onDone }) {
 /* =========================================================================
    CLIENT-FACING SIGNING FLOW  (#/sign/{contractId}/{token})
    ========================================================================= */
+// Pre-fill label for the signing-page "Country of Registration" field. The
+// admin stores country as an ISO code (e.g. "CY") to drive VAT; show the client
+// a full country name instead of a bare code so they confirm readable wording.
+const ISO_COUNTRY_LABELS = { CY: 'Cyprus', GR: 'Greece', GB: 'United Kingdom', SA: 'Saudi Arabia', MT: 'Malta' };
+function countryLabelForSigning(country) {
+  const c = (country || '').trim();
+  if (!c) return 'Cyprus';
+  if (/^[A-Za-z]{2}$/.test(c)) return ISO_COUNTRY_LABELS[c.toUpperCase()] || c.toUpperCase();
+  return c;
+}
+
 // Map a frozen document snapshot (stored from DB rows, so keys may be snake_case)
 // onto the camelCase shape the SigningFlow screens already expect. Tolerant of
 // both cases so it works whether the Edge Function stored snake_case or camelCase.
@@ -3808,6 +3832,7 @@ function normalizeSnapshot(snapshot) {
     contactName: pick(cl, 'contactName', 'contact_name'),
     contactEmail: pick(cl, 'contactEmail', 'contact_email'),
     address: pick(cl, 'address'),
+    country: pick(cl, 'country'),
     vatNumber: pick(cl, 'vatNumber', 'vat_number'),
     registrationNumber: pick(cl, 'registrationNumber', 'registration_number'),
     logoBase64: pick(cl, 'logoBase64', 'logo_url'),
@@ -3947,6 +3972,9 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
   // Combined validation errors for the "Confirm Agreement Summary" step
   // (company details + designated contact + finance) — all mandatory.
   const [confirmErrors, setConfirmErrors] = useState({});
+  // Soft format warnings (VAT / registration number look off) — shown under the
+  // field but NEVER block signing, so an unusual-but-valid entity can proceed.
+  const [confirmWarnings, setConfirmWarnings] = useState({});
 
   // Client-provided designated contact person + finance contact (captured on
   // screen 3, stored on the contract via record-signature). Session-only state.
@@ -4003,7 +4031,7 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
           setClient(client);
           setCompany(company);
           setSigCompany(client ? client.companyName || '' : '');
-          if (client) setClientDetailsForm({ companyName: client.companyName || '', address: client.address || '', vatNumber: client.vatNumber || '', registrationNumber: client.registrationNumber || '' });
+          if (client) setClientDetailsForm({ companyName: client.companyName || '', address: client.address || '', country: countryLabelForSigning(client.country), vatNumber: client.vatNumber || '', registrationNumber: client.registrationNumber || '' });
           // Pre-fill the confirm-email step from the request's signer email.
           if (request.signer_email && !client?.contactEmail) {
             setClient(cl => ({ ...(cl || {}), contactEmail: request.signer_email }));
@@ -4021,7 +4049,7 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
           setClient(data.client);
           setCompany(data.company);
           setSigCompany(data.client ? data.client.companyName : '');
-          if (data.client) setClientDetailsForm({ companyName: data.client.companyName || '', address: data.client.address || '', vatNumber: data.client.vatNumber || '', registrationNumber: data.client.registrationNumber || '' });
+          if (data.client) setClientDetailsForm({ companyName: data.client.companyName || '', address: data.client.address || '', country: countryLabelForSigning(data.client.country), vatNumber: data.client.vatNumber || '', registrationNumber: data.client.registrationNumber || '' });
         } catch (err) {
           setLoadError('This signing link could not be read — it may be incomplete or corrupted. Ask the sender for a fresh link.');
         }
@@ -4033,7 +4061,7 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
         const cl = await clientService.getById(c.clientId);
         setClient(cl);
         setSigCompany(cl ? cl.companyName : '');
-        if (cl) setClientDetailsForm({ companyName: cl.companyName || '', address: cl.address || '', vatNumber: cl.vatNumber || '', registrationNumber: cl.registrationNumber || '' });
+        if (cl) setClientDetailsForm({ companyName: cl.companyName || '', address: cl.address || '', country: countryLabelForSigning(cl.country), vatNumber: cl.vatNumber || '', registrationNumber: cl.registrationNumber || '' });
       }
       setCompany(await companyService.get());
     })();
@@ -4047,8 +4075,16 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
     // Client company details — all required.
     if (!cd.companyName || !cd.companyName.trim()) e.companyName = 'Company name is required.';
     if (!cd.address || !cd.address.trim()) e.address = 'Registered address is required.';
+    if (!cd.country || !cd.country.trim()) e.country = 'Country of registration is required.';
     if (!cd.vatNumber || !cd.vatNumber.trim()) e.vatNumber = 'VAT number is required.';
     if (!cd.registrationNumber || !cd.registrationNumber.trim()) e.registrationNumber = 'Registration number is required.';
+    // Soft format warnings (do NOT block) — only when a value was actually typed.
+    const w = {};
+    if (cd.vatNumber && cd.vatNumber.trim() && !looksLikeVatNumber(cd.vatNumber, cd.country))
+      w.vatNumber = 'This doesn\'t look like a valid VAT number — please double-check.';
+    if (cd.registrationNumber && cd.registrationNumber.trim() && !looksLikeRegistrationNumber(cd.registrationNumber, cd.country))
+      w.registrationNumber = 'This doesn\'t look like a valid registration number — please double-check.';
+    setConfirmWarnings(w);
     // Designated contact — all required.
     if (!contactForm.contactName.trim()) e.contactName = 'Contact name is required.';
     if (!contactForm.contactRole.trim()) e.contactRole = 'Role is required.';
@@ -4067,17 +4103,20 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
       // Portable AND server mode: the signer has no DB auth, so edits are
       // session-only — they display on screen but don't write the client record.
       if (isPortable || isServer) {
-        const updated = { ...client, companyName: cd.companyName.trim(), address: cd.address.trim(), vatNumber: cd.vatNumber.trim(), registrationNumber: cd.registrationNumber.trim() };
+        const updated = { ...client, companyName: cd.companyName.trim(), address: cd.address.trim(), country: (cd.country || '').trim(), vatNumber: cd.vatNumber.trim(), registrationNumber: cd.registrationNumber.trim() };
         setClient(updated);
         setSigCompany(updated.companyName);
       } else {
+        // Persist the confirmed identity fields — but NOT `country`: clients.country
+        // holds the ISO code that drives VAT (set by admin). The client-confirmed
+        // country is a free-text legal label for the document only, kept in-memory.
         const updated = await clientService.update(client.id, {
           companyName: cd.companyName.trim(),
           address: cd.address.trim(),
           vatNumber: cd.vatNumber.trim(),
           registrationNumber: cd.registrationNumber.trim(),
         });
-        setClient(updated);
+        setClient({ ...updated, country: (cd.country || '').trim() });
         setSigCompany(updated.companyName);
         await contractService.addAuditEntry(contract.id, { type:'client_update', message:`Client updated their company details via the signing link (${updated.companyName})`, by: null });
       }
@@ -4523,19 +4562,23 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
                 <p className="text-xs text-slate-500 mt-4">Please confirm your company details and provide your contact people. All fields are required to proceed.</p>
 
                 <div className="mt-4 border border-[var(--border)] rounded-lg p-4">
-                  <div className="text-sm font-medium mb-3">Your Company Details</div>
-                  <Field label="Company Name" required error={confirmErrors.companyName}>
-                    <input value={clientDetailsForm.companyName} onChange={e=>setClientDetailsForm(f=>({...f,companyName:e.target.value}))} className={inputCls(confirmErrors.companyName)} />
+                  <div className="text-sm font-medium mb-1">Your Company Details</div>
+                  <p className="text-xs text-slate-500 mb-3">Enter your <strong>full legal company name</strong> exactly as registered — this is the name that will appear as the contracting party throughout the signed agreement.</p>
+                  <Field label="Full Legal Company Name" required error={confirmErrors.companyName}>
+                    <input value={clientDetailsForm.companyName} onChange={e=>setClientDetailsForm(f=>({...f,companyName:e.target.value}))} className={inputCls(confirmErrors.companyName)} placeholder="e.g. AEL Football Public Ltd" />
                   </Field>
                   <Field label="Registered Address" required error={confirmErrors.address}>
                     <input value={clientDetailsForm.address} onChange={e=>setClientDetailsForm(f=>({...f,address:e.target.value}))} className={inputCls(confirmErrors.address)} />
                   </Field>
+                  <Field label="Country of Registration" required error={confirmErrors.country}>
+                    <input value={clientDetailsForm.country} onChange={e=>setClientDetailsForm(f=>({...f,country:e.target.value}))} className={inputCls(confirmErrors.country)} placeholder="e.g. Cyprus" />
+                  </Field>
                   <div className="grid grid-cols-2 gap-3">
-                    <Field label="VAT Number" required error={confirmErrors.vatNumber}>
-                      <input value={clientDetailsForm.vatNumber} onChange={e=>setClientDetailsForm(f=>({...f,vatNumber:e.target.value}))} className={inputCls(confirmErrors.vatNumber)} />
+                    <Field label="VAT Number" required error={confirmErrors.vatNumber} warning={confirmWarnings.vatNumber}>
+                      <input value={clientDetailsForm.vatNumber} onChange={e=>setClientDetailsForm(f=>({...f,vatNumber:e.target.value}))} className={inputCls(confirmErrors.vatNumber)} placeholder="e.g. CY60030297Y" />
                     </Field>
-                    <Field label="Registration Number" required error={confirmErrors.registrationNumber}>
-                      <input value={clientDetailsForm.registrationNumber} onChange={e=>setClientDetailsForm(f=>({...f,registrationNumber:e.target.value}))} className={inputCls(confirmErrors.registrationNumber)} />
+                    <Field label="Registration Number" required error={confirmErrors.registrationNumber} warning={confirmWarnings.registrationNumber}>
+                      <input value={clientDetailsForm.registrationNumber} onChange={e=>setClientDetailsForm(f=>({...f,registrationNumber:e.target.value}))} className={inputCls(confirmErrors.registrationNumber)} placeholder="e.g. HE449875" />
                     </Field>
                   </div>
                 </div>

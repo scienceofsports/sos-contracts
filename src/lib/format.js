@@ -50,6 +50,32 @@ export function validateEmail(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email || '');
 }
 
+// --- Company-identifier format checks (used to WARN, never to block a signing).
+// Cyprus VAT is CY + 8 digits + 1 trailing letter (e.g. CY60030297Y). For any
+// other country we accept a looser "alphanumeric, reasonable length" shape so a
+// legitimate foreign entity is never rejected — the ceiling is generous enough
+// for the longest national formats (e.g. Saudi Arabia's 15-digit VAT number).
+export function looksLikeVatNumber(vat, country) {
+  const v = (vat || '').replace(/[\s-]/g, '').toUpperCase();
+  if (!v) return false;
+  if (isCyprus(country) || v.startsWith('CY')) return /^CY\d{8}[A-Z]$/.test(v);
+  return /^[A-Z]{0,3}[0-9A-Z]{6,17}$/.test(v);
+}
+
+// Cyprus company registration numbers look like HE449875 (HE + digits).
+// Elsewhere we only require digits (optionally with a short letter prefix).
+export function looksLikeRegistrationNumber(reg, country) {
+  const r = (reg || '').replace(/[\s-]/g, '').toUpperCase();
+  if (!r) return false;
+  if (isCyprus(country) || /^HE/.test(r)) return /^HE\d{4,9}$/.test(r);
+  return /^[A-Z]{0,4}\d{3,12}$/.test(r);
+}
+
+function isCyprus(country) {
+  const c = (country || '').trim().toLowerCase();
+  return !c || c === 'cyprus' || c === 'cy' || c === 'κύπρος';
+}
+
 /* VAT logic */
 // Compute VAT for a payment amount. When `inclusive` is true, `amount` is
 // treated as the VAT-INCLUSIVE (gross) figure the client agreed to pay — the

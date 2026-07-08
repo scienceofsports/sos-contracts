@@ -641,7 +641,13 @@ export async function buildContractPdf(input: {
   // document; by signing time the client has confirmed them, so the SIGNED
   // contract reads as plain text (no brackets, no highlight) — clean + unmarked.
   const TBC = '[ to be confirmed on signing ]';
-  const clientCountry = cl.country || '[ country to be confirmed on signing ]';
+  // country may be a bare ISO code ("CY") from the admin record — expand to a
+  // readable name. On the SIGNED doc it's already the client-confirmed full name.
+  const ISO: Record<string, string> = { CY: 'Cyprus', GR: 'Greece', GB: 'United Kingdom', SA: 'Saudi Arabia', MT: 'Malta' };
+  const rawCountry = String(cl.country || '').trim();
+  const clientCountry = rawCountry
+    ? (/^[A-Za-z]{2}$/.test(rawCountry) ? (ISO[rawCountry.toUpperCase()] || rawCountry.toUpperCase()) : rawCountry)
+    : '[ country to be confirmed on signing ]';
   const clientReg = pick(cl, 'registrationNumber', 'registration_number') || TBC;
   const clientVat = pick(cl, 'vatNumber', 'vat_number') || TBC;
   const clientAddr = cl.address || TBC;

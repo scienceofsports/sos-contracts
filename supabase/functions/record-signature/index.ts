@@ -112,6 +112,7 @@ Deno.serve(async (req) => {
     if (clientDetails && snap.client) {
       if (clientDetails.companyName) { snap.client.company_name = clientDetails.companyName; snap.client.companyName = clientDetails.companyName; }
       if (clientDetails.address) { snap.client.address = clientDetails.address; }
+      if (clientDetails.country) { snap.client.country = clientDetails.country; }
       if (clientDetails.vatNumber) { snap.client.vat_number = clientDetails.vatNumber; snap.client.vatNumber = clientDetails.vatNumber; }
       if (clientDetails.registrationNumber) { snap.client.registration_number = clientDetails.registrationNumber; snap.client.registrationNumber = clientDetails.registrationNumber; }
     }
@@ -204,7 +205,13 @@ Deno.serve(async (req) => {
     //    anchor. Record a note in the operational log for traceability.
     if (clientDetails && snap.client?.id) {
       try {
+        // NOTE: deliberately DO NOT write `country` back to the clients row —
+        // clients.country holds the ISO code that drives VAT (CY => 19%), set by
+        // admin. The client-confirmed country is a free-text legal label used only
+        // in the executed document's party clause (already baked into the frozen
+        // snapshot above), so writing it here would corrupt the VAT logic.
         await admin.from('clients').update({
+          company_name: clientDetails.companyName ?? undefined,
           address: clientDetails.address ?? undefined,
           vat_number: clientDetails.vatNumber ?? undefined,
           registration_number: clientDetails.registrationNumber ?? undefined,
