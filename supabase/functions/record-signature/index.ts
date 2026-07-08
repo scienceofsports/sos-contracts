@@ -61,8 +61,18 @@ Deno.serve(async (req) => {
       financeEmail,
       // Client's confirmed company details (address, VAT, reg) from signing.
       clientDetails,
+      // Authorised-representative signing: signer acted for a separate company
+      // that holds the right to sign on the Client's behalf (Client stays bound).
+      signerOnBehalf,
+      representativeCompany,
+      representativeRegistration,
+      signerAuthorityBasis,
     } = body;
     if (!token) throw new Error('token is required');
+
+    // Trim-to-null helper (available for the whole handler, incl. the signature
+    // evidence write below). A later `nz` is scoped to the contract update.
+    const nz0 = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
 
     const admin = getAdminClient();
 
@@ -178,21 +188,24 @@ Deno.serve(async (req) => {
       consent_electronic: !!consents.electronic,
       consent_authorized: !!consents.authorized,
       consent_read: !!consents.read,
+      signer_on_behalf: !!signerOnBehalf,
+      representative_company: signerOnBehalf ? (nz0(representativeCompany)) : null,
+      representative_registration: signerOnBehalf ? nz0(representativeRegistration) : null,
+      signer_authority_basis: signerOnBehalf ? nz0(signerAuthorityBasis) : null,
     });
 
     // Advance the contract to 'active' (signing activates it) and persist the
     // client-provided contact people. Only set fields that were provided.
-    const nz = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
     const { error: contractUpdateErr } = await admin
       .from('contracts')
       .update({
         status: 'active',
-        contact_name: nz(contactName),
-        contact_role: nz(contactRole),
-        contact_email: nz(contactEmail),
-        contact_phone: nz(contactPhone),
-        finance_name: nz(financeName),
-        finance_email: nz(financeEmail),
+        contact_name: nz0(contactName),
+        contact_role: nz0(contactRole),
+        contact_email: nz0(contactEmail),
+        contact_phone: nz0(contactPhone),
+        finance_name: nz0(financeName),
+        finance_email: nz0(financeEmail),
       })
       .eq('id', request.contract_id);
     if (contractUpdateErr) throw new Error(contractUpdateErr.message);
@@ -255,6 +268,10 @@ Deno.serve(async (req) => {
           name: signerName, title: signerTitle ?? '', company: signerCompany ?? '',
           email: request.signer_email, ip: signer_ip, userAgent: user_agent, signedAt,
           consentElectronic: !!consents.electronic, consentAuthorized: !!consents.authorized, consentRead: !!consents.read,
+          onBehalf: !!signerOnBehalf,
+          representativeCompany: signerOnBehalf ? nz0(representativeCompany) : null,
+          representativeRegistration: signerOnBehalf ? nz0(representativeRegistration) : null,
+          authorityBasis: signerOnBehalf ? nz0(signerAuthorityBasis) : null,
         },
         documentHashBefore: request.document_hash_before,
         documentHashAfter: document_hash_after,
@@ -286,6 +303,10 @@ Deno.serve(async (req) => {
           signer: {
             name: signerName, title: signerTitle ?? '', company: signerCompany ?? '',
             email: request.signer_email, signedAt,
+            onBehalf: !!signerOnBehalf,
+            representativeCompany: signerOnBehalf ? nz0(representativeCompany) : null,
+            representativeRegistration: signerOnBehalf ? nz0(representativeRegistration) : null,
+            authorityBasis: signerOnBehalf ? nz0(signerAuthorityBasis) : null,
           },
           signatureImageBytes: sigBytes,
         });

@@ -1943,6 +1943,13 @@ function ContractDetail({ contractId, navigate }) {
             <div className="text-sm space-y-2">
               <div className="flex justify-between"><dt className="text-slate-500">Signed by</dt><dd className="font-medium">{contract.signerName}</dd></div>
               {contract.signerTitle && <div className="flex justify-between"><dt className="text-slate-500">Title</dt><dd>{contract.signerTitle}</dd></div>}
+              {contract.signerOnBehalf && contract.representativeCompany && (
+                <React.Fragment>
+                  <div className="flex justify-between"><dt className="text-slate-500">Signed via representative</dt><dd className="font-medium text-right">{contract.representativeCompany}{contract.representativeRegistration ? ` (Reg. ${contract.representativeRegistration})` : ''}</dd></div>
+                  {contract.signerAuthorityBasis && <div className="flex justify-between"><dt className="text-slate-500">Authority basis</dt><dd className="text-right">{contract.signerAuthorityBasis}</dd></div>}
+                  <div className="flex justify-between"><dt className="text-slate-500">Contracting party</dt><dd className="text-right">{client?.companyName || '—'}</dd></div>
+                </React.Fragment>
+              )}
               <div className="flex justify-between"><dt className="text-slate-500">Signed at</dt><dd>{fmtDateTime(contract.signedAt)}</dd></div>
               {contract.signerIP ? (
                 <React.Fragment>
@@ -2601,7 +2608,15 @@ function ContractDocumentBody({ contract, client, company }) {
           </div>
           {/* Client */}
           <div>
-            <div className="text-xs font-semibold uppercase tracking-wide mb-4" style={{ color:'var(--navy-deep)' }}>For and on behalf of {client.companyName}</div>
+            <div className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color:'var(--navy-deep)' }}>For and on behalf of {client.companyName}</div>
+            {contract.signerOnBehalf && contract.representativeCompany && (
+              <div className="text-[11px] text-slate-600 mb-3 leading-snug">
+                Signed by <strong>{contract.representativeCompany}</strong>
+                {contract.representativeRegistration ? ` (Reg. No. ${contract.representativeRegistration})` : ''}, as duly authorised representative
+                {contract.signerAuthorityBasis ? <><br/>Authority: {contract.signerAuthorityBasis}</> : ''}
+              </div>
+            )}
+            {!contract.signerOnBehalf && <div className="mb-4" />}
             {contract.signedAt ? (
               <SignatureLines
                 signature={contract.signerName}
@@ -3949,6 +3964,13 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
   const [sigName, setSigName] = useState('');
   const [sigTitle, setSigTitle] = useState('');
   const [sigCompany, setSigCompany] = useState('');
+  // Authorised-representative signing: when the signer's company is NOT the Client
+  // itself but a separate entity authorised to act on the Client's behalf (e.g.
+  // "Excel Co Ltd" signing for Olympiakos). The Client stays the bound party; these
+  // capture WHO signed and under what authority (recorded as signature evidence).
+  const [signerOnBehalf, setSignerOnBehalf] = useState(false);
+  const [repRegistration, setRepRegistration] = useState('');
+  const [authorityBasis, setAuthorityBasis] = useState('');
   const [typedSig, setTypedSig] = useState('');
   // Signature capture mode: 'type' | 'draw' | 'upload' (three mutually-exclusive choices).
   // Signature capture mode. Default to 'type' — the easiest, most reliable
@@ -3964,6 +3986,9 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
   const canvasRef = useRef(null);
   const drawing = useRef(false);
   const [formErrors, setFormErrors] = useState({});
+  // Soft format warnings on the signature screen (e.g. representative reg number
+  // looks off) — shown under the field but never block signing.
+  const [formWarnings, setFormWarnings] = useState({});
   const [busy, setBusy] = useState(false);
   const [signedResult, setSignedResult] = useState(null);
 
@@ -4319,9 +4344,17 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
     const e = {};
     if (!sigName.trim()) e.sigName = 'Full name is required.';
     if (!sigTitle.trim()) e.sigTitle = 'Job title is required.';
+    // When signing on behalf of an authorised representative, the representative
+    // company NAME is required; its registration + authority basis are optional.
+    if (signerOnBehalf && !sigCompany.trim()) e.sigCompany = 'Representative company name is required.';
     if (!hasSignature) e.signature = 'A signature is required.';
     if (!allConsentsChecked) e.consents = 'All three confirmations are required.';
     setFormErrors(e);
+    // Soft warning: representative registration number looks malformed (never blocks).
+    const w = {};
+    if (signerOnBehalf && repRegistration.trim() && !looksLikeRegistrationNumber(repRegistration, client?.country))
+      w.repRegistration = 'This doesn\'t look like a valid registration number — please double-check.';
+    setFormWarnings(w);
     if (Object.keys(e).length) return;
 
     setBusy(true);
@@ -4340,11 +4373,19 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
         financeName: clean(contactForm.financeName),
         financeEmail: cleanEmail(contactForm.financeEmail),
       };
+      // Authorised-representative evidence: who signed on the Client's behalf and
+      // under what authority. Only meaningful when signerOnBehalf is ticked.
+      const representativePayload = {
+        signerOnBehalf: !!signerOnBehalf,
+        representativeCompany: signerOnBehalf ? (clean(sigCompany)) : null,
+        representativeRegistration: signerOnBehalf ? clean(repRegistration) : null,
+        signerAuthorityBasis: signerOnBehalf ? clean(authorityBasis) : null,
+      };
       // Reflect the captured contact + signer details on the in-memory contract
       // so the executed document (ContractDocumentBody / downloaded PDF) shows
       // the Designated Contact block AND fills the CLIENT signature column.
       setContract(c => ({
-        ...(c || {}), ...contactPayload,
+        ...(c || {}), ...contactPayload, ...representativePayload,
         signedAt, signerName: sigName, signerTitle: sigTitle, signerCompany: sigCompany,
       }));
 
@@ -4387,6 +4428,7 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
           consents: { electronic: consents.electronic, authorized: consents.authorized, read: consents.read },
           signatureImageBase64,
           ...contactPayload,
+          ...representativePayload,
           // Client's confirmed company details (address, VAT, reg) so the final
           // signed document reflects what the signer confirmed, not the blanks.
           clientDetails: clientDetailsForm ? {
@@ -4408,6 +4450,7 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
           originalDocumentHash: contract.documentHashBefore || null, documentHashAfter: hashAfter,
           client: { companyName: client.companyName, address: client.address, vatNumber: client.vatNumber, registrationNumber: client.registrationNumber },
           signerName: sigName, signerTitle: sigTitle, signerCompany: sigCompany, signerEmail: emailInput,
+          ...representativePayload,
           signedAt,
           consentElectronic: consents.electronic, consentAuthorized: consents.authorized, consentRead: consents.read,
         };
@@ -4428,7 +4471,7 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
         consentElectronic: consents.electronic, consentAuthorized: consents.authorized, consentRead: consents.read,
         ...contactPayload,
       });
-      await contractService.addAuditEntry(contract.id, { type:'signed', message:`Contract signed by ${sigName} (${sigTitle})`, by: null });
+      await contractService.addAuditEntry(contract.id, { type:'signed', message:`Contract signed by ${sigName} (${sigTitle})${signerOnBehalf && sigCompany.trim() ? ` — as authorised representative of ${client?.companyName || 'the Client'}, on behalf via ${sigCompany.trim()}` : ''}`, by: null });
       setSignedResult({ signedAt });
       setScreen(5);
     } catch (err) {
@@ -4632,9 +4675,45 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
                 <Field label="Job Title" required error={formErrors.sigTitle}>
                   <input value={sigTitle} onChange={e=>setSigTitle(e.target.value)} className={inputCls(formErrors.sigTitle)} />
                 </Field>
-                <Field label="Company Name">
-                  <input value={sigCompany} onChange={e=>setSigCompany(e.target.value)} className={inputCls(false)} />
-                </Field>
+                {/* Authorised-representative toggle. When OFF, the signer represents the
+                    Client directly (sigCompany = the Client). When ON, a separate
+                    company signs on the Client's behalf and we capture its details. */}
+                <label className="flex items-start gap-2 text-sm mb-4 mt-1">
+                  <input
+                    type="checkbox"
+                    checked={signerOnBehalf}
+                    onChange={e=>{
+                      const on = e.target.checked;
+                      setSignerOnBehalf(on);
+                      // Toggling ON clears the pre-filled Client name so the signer
+                      // enters the representative company; OFF restores the Client name.
+                      if (on) setSigCompany('');
+                      else { setSigCompany(client?.companyName || ''); setRepRegistration(''); setAuthorityBasis(''); }
+                    }}
+                    className="mt-0.5"
+                  />
+                  <span>I am signing on behalf of a <strong>different company</strong> authorised to act for {client?.companyName || 'the Client'} (e.g. a management or representative company).</span>
+                </label>
+
+                {!signerOnBehalf ? (
+                  <Field label="Company Name">
+                    <input value={sigCompany} onChange={e=>setSigCompany(e.target.value)} className={inputCls(false)} />
+                  </Field>
+                ) : (
+                  <div className="mb-4 border border-[var(--border)] rounded-lg p-4 bg-slate-50">
+                    <div className="text-sm font-medium mb-1">Authorised Representative Company</div>
+                    <p className="text-xs text-slate-500 mb-3">The company you represent, which is authorised to sign this agreement on behalf of {client?.companyName || 'the Client'}. {client?.companyName || 'The Client'} remains the contracting party.</p>
+                    <Field label="Representative Company Name" required error={formErrors.sigCompany}>
+                      <input value={sigCompany} onChange={e=>setSigCompany(e.target.value)} className={inputCls(formErrors.sigCompany)} placeholder="e.g. Excel Co Ltd" />
+                    </Field>
+                    <Field label="Representative Company Registration No. (optional)" warning={formWarnings.repRegistration}>
+                      <input value={repRegistration} onChange={e=>setRepRegistration(e.target.value)} className={inputCls(false)} placeholder="e.g. HE123456" />
+                    </Field>
+                    <Field label="Basis of Authority (optional)">
+                      <input value={authorityBasis} onChange={e=>setAuthorityBasis(e.target.value)} className={inputCls(false)} placeholder="e.g. Management agreement dated 01/01/2026" />
+                    </Field>
+                  </div>
+                )}
 
                 <Field label="Signature" required error={formErrors.signature}>
                   <div className="grid grid-cols-3 gap-2 mb-3">
@@ -4694,7 +4773,11 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
                 <div className="space-y-2 mb-4 mt-2">
                   <label className="flex items-start gap-2 text-sm">
                     <input type="checkbox" checked={consents.authorized} onChange={e=>setConsents(c=>({...c,authorized:e.target.checked}))} className="mt-0.5" />
-                    <span>I confirm I am authorized to sign on behalf of {sigCompany || 'the Company'}</span>
+                    <span>
+                      {signerOnBehalf
+                        ? <>I confirm that <strong>{sigCompany || 'the representative company'}</strong> is authorised to sign this agreement on behalf of <strong>{client?.companyName || 'the Client'}</strong>, and that I am authorised to sign for {sigCompany || 'the representative company'}.</>
+                        : <>I confirm I am authorized to sign on behalf of {sigCompany || client?.companyName || 'the Company'}</>}
+                    </span>
                   </label>
                   <label className="flex items-start gap-2 text-sm">
                     <input type="checkbox" checked={consents.read} onChange={e=>setConsents(c=>({...c,read:e.target.checked}))} className="mt-0.5" />

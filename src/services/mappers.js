@@ -204,6 +204,11 @@ export function contractFromRow(row, payments = [], events = []) {
     consentElectronic: signedEvent?.consent_electronic ?? false,
     consentAuthorized: signedEvent?.consent_authorized ?? false,
     consentRead: signedEvent?.consent_read ?? false,
+    // ---- Authorised-representative signing (from the signed event evidence).
+    signerOnBehalf: signedEvent?.signer_on_behalf ?? false,
+    representativeCompany: signedEvent?.representative_company ?? null,
+    representativeRegistration: signedEvent?.representative_registration ?? null,
+    signerAuthorityBasis: signedEvent?.signer_authority_basis ?? null,
 
     // ---- Audit trail from the ledger; payments from the payments table.
     auditLog,

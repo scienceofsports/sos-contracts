@@ -29,6 +29,8 @@ export async function buildCertificate(input: {
     name: string; title: string; company: string; email: string;
     ip: string | null; userAgent: string | null; signedAt: string;
     consentElectronic: boolean; consentAuthorized: boolean; consentRead: boolean;
+    onBehalf?: boolean; representativeCompany?: string | null;
+    representativeRegistration?: string | null; authorityBasis?: string | null;
   };
   documentHashBefore: string;
   documentHashAfter: string;
@@ -89,9 +91,19 @@ export async function buildCertificate(input: {
   gap(4); rule();
 
   // Signer / evidence
+  const clientPartyName = cl.companyName ?? cl.company_name ?? '';
   line('SIGNATORY & EVIDENCE', { size: 10, f: bold, color: CYAN });
   line(`Signed by: ${signer.name}${signer.title ? ', ' + signer.title : ''}`, { size: 10 });
-  line(`On behalf of: ${signer.company || (cl.companyName ?? cl.company_name ?? '')}`, { size: 10 });
+  // The contracting party is always the Client. When an authorised representative
+  // company signed on the Client's behalf, record that + its authority explicitly.
+  line(`Contracting party (Client): ${clientPartyName}`, { size: 10 });
+  if (signer.onBehalf && signer.representativeCompany) {
+    const reg = signer.representativeRegistration ? ` (Reg. No. ${signer.representativeRegistration})` : '';
+    line(`Signed by authorised representative: ${signer.representativeCompany}${reg}`, { size: 10 });
+    if (signer.authorityBasis) line(`Basis of authority: ${signer.authorityBasis}`, { size: 9, color: GREY });
+  } else if (signer.company) {
+    line(`On behalf of: ${signer.company}`, { size: 10 });
+  }
   line(`Email (verified by one-time code): ${signer.email}`, { size: 10 });
   line(`Server timestamp (UTC): ${signer.signedAt}`, { size: 10 });
   line(`Signer IP address: ${signer.ip ?? 'not recorded'}`, { size: 10 });

@@ -27,6 +27,10 @@ export async function appendEvent(
     consent_electronic?: boolean | null;
     consent_authorized?: boolean | null;
     consent_read?: boolean | null;
+    signer_on_behalf?: boolean | null;
+    representative_company?: string | null;
+    representative_registration?: string | null;
+    signer_authority_basis?: string | null;
   },
 ): Promise<void> {
   // Fetch the current chain tip (most recent row_hash) for this contract.
@@ -63,6 +67,10 @@ export async function appendEvent(
     consent_electronic: event.consent_electronic ?? null,
     consent_authorized: event.consent_authorized ?? null,
     consent_read: event.consent_read ?? null,
+    signer_on_behalf: event.signer_on_behalf ?? null,
+    representative_company: event.representative_company ?? null,
+    representative_registration: event.representative_registration ?? null,
+    signer_authority_basis: event.signer_authority_basis ?? null,
   };
 
   const rowHash = await computeRowHash(material, prevHash);

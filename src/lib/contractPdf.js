@@ -829,7 +829,21 @@ export function generateContractPdf({ contract, client, company }) {
     { sigImg: signed ? (contract.signerSignature || null) : null, sigFallback: signed ? (contract.signerName || '') : '', name: signed ? (contract.signerName || '') : '', title: signed ? (contract.signerTitle || '') : '', date: signed ? fmtDate(contract.signedAt) : '' },
   ];
 
-  ensure(190);
+  // Pre-compute the authorised-representative caption (client column only) so we
+  // reserve equal vertical space in BOTH columns and keep the signature lines
+  // aligned. Party heading stays the Client (bound); caption records who signed.
+  let repLines = [];
+  if (contract.signerOnBehalf && contract.representativeCompany) {
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(7);
+    const reg = contract.representativeRegistration ? ` (Reg. No. ${contract.representativeRegistration})` : '';
+    repLines = doc.splitTextToSize(`Signed by ${contract.representativeCompany}${reg}, as duly authorised representative`, colW).slice(0, 2);
+    if (contract.signerAuthorityBasis) {
+      repLines = repLines.concat(doc.splitTextToSize(`Authority: ${contract.signerAuthorityBasis}`, colW).slice(0, 1));
+    }
+  }
+  const capReserve = repLines.length ? repLines.length * 8 + 4 : 0;
+
+  ensure(190 + capReserve);
   const blockTop = y;
   let maxColBottom = y;
   cols.forEach((col, idx) => {
@@ -841,7 +855,19 @@ export function generateContractPdf({ contract, client, company }) {
     doc.setFontSize(8.5);
     doc.setTextColor(...NAVY);
     doc.text(heads[idx].toUpperCase().slice(0, 60), x, yy);
-    yy += 16;
+    yy += 12;
+
+    // Draw caption on the CLIENT column; reserve the same space on the other.
+    if (idx === 1 && repLines.length) {
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7);
+      doc.setTextColor(...GREY);
+      repLines.forEach((ln, i) => doc.text(ln, x, yy + i * 8));
+      yy += repLines.length * 8 + 4;
+    } else {
+      yy += capReserve;
+    }
+    yy += 4;
 
     // Signature area: reserve a tall band; draw a LARGE image just above the
     // signature line, else the italic name fallback.
