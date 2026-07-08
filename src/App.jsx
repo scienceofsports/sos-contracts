@@ -636,6 +636,7 @@ function ContractsList({ navigate, filterStatus }) {
       case 'client': return (clientMap[c.clientId]?.companyName || '').toLowerCase();
       case 'value':  return Number(c.value || 0);
       case 'status': return effectiveContractStatus(c);
+      case 'startDate':return c.startDate ? new Date(c.startDate).getTime() : Infinity;
       case 'endDate':return c.endDate ? new Date(c.endDate).getTime() : Infinity; // undated sinks last
       default:       return (c.contractNumber || '').toLowerCase(); // 'number'
     }
@@ -677,6 +678,7 @@ function ContractsList({ navigate, filterStatus }) {
               <SortHeader label="Client" col="client" />
               <SortHeader label="Value" col="value" />
               <SortHeader label="Status" col="status" />
+              <SortHeader label="Start Date" col="startDate" />
               <SortHeader label="End Date" col="endDate" />
             </tr></thead>
             <tbody>
@@ -687,6 +689,7 @@ function ContractsList({ navigate, filterStatus }) {
                   <td className="py-3 px-4">{clientMap[c.clientId]?.companyName || '—'}</td>
                   <td className="py-3 px-4 font-data">{fmtMoney(c.value, c.currency)}</td>
                   <td className="py-3 px-4"><Badge status={effectiveContractStatus(c)} /></td>
+                  <td className="py-3 px-4">{c.startDate ? fmtDate(c.startDate) : '—'}</td>
                   <td className="py-3 px-4">{c.endDate ? fmtDate(c.endDate) : '—'}</td>
                 </tr>
               ))}
