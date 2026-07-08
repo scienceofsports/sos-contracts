@@ -169,46 +169,69 @@ Deno.serve(async (req) => {
       throw new Error('This contract has already been signed.');
     }
 
-    // 8. Append the tamper-evident 'signed' event with the full evidence bundle.
+    // 8. Append the tamper-evident 'signed' event + activate the contract.
     //    We are past the atomic claim, so this runs at most once per contract.
-    await appendEvent(admin, {
-      contract_id: request.contract_id,
-      signing_request_id: request.id,
-      event_type: 'signed',
-      message: `Signed by ${signerName}`,
-      actor_type: 'signer',
-      signer_name: signerName,
-      signer_title: signerTitle ?? null,
-      signer_company: signerCompany ?? null,
-      signer_email: request.signer_email,
-      signer_ip,
-      user_agent,
-      signature_image_url,
-      document_hash_after,
-      consent_electronic: !!consents.electronic,
-      consent_authorized: !!consents.authorized,
-      consent_read: !!consents.read,
-      signer_on_behalf: !!signerOnBehalf,
-      representative_company: signerOnBehalf ? (nz0(representativeCompany)) : null,
-      representative_registration: signerOnBehalf ? nz0(representativeRegistration) : null,
-      signer_authority_basis: signerOnBehalf ? nz0(signerAuthorityBasis) : null,
-    });
+    //
+    //    CRITICAL WINDOW: claim_signing_request already flipped the request to
+    //    'signed' and committed. If either the ledger append or the contract
+    //    activation throws here, the request would be stuck 'signed' with NO
+    //    evidence row and no way to retry ('signed' is not claimable). So we wrap
+    //    this window and, on ANY failure, COMPENSATE by releasing the claim back
+    //    to 'otp_verified' (release_signing_claim, migration 0022) — which only
+    //    resets when no 'signed' ledger row exists, so it can never un-sign a
+    //    recorded signature. The signer can then simply retry; the 0016 partial-
+    //    unique index guarantees a retry cannot create a duplicate signature.
+    try {
+      await appendEvent(admin, {
+        contract_id: request.contract_id,
+        signing_request_id: request.id,
+        event_type: 'signed',
+        message: `Signed by ${signerName}`,
+        actor_type: 'signer',
+        signer_name: signerName,
+        signer_title: signerTitle ?? null,
+        signer_company: signerCompany ?? null,
+        signer_email: request.signer_email,
+        signer_ip,
+        user_agent,
+        signature_image_url,
+        document_hash_after,
+        consent_electronic: !!consents.electronic,
+        consent_authorized: !!consents.authorized,
+        consent_read: !!consents.read,
+        signer_on_behalf: !!signerOnBehalf,
+        representative_company: signerOnBehalf ? (nz0(representativeCompany)) : null,
+        representative_registration: signerOnBehalf ? nz0(representativeRegistration) : null,
+        signer_authority_basis: signerOnBehalf ? nz0(signerAuthorityBasis) : null,
+      });
 
-    // Advance the contract to 'active' (signing activates it) and persist the
-    // client-provided contact people. Only set fields that were provided.
-    const { error: contractUpdateErr } = await admin
-      .from('contracts')
-      .update({
-        status: 'active',
-        contact_name: nz0(contactName),
-        contact_role: nz0(contactRole),
-        contact_email: nz0(contactEmail),
-        contact_phone: nz0(contactPhone),
-        finance_name: nz0(financeName),
-        finance_email: nz0(financeEmail),
-      })
-      .eq('id', request.contract_id);
-    if (contractUpdateErr) throw new Error(contractUpdateErr.message);
+      // Advance the contract to 'active' (signing activates it) and persist the
+      // client-provided contact people. Only set fields that were provided.
+      const { error: contractUpdateErr } = await admin
+        .from('contracts')
+        .update({
+          status: 'active',
+          contact_name: nz0(contactName),
+          contact_role: nz0(contactRole),
+          contact_email: nz0(contactEmail),
+          contact_phone: nz0(contactPhone),
+          finance_name: nz0(financeName),
+          finance_email: nz0(financeEmail),
+        })
+        .eq('id', request.contract_id);
+      if (contractUpdateErr) throw new Error(contractUpdateErr.message);
+    } catch (recordErr) {
+      // Roll the claim back so this signing attempt is recoverable. If the
+      // release fails too, surface a combined error — but the append is the only
+      // thing that writes a 'signed' event, so a failed append leaves nothing to
+      // un-sign and the reset is safe.
+      try {
+        await admin.rpc('release_signing_claim', { p_request_id: request.id });
+      } catch (releaseErr) {
+        console.error('release_signing_claim failed after a record-signature error:', releaseErr);
+      }
+      throw recordErr;
+    }
 
     // 9. Persist the client's confirmed company details onto the CLIENT RECORD
     //    (so the admin view + future contracts benefit). The confirmed values
