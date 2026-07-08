@@ -230,6 +230,18 @@ function annualisedValue(contract) {
   return Math.round((Number(contract?.value || 0) / contractTermYears(contract)) * 100) / 100;
 }
 
+// The NET (ex-VAT) portion of what was actually received for a payment. Revenue
+// / income figures use this — VAT collected isn't income, it's passed to the tax
+// office. Split by the payment's net:gross ratio so it's correct for partial
+// payments and VAT-exempt rows. Money-OWED figures (receivables) stay gross.
+function netReceived(payment) {
+  const gross = Number(payment?.totalAmount || 0);
+  const net = Number(payment?.amount != null ? payment.amount : gross);
+  const received = Number(payment?.paidAmount || 0);
+  if (gross > 0 && net >= 0) return Math.round(received * (net / gross) * 100) / 100;
+  return received;
+}
+
 // A large, prominent hero metric for the top-of-dashboard glance row. Bigger
 // than MetricCard, with an accent strip and an optional click-through.
 function HeroCard({ label, value, sub, accent, onClick }) {
@@ -344,7 +356,9 @@ function Dashboard({ navigate }) {
   // the true yearly run-rate (a 3-year deal counts once per year, not in full).
   const annualisedActiveValue = activeContracts.reduce((s,c) => s + annualisedValue(c), 0);
   const allPayments = contracts.flatMap(c => c.payments.map(p => ({ ...p, contractTitle: c.title, contractNumber: c.contractNumber, clientId: c.clientId })));
-  const collectedYTD = allPayments.filter(p => p.status === 'paid' && new Date(p.paidAt).getFullYear() === now.getFullYear()).reduce((s,p) => s + Number(p.paidAmount||0), 0);
+  // Collected YTD is NET of VAT, to match Annual Revenue and the Revenue Report
+  // (every "income" figure on the board is net; money-owed figures stay gross).
+  const collectedYTD = allPayments.filter(p => p.status === 'paid' && new Date(p.paidAt).getFullYear() === now.getFullYear()).reduce((s,p) => s + netReceived(p), 0);
   // Overdue is COMPUTED live from due dates (a pending payment past due = overdue).
   const openPayments = allPayments.filter(p => { const st = effectiveStatus(p); return st === 'pending' || st === 'overdue' || st === 'disputed'; });
   // FULL outstanding = every unpaid scheduled payment, incl. future instalments of
@@ -442,9 +456,9 @@ function Dashboard({ navigate }) {
           accent="#0A1A3F"
         />
         <HeroCard
-          label="Collected YTD"
+          label="Collected YTD (net)"
           value={fmtMoney(collectedYTD,'EUR')}
-          sub={`${new Date().getFullYear()} to date`}
+          sub={`${new Date().getFullYear()} to date · ex-VAT`}
           accent="#10B981"
         />
         <HeroCard
@@ -3167,32 +3181,36 @@ function ClientFormModal({ client, readOnly, canDelete, onDeleted, onClose, onDo
    ========================================================================= */
 function RevenueReport() {
   const { contracts, clients } = useContractsData();
+  // Basis toggle: NET (ex-VAT, the true revenue — default) or GROSS (VAT-inc, to
+  // reconcile against the bank). Persisted so the choice sticks between visits.
+  const [basis, setBasis] = useState(() => localStorage.getItem('revenueBasis') || 'net');
+  const setBasisMode = (b) => { setBasis(b); localStorage.setItem('revenueBasis', b); };
   if (!contracts) return <div className="p-6"><Skeleton className="h-96 w-full" /></div>;
   const clientMap = Object.fromEntries(clients.map(c => [c.id, c]));
   const allPayments = contracts.flatMap(c => c.payments.map(p => ({ ...p, clientId: c.clientId, contractType: c.type })));
   const paid = allPayments.filter(p => p.status === 'paid');
-  // Revenue is reported NET of VAT — VAT collected is not income, it's passed to
-  // the tax office. Derive the net portion of each collected amount from the
-  // payment's net:gross ratio (handles partial payments and VAT-exempt rows).
-  const netOf = (p) => {
-    const gross = Number(p.totalAmount || 0);
-    const net = Number(p.amount != null ? p.amount : gross);   // stored net
-    const received = Number(p.paidAmount || 0);
-    if (gross > 0 && net >= 0) return round2(received * (net / gross));
-    return received;   // no VAT info -> treat received as net
-  };
+  // NET (ex-VAT) is the default — VAT collected isn't income. GROSS shows the
+  // VAT-inclusive amount actually banked, for reconciliation.
+  const amountOf = (p) => basis === 'gross' ? Number(p.paidAmount || 0) : netReceived(p);
   const byType = {};
-  paid.forEach(p => { byType[p.contractType] = (byType[p.contractType]||0) + netOf(p); });
+  paid.forEach(p => { byType[p.contractType] = (byType[p.contractType]||0) + amountOf(p); });
   const byClient = {};
-  paid.forEach(p => { const name = clientMap[p.clientId]?.companyName || 'Unknown'; byClient[name] = (byClient[name]||0) + netOf(p); });
-  const total = paid.reduce((s,p)=>s+netOf(p),0);
+  paid.forEach(p => { const name = clientMap[p.clientId]?.companyName || 'Unknown'; byClient[name] = (byClient[name]||0) + amountOf(p); });
+  const total = paid.reduce((s,p)=>s+amountOf(p),0);
   // VAT collected (gross received − net revenue) — shown separately for clarity.
   const grossTotal = paid.reduce((s,p)=>s+Number(p.paidAmount||0),0);
-  const vatCollected = round2(grossTotal - total);
+  const netTotal = paid.reduce((s,p)=>s+netReceived(p),0);
+  const vatCollected = round2(grossTotal - netTotal);
 
   return (
     <div className="p-4 md:p-6">
-      <div className="font-display mb-6 text-[var(--navy-deep)]">Revenue Report</div>
+      <div className="flex items-center justify-between mb-6">
+        <div className="font-display text-[var(--navy-deep)]">Revenue Report</div>
+        <div className="inline-flex rounded-lg border border-[var(--border)] overflow-hidden text-sm">
+          <button onClick={()=>setBasisMode('net')} className={`px-3 py-2 transition ${basis==='net' ? 'bg-[var(--navy-deep)] text-white' : 'bg-white text-slate-500 hover:bg-slate-50'}`} title="Revenue excluding VAT (your actual income)">Net (ex-VAT)</button>
+          <button onClick={()=>setBasisMode('gross')} className={`px-3 py-2 transition border-l border-[var(--border)] ${basis==='gross' ? 'bg-[var(--navy-deep)] text-white' : 'bg-white text-slate-500 hover:bg-slate-50'}`} title="VAT-inclusive amount banked (for reconciliation)">Gross (incl. VAT)</button>
+        </div>
+      </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="bg-white rounded-xl border border-[var(--border)] p-5">
           <div className="font-heading text-base mb-4">Revenue by Contract Type</div>
@@ -3221,11 +3239,13 @@ function RevenueReport() {
         </div>
       </div>
       <div className="bg-white rounded-xl border border-[var(--border)] p-5 mt-4">
-        <div className="text-xs text-slate-500">Total Revenue Collected (net of VAT)</div>
+        <div className="text-xs text-slate-500">Total Revenue Collected ({basis === 'gross' ? 'incl. VAT' : 'net of VAT'})</div>
         <div className="font-data text-2xl mt-1">{fmtMoney(total,'EUR')}</div>
         {vatCollected > 0 && (
           <div className="text-xs text-slate-400 mt-1">
-            + {fmtMoney(vatCollected,'EUR')} VAT collected (passed to the tax office) · {fmtMoney(grossTotal,'EUR')} gross received
+            {basis === 'gross'
+              ? `Includes ${fmtMoney(vatCollected,'EUR')} VAT (passed to the tax office) · ${fmtMoney(netTotal,'EUR')} net revenue`
+              : `+ ${fmtMoney(vatCollected,'EUR')} VAT collected (passed to the tax office) · ${fmtMoney(grossTotal,'EUR')} gross received`}
           </div>
         )}
       </div>
