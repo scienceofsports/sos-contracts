@@ -40,8 +40,8 @@ with checks(mig, applied) as (
          exists(select 1 from information_schema.columns where table_name='contracts' and column_name='vat_inclusive')
   union all select '0019 annual_value_override (contracts.annual_value_override)',
          exists(select 1 from information_schema.columns where table_name='contracts' and column_name='annual_value_override')
-  union all select '0020 signer_on_behalf (contracts.signer_on_behalf)',
-         exists(select 1 from information_schema.columns where table_name='contracts' and column_name='signer_on_behalf')
+  union all select '0020 signer_on_behalf (signature_events.signer_on_behalf)',
+         exists(select 1 from information_schema.columns where table_name='signature_events' and column_name='signer_on_behalf')
 )
 select mig,
        case when applied then 'ok' else '>>> MISSING <<<' end as status
