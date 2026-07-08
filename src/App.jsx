@@ -12,6 +12,7 @@ import {
   generateDescriptionFromServices,
   summarizeAgreement,
   analysisScopeText,
+  clientEntityDescriptor,
   seasonLabelFromDates,
   commercialModelText,
   commercialValue,
@@ -2306,7 +2307,7 @@ function ContractDocumentBody({ contract, client, company }) {
         </p>
         <p className="text-sm text-slate-700 mb-6">and</p>
         <p className="text-sm text-slate-700 mb-8">
-          <strong>{client.companyName}</strong>, a company registered under the laws of{' '}
+          <strong>{client.companyName}</strong>, {clientEntityDescriptor(client.entityType)}{' '}
           {clientCountryLabel
             ? clientCountryLabel
             : <ClientFillHint>country to be confirmed on signing</ClientFillHint>}
@@ -2314,10 +2315,16 @@ function ContractDocumentBody({ contract, client, company }) {
           {client.registrationNumber
             ? client.registrationNumber
             : <ClientFillHint>to be confirmed on signing</ClientFillHint>}
-          , VAT number{' '}
-          {client.vatNumber
-            ? client.vatNumber
-            : <ClientFillHint>to be confirmed on signing</ClientFillHint>}
+          {/* Associations/federations frequently have no VAT — omit the phrase
+              rather than show a permanent blank. Companies still see the hint. */}
+          {(client.vatNumber || client.entityType === 'company' || !client.entityType) && (
+            <>
+              , VAT number{' '}
+              {client.vatNumber
+                ? client.vatNumber
+                : <ClientFillHint>to be confirmed on signing</ClientFillHint>}
+            </>
+          )}
           , having its registered office at{' '}
           {client.address
             ? client.address
@@ -3207,10 +3214,10 @@ function ClientFormModal({ client, readOnly, canDelete, onDeleted, onClose, onDo
     }
   };
   const [form, setForm] = useState(client ? {
-    companyName: client.companyName || '', contactName: client.contactName || '', contactEmail: client.contactEmail || '',
+    companyName: client.companyName || '', entityType: client.entityType || 'company', contactName: client.contactName || '', contactEmail: client.contactEmail || '',
     contactPhone: client.contactPhone || '', address: client.address || '', country: client.country || 'CY',
     vatNumber: client.vatNumber || '', registrationNumber: client.registrationNumber || '', currency: client.currency || 'EUR',
-  } : { companyName:'', contactName:'', contactEmail:'', contactPhone:'', address:'', country:'CY', vatNumber:'', registrationNumber:'', currency:'EUR' });
+  } : { companyName:'', entityType:'company', contactName:'', contactEmail:'', contactPhone:'', address:'', country:'CY', vatNumber:'', registrationNumber:'', currency:'EUR' });
   const [logoBase64, setLogoBase64] = useState(client && client.logoBase64 ? client.logoBase64 : null);
   // CC recipients (finance, a director…) — up to 3 email inputs; non-empty
   // ones are collected into ccEmails on save. Padded to 3 for stable inputs.
@@ -3307,7 +3314,17 @@ function ClientFormModal({ client, readOnly, canDelete, onDeleted, onClose, onDo
           )}
         </div>
       </Field>
-      <Field label="Company Name" required error={errors.companyName}><input disabled={readOnly} value={form.companyName} onChange={e=>set('companyName',e.target.value)} className={inputCls(errors.companyName)} /></Field>
+      <div className="grid grid-cols-2 gap-4">
+        <Field label="Company / Entity Name" required error={errors.companyName}><input disabled={readOnly} value={form.companyName} onChange={e=>set('companyName',e.target.value)} className={inputCls(errors.companyName)} /></Field>
+        <Field label="Entity Type">
+          <select disabled={readOnly} value={form.entityType} onChange={e=>set('entityType',e.target.value)} className={inputCls(false)}>
+            <option value="company">Company (Ltd)</option>
+            <option value="club">Club / Association</option>
+            <option value="federation">Federation / Governing Body</option>
+          </select>
+        </Field>
+      </div>
+      <p className="text-xs text-slate-500 -mt-2 mb-3">Sets the legal wording in the contract's party clause — e.g. a club reads as "an association duly registered under…", not "a company". Clubs/federations without a VAT number will omit the VAT phrase.</p>
       <Field label="Contact Name" required error={errors.contactName}><input disabled={readOnly} value={form.contactName} onChange={e=>set('contactName',e.target.value)} className={inputCls(errors.contactName)} /></Field>
       <Field label="Contact Email" required error={errors.contactEmail}><input disabled={readOnly} value={form.contactEmail} onChange={e=>set('contactEmail',e.target.value)} className={inputCls(errors.contactEmail)} /></Field>
       <Field label="Contact Phone"><input disabled={readOnly} value={form.contactPhone} onChange={e=>set('contactPhone',e.target.value)} className={inputCls(false)} /></Field>
@@ -4098,10 +4115,13 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
     const cd = clientDetailsForm || {};
     const e = {};
     // Client company details — all required.
+    // Clubs/federations are often associations with no VAT registration, so VAT
+    // is only mandatory for companies. Everything else stays required.
+    const vatRequired = (client?.entityType || 'company') === 'company';
     if (!cd.companyName || !cd.companyName.trim()) e.companyName = 'Company name is required.';
     if (!cd.address || !cd.address.trim()) e.address = 'Registered address is required.';
     if (!cd.country || !cd.country.trim()) e.country = 'Country of registration is required.';
-    if (!cd.vatNumber || !cd.vatNumber.trim()) e.vatNumber = 'VAT number is required.';
+    if (vatRequired && (!cd.vatNumber || !cd.vatNumber.trim())) e.vatNumber = 'VAT number is required.';
     if (!cd.registrationNumber || !cd.registrationNumber.trim()) e.registrationNumber = 'Registration number is required.';
     // Soft format warnings (do NOT block) — only when a value was actually typed.
     const w = {};
@@ -4617,7 +4637,7 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
                     <input value={clientDetailsForm.country} onChange={e=>setClientDetailsForm(f=>({...f,country:e.target.value}))} className={inputCls(confirmErrors.country)} placeholder="e.g. Cyprus" />
                   </Field>
                   <div className="grid grid-cols-2 gap-3">
-                    <Field label="VAT Number" required error={confirmErrors.vatNumber} warning={confirmWarnings.vatNumber}>
+                    <Field label={(client?.entityType || 'company') === 'company' ? 'VAT Number' : 'VAT Number (if applicable)'} required={(client?.entityType || 'company') === 'company'} error={confirmErrors.vatNumber} warning={confirmWarnings.vatNumber}>
                       <input value={clientDetailsForm.vatNumber} onChange={e=>setClientDetailsForm(f=>({...f,vatNumber:e.target.value}))} className={inputCls(confirmErrors.vatNumber)} placeholder="e.g. CY60030297Y" />
                     </Field>
                     <Field label="Registration Number" required error={confirmErrors.registrationNumber} warning={confirmWarnings.registrationNumber}>

@@ -22,7 +22,7 @@
    ========================================================================= */
 import { jsPDF } from 'jspdf';
 import { fmtDate, fmtMoney, daysBetween } from './format.js';
-import { computeServiceLineItems, platformSeatsSummary, SERVICE_GROUPS, analysisScopeText, seasonLabelFromDates, commercialModelText, parseSpecialTerms, serviceLevelsLines, vatSummary } from './constants.js';
+import { computeServiceLineItems, platformSeatsSummary, SERVICE_GROUPS, analysisScopeText, seasonLabelFromDates, commercialModelText, parseSpecialTerms, serviceLevelsLines, vatSummary, clientPartyClause } from './constants.js';
 
 export function generateContractPdf({ contract, client, company }) {
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
@@ -419,9 +419,19 @@ export function generateContractPdf({ contract, client, company }) {
     ? (/^[A-Za-z]{2}$/.test(rawCountry) ? (ISO[rawCountry.toUpperCase()] || rawCountry.toUpperCase()) : rawCountry)
     : '[ country to be confirmed on signing ]';
   const clientReg = client?.registrationNumber || TBC;
-  const clientVat = client?.vatNumber || TBC;
   const clientAddr = client?.address || TBC;
-  text(`${client?.companyName || '—'}, a company registered under the laws of ${clientCountry} with registration number ${clientReg}, VAT number ${clientVat}, having its registered office at ${clientAddr} (the "Client").`, { size: 10, gap: 2 });
+  // Associations/federations often carry no VAT — omit the VAT phrase entirely
+  // for them when blank; a company with a blank VAT still shows the TBC hint.
+  const entityType = client?.entityType || 'company';
+  const clientVat = client?.vatNumber || (entityType === 'company' ? TBC : '');
+  text(clientPartyClause({
+    name: client?.companyName || '—',
+    entityType,
+    country: clientCountry,
+    registration: clientReg,
+    vat: clientVat,
+    address: clientAddr,
+  }), { size: 10, gap: 2 });
   text('The above are hereinafter jointly referred to as the "Parties".', { size: 10, gap: 10 });
 
   // --- About the Service Provider — navy pill + intro + credential bullets. --
@@ -874,8 +884,8 @@ export function generateContractPdf({ contract, client, company }) {
     const sigLineY = yy + 64;   // downward position of the ruled signature line
     let drewImg = false;
     if (col.sigImg) {
-      // Larger signature: fit into a bigger box so it reads bold and prominent.
-      const fit = fitImage(col.sigImg, 190, 64);
+      // Provider (idx 0) counter-signature draws smaller than the client's.
+      const fit = idx === 0 ? fitImage(col.sigImg, 135, 46) : fitImage(col.sigImg, 190, 64);
       if (fit) {
         try {
           doc.addImage(col.sigImg, imgFormat(col.sigImg), x + 2, sigLineY - fit.h - 3, fit.w, fit.h);

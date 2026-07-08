@@ -89,7 +89,7 @@ const SERVICE_CATALOG: Array<{ key: string; label: string; group: string; unit: 
   { key: 'opponent_analysis', label: 'Opponent Tactical Analysis', group: 'Analysis Services', unit: 'per_match', defaultRate: 120,
     detail: 'Opponent playing style, key players, and strengths & weaknesses ahead of each fixture.' },
   { key: 'match_reports', label: 'Match Team & Player Reports', group: 'Reporting Services', unit: 'included', defaultRate: 0,
-    detail: 'Possession, passes, xG, player performance metrics and visual dashboards, delivered within 24 hours of each match.' },
+    detail: 'Possession, passes, xG, player performance metrics and visual dashboards.' },
   { key: 'academy_reports', label: 'Academy Performance Reports', group: 'Reporting Services', unit: 'per_unit', defaultRate: 100,
     detail: 'Quarterly and full-season academy performance overviews — team progress, tactical evolution, physical trends and recommendations (1st Quarter, 2nd Quarter, Full Season).' },
   { key: 'player_reports', label: 'Individual Player Reports', group: 'Reporting Services', unit: 'per_unit', defaultRate: 100,
@@ -177,6 +177,17 @@ function platformSeatsSummary(svc: Any): string {
     seatLabel(svc.playerSeats, 'Player', 'Players'),
   ].filter(Boolean);
   return parts.join(', ');
+}
+
+// Port of clientEntityDescriptor — the Client party's legal descriptor.
+// Keep in sync with src/lib/constants.js. Clubs/federations are associations /
+// governing bodies, not companies. Default 'company' keeps historic wording.
+function clientEntityDescriptor(entityType?: string): string {
+  switch (entityType) {
+    case 'club':       return 'an association duly registered under the laws of';
+    case 'federation': return 'a governing body duly registered under the laws of';
+    default:           return 'a company registered under the laws of';
+  }
 }
 
 // Port of analysisScopeText — build the two "Scope of Analysis" sentences.
@@ -653,8 +664,13 @@ export async function buildContractPdf(input: {
     ? (/^[A-Za-z]{2}$/.test(rawCountry) ? (ISO[rawCountry.toUpperCase()] || rawCountry.toUpperCase()) : rawCountry)
     : '[ country to be confirmed on signing ]';
   const clientReg = pick(cl, 'registrationNumber', 'registration_number') || TBC;
-  const clientVat = pick(cl, 'vatNumber', 'vat_number') || TBC;
   const clientAddr = cl.address || TBC;
+  // Associations/federations often carry no VAT — omit the VAT phrase entirely
+  // for them when blank; a company with a blank VAT still shows the TBC hint.
+  const clientEntityType = pick(cl, 'entityType', 'entity_type') || 'company';
+  const clientVatRaw = pick(cl, 'vatNumber', 'vat_number') || '';
+  const clientVat = clientVatRaw || (clientEntityType === 'company' ? TBC : '');
+  const clientVatPhrase = clientVat ? `, VAT number ${clientVat}` : '';
 
   // --- Title (split on the dash like the client PDF), centred navy bold. ----
   {
@@ -675,7 +691,7 @@ export async function buildContractPdf(input: {
   text(`This Agreement is made on ${fmtDate(madeOn)} between:`, { size: 10, gap: 4 });
   text(`${companyName}, a company registered under the laws of the Republic of Cyprus with registration number ${companyReg}, VAT number ${companyVat}, having its registered office at ${companyAddr} (the "Service Provider"),`, { size: 10, gap: 2 });
   text('and', { size: 10, gap: 2 });
-  text(`${clientName}, a company registered under the laws of ${clientCountry} with registration number ${clientReg}, VAT number ${clientVat}, having its registered office at ${clientAddr} (the "Client").`, { size: 10, gap: 2 });
+  text(`${clientName}, ${clientEntityDescriptor(clientEntityType)} ${clientCountry} with registration number ${clientReg}${clientVatPhrase}, having its registered office at ${clientAddr} (the "Client").`, { size: 10, gap: 2 });
   text('The above are hereinafter jointly referred to as the "Parties".', { size: 10, gap: 10 });
 
   // --- About the Service Provider — navy pill header + intro + bullets. -----
@@ -1169,8 +1185,8 @@ export async function buildContractPdf(input: {
     };
     if (col.sig) {
       try {
-        // Larger signature: fit into a bigger box so it reads bold and prominent.
-        const scaled = col.sig.scaleToFit(190, 64);
+        // Provider (idx 0) counter-signature draws smaller than the client's.
+        const scaled = idx === 0 ? col.sig.scaleToFit(135, 46) : col.sig.scaleToFit(190, 64);
         // Image bottom sits ~5pt above the ruled line; grows upward.
         page.drawImage(col.sig, { x: x + 2, y: py(sigLineY - 5), width: scaled.width, height: scaled.height });
       } catch (_) {

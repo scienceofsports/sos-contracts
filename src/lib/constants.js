@@ -47,7 +47,7 @@ export const SERVICE_CATALOG = [
   { key:'opponent_analysis', label:'Opponent Tactical Analysis', group:'Analysis Services', unit:'per_match', defaultRate:120, defaultQty:0,
     detail:'Opponent playing style, key players, and strengths & weaknesses ahead of each fixture.' },
   { key:'match_reports', label:'Match Team & Player Reports', group:'Reporting Services', unit:'included', defaultRate:0, defaultQty:130,
-    detail:'Possession, passes, xG, player performance metrics and visual dashboards, delivered within 24 hours of each match.' },
+    detail:'Possession, passes, xG, player performance metrics and visual dashboards.' },
   { key:'academy_reports', label:'Academy Performance Reports', group:'Reporting Services', unit:'per_unit', defaultRate:100, defaultQty:3,
     detail:'Quarterly and full-season academy performance overviews — team progress, tactical evolution, physical trends and recommendations (1st Quarter, 2nd Quarter, Full Season).' },
   { key:'player_reports', label:'Individual Player Reports', group:'Reporting Services', unit:'per_unit', defaultRate:100, defaultQty:10,
@@ -121,6 +121,32 @@ export function analysisScopeText(contract, seasonLabel) {
   const granted = opp.filter(([, on]) => on).map(([label]) => label);
   const opponent = granted.length ? granted.join(' · ') + '.' : '';
   return { teams: teamsStr, coverage, opponent };
+}
+
+// The legal descriptor for the Client party in the opening clause. A SCIOS
+// counterparty is not always a limited company — clubs and federations are
+// usually registered ASSOCIATIONS / governing bodies, not companies, and often
+// carry no VAT number. entity_type ('company' | 'club' | 'federation') drives
+// the correct phrasing so the party clause reads accurately for each. Default
+// is 'company', preserving the historic wording for every existing client.
+export function clientEntityDescriptor(entityType) {
+  switch (entityType) {
+    case 'club':       return 'an association duly registered under the laws of';
+    case 'federation': return 'a governing body duly registered under the laws of';
+    case 'company':
+    default:           return 'a company registered under the laws of';
+  }
+}
+
+// Build the Client party sentence for the opening clause, shared by all three
+// document generators (App.jsx screen, contractPdf.js draft, contractPdf.ts
+// sent/signed). Callers pass already-resolved display strings so each generator
+// keeps control of its own "to be confirmed on signing" placeholder styling;
+// `vat` is passed as null/'' to OMIT the VAT phrase entirely (e.g. an
+// association with no VAT registration) rather than print an empty blank.
+export function clientPartyClause({ name, entityType, country, registration, vat, address }) {
+  const vatPhrase = vat ? `, VAT number ${vat}` : '';
+  return `${name}, ${clientEntityDescriptor(entityType)} ${country} with registration number ${registration}${vatPhrase}, having its registered office at ${address} (the "Client").`;
 }
 
 // Clause names a special term can reference (stable — by name, not number).

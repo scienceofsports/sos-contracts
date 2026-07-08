@@ -81,6 +81,7 @@ export function clientFromRow(row) {
   return {
     id: row.id,
     companyName: row.company_name ?? null,
+    entityType: row.entity_type ?? 'company',
     contactName: row.contact_name ?? null,
     contactEmail: row.contact_email ?? null,
     contactPhone: row.contact_phone ?? null,
@@ -99,6 +100,7 @@ export function clientToRow(obj) {
   if (!obj) return {};
   const row = {};
   if ('companyName' in obj) row.company_name = obj.companyName;
+  if ('entityType' in obj) row.entity_type = obj.entityType;
   if ('contactName' in obj) row.contact_name = obj.contactName;
   if ('contactEmail' in obj) row.contact_email = obj.contactEmail;
   if ('contactPhone' in obj) row.contact_phone = obj.contactPhone;
