@@ -2689,30 +2689,12 @@ function ContractDocument({ contractId, navigate }) {
             // the signature block renders the client's name/date (these live on
             // the contract row, not in the send-time snapshot).
             setContract({ ...ns.contract, signedAt: c.signedAt, signerName: c.signerName, signerTitle: c.signerTitle, signerCompany: c.signerCompany, signerEmail: c.signerEmail });
-            // For a SIGNED contract, the client may have CORRECTED their legal
-            // details (company name / address / VAT / registration) at signing.
-            // Those confirmed values were written to the client record on signing
-            // and are what the executed (signed) PDF shows — so overlay them here
-            // so "View Document" matches the signed PDF, not the pre-sign draft.
-            // The send-time snapshot underneath is preserved untouched as evidence
-            // (the signed PDF remains the immutable legal record). A not-yet-signed
-            // (sent) contract keeps the send-time values verbatim.
-            let viewClient = ns.client;
-            if (snap.status === 'signed' && ns.client?.id) {
-              try {
-                const live = await clientService.getById(ns.client.id);
-                if (live) {
-                  viewClient = {
-                    ...ns.client,
-                    companyName: live.companyName ?? ns.client.companyName,
-                    address: live.address ?? ns.client.address,
-                    vatNumber: live.vatNumber ?? ns.client.vatNumber,
-                    registrationNumber: live.registrationNumber ?? ns.client.registrationNumber,
-                  };
-                }
-              } catch (_) { /* fall back to the frozen client if the live read fails */ }
-            }
-            setClient(viewClient);
+            // getFrozenSnapshot returns the EXECUTED snapshot for a signed contract
+            // (the document exactly as the client confirmed it at signing, identical
+            // to the signed PDF) and the send-time snapshot for a sent one. Either
+            // way the client we render is the frozen one — no live overlay, so no
+            // drift if the client record is later edited.
+            setClient(ns.client);
             setCompany(ns.company);
             setFrozenStatus(snap.status);
             setSignedPdfUrl(snap.signedPdfUrl || null);
@@ -3888,6 +3870,11 @@ function normalizeSnapshot(snapshot) {
   const client = {
     id: pick(cl, 'id'),
     companyName: pick(cl, 'companyName', 'company_name'),
+    // entityType drives the party-clause descriptor (company/club/federation) and
+    // whether the VAT phrase shows. Must be carried so the on-screen frozen view
+    // matches the PDF, which reads it straight from the snapshot. Default 'company'
+    // preserves historic wording. (Fixes an on-screen vs PDF party-clause mismatch.)
+    entityType: pick(cl, 'entityType', 'entity_type') || 'company',
     contactName: pick(cl, 'contactName', 'contact_name'),
     contactEmail: pick(cl, 'contactEmail', 'contact_email'),
     address: pick(cl, 'address'),

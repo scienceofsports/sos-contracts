@@ -264,14 +264,23 @@ export const contractService = {
     const rows = unwrap(
       await supabase
         .from('signing_requests')
-        .select('id, status, document_snapshot, created_at')
+        .select('id, status, document_snapshot, executed_snapshot, created_at')
         .eq('contract_id', contractId)
         .order('created_at', { ascending: false })
     );
     if (!rows || rows.length === 0) return null;
     // Prefer the signed request (the executed document); else the latest.
     const req = rows.find((r) => r.status === 'signed') || rows[0];
-    if (!req || !req.document_snapshot) return null;
+    if (!req) return null;
+    // For a SIGNED request, render the EXECUTED snapshot — the complete document
+    // exactly as the client confirmed it at signing, byte-identical to the signed
+    // PDF, with no drift. Older signed contracts (pre-0023) have no executed_
+    // snapshot; fall back to the send-time document_snapshot for those. A not-yet-
+    // signed (sent) request always shows the send-time document_snapshot.
+    const snapshot = (req.status === 'signed' && req.executed_snapshot)
+      ? req.executed_snapshot
+      : req.document_snapshot;
+    if (!snapshot) return null;
     let signedPdfUrl = null;
     if (req.status === 'signed') {
       const path = `${contractId}/${req.id}-signed-contract.pdf`;
@@ -280,7 +289,7 @@ export const contractService = {
         .createSignedUrl(path, 300);
       signedPdfUrl = data?.signedUrl || null;
     }
-    return { snapshot: req.document_snapshot, status: req.status, signedPdfUrl };
+    return { snapshot, status: req.status, signedPdfUrl };
   },
 
   create: async (data) => {

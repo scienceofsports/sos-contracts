@@ -275,6 +275,20 @@ Deno.serve(async (req) => {
       if (liveCompany?.logo_url && snap.company) snap.company.logo_url = liveCompany.logo_url;
     } catch (_) { /* non-fatal — fall back to whatever the snapshot holds */ }
 
+    // Freeze the EXECUTED document. `snap` is now exactly the object rendered into
+    // the signed PDF — every clause, value and the client's confirmed party /
+    // signatory / contact details. Store it verbatim so the admin "View Contract
+    // Document" and both parties' copies render 100% identically to the signed PDF
+    // for all time, with NO drift if the client record is later edited. This is
+    // the same object whose SHA-256 is document_hash_after (the logo_url refresh
+    // above is cosmetic and excluded from the hash). Best-effort: a failure here
+    // must never break signing — readers fall back to the send-time snapshot.
+    try {
+      await admin.from('signing_requests')
+        .update({ executed_snapshot: snap })
+        .eq('id', request.id);
+    } catch (e) { console.error('executed_snapshot persist failed (non-fatal):', e); }
+
     const contractTitle = snap?.contract?.title ?? 'Contract';
     const contractNumber = snap?.contract?.contractNumber ?? snap?.contract?.contract_number ?? '';
     try {
