@@ -131,7 +131,6 @@ const NAV = [
   { key:'clients', label:'Clients', icon:'🏟️' },
   { key:'reports', label:'Reports', icon:'📈', children:[
     { key:'reports:revenue', label:'Revenue Report' },
-    { key:'reports:board', label:'Board Export' },
   ]},
   { key:'settings', label:'Settings', icon:'⚙️', children:[
     { key:'settings:company', label:'Company Profile' },
@@ -334,8 +333,7 @@ function ReminderBanners({ contracts, clients, navigate }) {
 }
 
 function Dashboard({ navigate }) {
-  const { contracts, clients, reload } = useContractsData();
-  const toast = useToast();
+  const { contracts, clients } = useContractsData();
 
   if (!contracts) {
     return (
@@ -413,29 +411,25 @@ function Dashboard({ navigate }) {
     return { client: cl, totalValue, collected, outstanding: outstandingC, endDate: latestEnd };
   }).sort((a,b)=>b.totalValue-a.totalValue);
 
-  const exportBoardCSV = () => {
-    const mrr = contracts.filter(c=>c.status==='active' && c.paymentType==='monthly').reduce((s,c)=>s+Number(c.value||0),0);
-    // ARR = annualised (per-year) run-rate; multi-year deals count once per year.
-    const arr = annualisedActiveValue;
-    const rows = [
-      ['Metric','Value'],
-      ['MRR', mrr.toFixed(2)],
-      ['ARR (annualised)', arr.toFixed(2)],
-      ['Total active contract value (lifetime)', totalActiveValue.toFixed(2)],
-      ['YTD Revenue', collectedYTD.toFixed(2)],
-      ['Outstanding', outstanding.toFixed(2)],
-      ['Renewal Pipeline (60d)', renewalCount],
-    ];
-    const csv = rows.map(r => r.join(',')).join('\r\n');
-    downloadFile('﻿' + csv, 'sos-board-export.csv');
-    toast.push('Board export downloaded.', 'success');
-  };
-
   return (
-    <div className="p-4 md:p-6">
-      <div className="flex items-center justify-between mb-6">
+    <div className="p-4 md:p-6 board-print">
+      {/* Screen header — hidden when printing. */}
+      <div className="flex items-center justify-between mb-6 no-print">
         <div className="font-display text-[var(--navy-deep)]">Dashboard</div>
-        <button onClick={exportBoardCSV} className="px-4 py-2 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">Board Export</button>
+        <button onClick={()=>window.print()} className="px-4 py-2 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">📄 Download board report (PDF)</button>
+      </div>
+
+      {/* Print-only branded report header — appears at the top of the PDF. */}
+      <div className="print-only" style={{ marginBottom: '16px', borderBottom: '2px solid var(--navy-deep)', paddingBottom: '10px' }}>
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+          <div>
+            <div className="font-display text-[var(--navy-deep)]" style={{ fontSize:'20px' }}>SCIOS — Board Report</div>
+            <div style={{ fontSize:'11px', color:'#64748b' }}>Science of Sports · Contract & Revenue Overview</div>
+          </div>
+          <div style={{ textAlign:'right', fontSize:'11px', color:'#64748b' }}>
+            Generated {fmtDate(now)}<br/>All figures in EUR · revenue net of VAT
+          </div>
+        </div>
       </div>
 
       <ReminderBanners contracts={contracts} clients={clients} navigate={navigate} />

@@ -73,7 +73,26 @@ html, body { font-family: 'Inter', sans-serif; background: var(--bg); }
   100% { background-position: 0 50%; }
 }
 
+/* Shown only when printing (e.g. the board-report header on the dashboard). */
+.print-only { display: none; }
+
 @media print {
   .no-print { display: none !important; }
+  .print-only { display: block !important; }
   body { background: white !important; }
+
+  /* A4 with sensible margins for a board document. */
+  @page { size: A4; margin: 14mm; }
+
+  /* Tighten the dashboard for paper: flatten shadows, avoid breaking a card
+     across pages, and keep the grid readable. */
+  .board-print { padding: 0 !important; }
+  .board-print .rounded-xl,
+  .board-print .rounded-lg { box-shadow: none !important; }
+  .board-print .rounded-xl,
+  .board-print .rounded-lg,
+  .board-print table { break-inside: avoid; page-break-inside: avoid; }
+
+  /* Force accent colours / chart fills to print (browsers strip them by default). */
+  * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
 }
