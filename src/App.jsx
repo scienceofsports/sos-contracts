@@ -225,7 +225,15 @@ function contractTermYears(contract) {
 // what "annual revenue" views should sum, so a 3-year €164,500 deal contributes
 // ~€54,833/yr rather than distorting the annual figure with its whole lifetime
 // total. Rounded to cents.
+//
+// If a contract carries a manual `annualValueOverride` (a display-only reporting
+// figure — see migration 0019), that pinned amount wins. Use it when a clean
+// yearly deal's dates don't land on a whole number of 365-day years, so the
+// run-rate reads e.g. €47,000 instead of €47,277.56. The override never changes
+// the signed value/dates — only what these annualised views report.
 function annualisedValue(contract) {
+  const override = Number(contract?.annualValueOverride);
+  if (Number.isFinite(override) && override > 0) return Math.round(override * 100) / 100;
   return Math.round((Number(contract?.value || 0) / contractTermYears(contract)) * 100) / 100;
 }
 
@@ -1647,6 +1655,10 @@ function ContractDetail({ contractId, navigate }) {
   const [linkCopied, setLinkCopied] = useState(false);
   // Shows the "sent — here's the link" modal immediately after a send/resend.
   const [sentLinkModal, setSentLinkModal] = useState(null); // { url } | null
+  // Inline editing of the display-only annual-value override. `null` = not
+  // editing; a string = the in-progress value. Reporting figure only.
+  const [editingAnnual, setEditingAnnual] = useState(null);
+  const [savingAnnual, setSavingAnnual] = useState(false);
 
   const load = useCallback(async () => {
     const c = await contractService.getById(contractId);
@@ -1776,6 +1788,28 @@ function ContractDetail({ contractId, navigate }) {
     }
   };
 
+  // Save (or clear) the display-only annual value override. A blank field clears
+  // it back to the automatic value ÷ term run-rate. Never touches signed terms.
+  const saveAnnualOverride = async () => {
+    const raw = (editingAnnual ?? '').trim();
+    const next = raw === '' ? null : Number(raw);
+    if (next != null && !(Number.isFinite(next) && next > 0)) {
+      toast.push('Enter a positive amount, or leave it blank to use the automatic run-rate.', 'error');
+      return;
+    }
+    setSavingAnnual(true);
+    try {
+      await contractService.setAnnualValueOverride(contract.id, next);
+      toast.push(next == null ? 'Annual figure reset to automatic (value ÷ term).' : 'Annual reporting figure updated.', 'success');
+      setEditingAnnual(null);
+      load();
+    } catch (err) {
+      toast.push(err.message || 'Could not update the annual figure.', 'error');
+    } finally {
+      setSavingAnnual(false);
+    }
+  };
+
   const cancelContract = async () => {
     try {
       await contractService.updateStatus(contract.id, 'cancelled');
@@ -1851,7 +1885,35 @@ function ContractDetail({ contractId, navigate }) {
           <dl className="text-sm space-y-2">
             <div className="flex justify-between"><dt className="text-slate-500">Client</dt><dd className="font-medium">{client?.companyName}</dd></div>
             <div className="flex justify-between"><dt className="text-slate-500">Type</dt><dd className="capitalize">{contract.type.replace('_',' ')}</dd></div>
-            <div className="flex justify-between"><dt className="text-slate-500">Value</dt><dd className="font-data text-right">{fmtMoney(contract.value, contract.currency)}{contractTermYears(contract) >= 1.5 && <div className="text-xs text-slate-400 font-normal">≈ {fmtMoney(annualisedValue(contract), contract.currency)}/yr over {Math.round(contractTermYears(contract))} yrs</div>}</dd></div>
+            <div className="flex justify-between"><dt className="text-slate-500">Value</dt><dd className="font-data text-right">{fmtMoney(contract.value, contract.currency)}{contractTermYears(contract) >= 1.5 && <div className="text-xs text-slate-400 font-normal">≈ {fmtMoney(annualisedValue(contract), contract.currency)}/yr over {Math.round(contractTermYears(contract))} yrs{contract.annualValueOverride != null && ' · pinned'}</div>}</dd></div>
+            {/* Display-only annual run-rate override. Admin-only, shown once a
+                contract is signed/active (drafts recompute from dates on save).
+                Reporting figure — never changes the signed value or dates. */}
+            {auth.isAdmin && (contract.status === 'signed' || contract.status === 'active') && (
+              editingAnnual !== null ? (
+                <div className="pt-2 mt-1 border-t border-[var(--border)] no-print">
+                  <div className="text-xs text-slate-500 mb-1">Annual figure for reporting ({CURRENCY_SYMBOL[contract.currency] || contract.currency}/yr)</div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number" min="0" step="0.01" autoFocus
+                      value={editingAnnual}
+                      onChange={e => setEditingAnnual(e.target.value)}
+                      placeholder={String(Math.round((Number(contract.value||0) / contractTermYears(contract)) * 100) / 100)}
+                      className="w-32 px-2 py-1 text-sm border border-[var(--border)] rounded-lg text-right font-data"
+                    />
+                    <button onClick={saveAnnualOverride} disabled={savingAnnual} className="px-2.5 py-1 text-xs font-medium rounded-lg bg-[var(--blue-primary)] text-white hover:bg-blue-700 transition disabled:opacity-50">{savingAnnual ? 'Saving…' : 'Save'}</button>
+                    <button onClick={()=>setEditingAnnual(null)} disabled={savingAnnual} className="px-2.5 py-1 text-xs font-medium rounded-lg border border-[var(--border)] text-slate-600 hover:bg-slate-50 transition">Cancel</button>
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-1">Display only — pins the “Annual Revenue (run-rate)” figure. Does not change the signed contract value ({fmtMoney(contract.value, contract.currency)}) or dates. Leave blank to use the automatic value ÷ term.</p>
+                </div>
+              ) : (
+                <div className="no-print">
+                  <button onClick={()=>setEditingAnnual(contract.annualValueOverride != null ? String(contract.annualValueOverride) : '')} className="text-xs text-[var(--blue-primary)] hover:underline">
+                    {contract.annualValueOverride != null ? 'Edit annual reporting figure' : 'Set annual reporting figure'}
+                  </button>
+                </div>
+              )
+            )}
             <div className="flex justify-between"><dt className="text-slate-500">Payment Terms</dt><dd className="capitalize">{contract.paymentType.replace('_',' ')} · Net {contract.paymentTermsDays}</dd></div>
             <div className="flex justify-between"><dt className="text-slate-500">Start</dt><dd>{fmtDate(contract.startDate)}</dd></div>
             <div className="flex justify-between"><dt className="text-slate-500">End</dt><dd>{fmtDate(contract.endDate)}</dd></div>

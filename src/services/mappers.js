@@ -139,6 +139,9 @@ export function contractFromRow(row, payments = [], events = []) {
     type: row.type ?? null,
     status: row.status ?? null,
     value: row.value ?? null,
+    // Display-only reporting override for the annualised run-rate (see
+    // migration 0019). NULL => automatic value ÷ term. Not a legal term.
+    annualValueOverride: row.annual_value_override ?? null,
     currency: row.currency ?? null,
     startDate: row.start_date ?? null,
     endDate: row.end_date ?? null,
@@ -223,6 +226,8 @@ export function contractToRow(obj) {
   if ('type' in obj) row.type = obj.type;
   if ('status' in obj) row.status = obj.status;
   if ('value' in obj) row.value = obj.value;
+  // Reporting-only override; '' clears it back to automatic value ÷ term.
+  if ('annualValueOverride' in obj) row.annual_value_override = obj.annualValueOverride === '' || obj.annualValueOverride == null ? null : Number(obj.annualValueOverride);
   if ('currency' in obj) row.currency = obj.currency;
   if ('startDate' in obj) row.start_date = nd(obj.startDate);
   if ('endDate' in obj) row.end_date = nd(obj.endDate);

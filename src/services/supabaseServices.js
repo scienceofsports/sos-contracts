@@ -308,6 +308,22 @@ export const contractService = {
     return contractService.getById(id);
   },
 
+  // Set (or clear, with null/'') the display-only annual value override. This is
+  // a reporting figure, NOT a contract term — it stays writable on signed/active
+  // contracts (0017's freeze trigger deliberately excludes this column), so the
+  // run-rate can be pinned to a clean yearly amount without touching the signed
+  // value or dates. Writes ONLY this column so no frozen field is ever carried.
+  setAnnualValueOverride: async (id, annualValueOverride) => {
+    const value = annualValueOverride === '' || annualValueOverride == null ? null : Number(annualValueOverride);
+    unwrap(
+      await supabase
+        .from('contracts')
+        .update({ annual_value_override: value })
+        .eq('id', id)
+    );
+    return contractService.getById(id);
+  },
+
   setAttachment: async (id, attachmentBase64, attachmentName) => {
     // Keep base64 in the text column for now (Storage migration is later).
     unwrap(
