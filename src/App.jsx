@@ -1438,14 +1438,14 @@ function ContractForm({ navigate, editContractId }) {
       <div className="font-display mb-6 text-[var(--navy-deep)]">{isEdit ? 'Edit Contract' : 'New Contract'}</div>
 
       <div className="bg-white rounded-xl border border-[var(--border)] p-6">
-        <Field label="Title" required error={errors.title}>
-          <input value={form.title} onChange={e=>set('title',e.target.value)} className={inputCls(errors.title)} placeholder="e.g. Platform Access — Client Name" />
-        </Field>
         <Field label="Client" required error={errors.clientId}>
           <select value={form.clientId} onChange={e=>setClient(e.target.value)} className={inputCls(errors.clientId)}>
             <option value="">Select client…</option>
             {clients.map(c => <option key={c.id} value={c.id}>{c.companyName}</option>)}
           </select>
+        </Field>
+        <Field label="Title" required error={errors.title}>
+          <input value={form.title} onChange={e=>set('title',e.target.value)} className={inputCls(errors.title)} placeholder="e.g. Platform Access — Client Name" />
         </Field>
 
         <CollapsibleSection title="Platform & Analysis" open={openSections.services} onToggle={()=>toggleSection('services')} summary={`${lineItems.filter(i=>PLATFORM_GROUPS.includes(i.group)).length} selected`}>
