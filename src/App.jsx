@@ -2689,7 +2689,30 @@ function ContractDocument({ contractId, navigate }) {
             // the signature block renders the client's name/date (these live on
             // the contract row, not in the send-time snapshot).
             setContract({ ...ns.contract, signedAt: c.signedAt, signerName: c.signerName, signerTitle: c.signerTitle, signerCompany: c.signerCompany, signerEmail: c.signerEmail });
-            setClient(ns.client);
+            // For a SIGNED contract, the client may have CORRECTED their legal
+            // details (company name / address / VAT / registration) at signing.
+            // Those confirmed values were written to the client record on signing
+            // and are what the executed (signed) PDF shows — so overlay them here
+            // so "View Document" matches the signed PDF, not the pre-sign draft.
+            // The send-time snapshot underneath is preserved untouched as evidence
+            // (the signed PDF remains the immutable legal record). A not-yet-signed
+            // (sent) contract keeps the send-time values verbatim.
+            let viewClient = ns.client;
+            if (snap.status === 'signed' && ns.client?.id) {
+              try {
+                const live = await clientService.getById(ns.client.id);
+                if (live) {
+                  viewClient = {
+                    ...ns.client,
+                    companyName: live.companyName ?? ns.client.companyName,
+                    address: live.address ?? ns.client.address,
+                    vatNumber: live.vatNumber ?? ns.client.vatNumber,
+                    registrationNumber: live.registrationNumber ?? ns.client.registrationNumber,
+                  };
+                }
+              } catch (_) { /* fall back to the frozen client if the live read fails */ }
+            }
+            setClient(viewClient);
             setCompany(ns.company);
             setFrozenStatus(snap.status);
             setSignedPdfUrl(snap.signedPdfUrl || null);
@@ -2730,7 +2753,7 @@ function ContractDocument({ contractId, navigate }) {
           <span>🔒</span>
           <span>
             {frozenStatus === 'signed'
-              ? 'This is the executed document exactly as signed — identical to the copy sent to the client. It does not change if the contract is later edited.'
+              ? 'This is the executed document, showing the party details as confirmed by the client at signing — matching the signed PDF. Download the signed PDF for the immutable legal record.'
               : 'This is the frozen document exactly as sent to the client for signature. It does not change if the contract is later edited.'}
           </span>
         </div>
