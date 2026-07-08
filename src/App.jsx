@@ -2220,11 +2220,14 @@ function ContractAttachment({ contract, onChange }) {
 // International-standard signature block: separate labelled lines for
 // Signature, Name, Title, and Date. When signed, the captured values are shown
 // above each line; when blank, empty lines are provided for wet-ink signing.
-function SignatureLines({ signature, signatureImage, name, title, date }) {
+function SignatureLines({ signature, signatureImage, name, title, date, provider }) {
+  // The Provider (Scios) counter-signature draws smaller than the Client's, to
+  // match the two PDF generators (135x46 vs 190x64). Only the image cap changes.
+  const imgCap = provider ? 'max-h-[74px]' : 'max-h-[104px]';
   const Row = ({ label, value, tall, image }) => (
     <div className="mb-4">
       <div className={`${tall ? 'h-28' : 'h-6'} border-b border-slate-400 flex items-end pb-1`}>
-        {image ? <img src={image} alt="signature" className="max-h-[104px] max-w-full w-auto object-contain" style={{ filter:'contrast(1.35) saturate(1.1)' }} />
+        {image ? <img src={image} alt="signature" className={`${imgCap} max-w-full w-auto object-contain`} style={{ filter:'contrast(1.35) saturate(1.1)' }} />
           : value ? <span className={label === 'Signature' ? 'italic font-semibold text-slate-900 text-2xl' : 'text-slate-800'}>{value}</span> : null}
       </div>
       <div className="text-[11px] text-slate-500 mt-1 uppercase tracking-wide">{label}</div>
@@ -2603,6 +2606,7 @@ function ContractDocumentBody({ contract, client, company }) {
             <div className="text-xs font-semibold uppercase tracking-wide mb-4" style={{ color:'var(--navy-deep)' }}>For and on behalf of {company.name}</div>
             {company.signatoryName ? (
               <SignatureLines
+                provider
                 signatureImage={company.signatorySignature || null}
                 signature={company.signatoryName}
                 name={company.signatoryName}
