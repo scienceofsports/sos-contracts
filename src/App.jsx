@@ -416,7 +416,7 @@ function Dashboard({ navigate }) {
       {/* Screen header — hidden when printing. */}
       <div className="flex items-center justify-between mb-6 no-print">
         <div className="font-display text-[var(--navy-deep)]">Dashboard</div>
-        <button onClick={()=>window.print()} className="px-4 py-2 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">📄 Download board report (PDF)</button>
+        <button onClick={()=>window.print()} className="px-4 py-2 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">📄 Report PDF</button>
       </div>
 
       {/* Print-only branded report header — appears at the top of the PDF. */}
@@ -801,7 +801,7 @@ function ContractForm({ navigate, editContractId }) {
     governingLaw:'Republic of Cyprus', jurisdiction:'Nicosia, Cyprus', description:'', slaHours:24, specialTerms:'',
     analysisTeams:[], oppMatchFootage:false, oppTeamAnalysis:false, oppPlayerAnalysis:false,
     billingBasis:'services', paymentModel:'club_all', playerMonthlyFee:'', playerMonths:'', kickbackPct:'', minPlayers:'', expectedPlayers:'', clubFixedFee:'', slaBands:[], teamSla:{},
-    packageKey:'', packageEdited:false,
+    packageKey:'', packageEdited:false, vatInclusive:false,
   });
   const [titleEdited, setTitleEdited] = useState(isEdit);
   // Which service groups are expanded in the form (collapsible sections).
@@ -870,6 +870,7 @@ function ContractForm({ navigate, editContractId }) {
         minPlayers: existing.minPlayers ?? '',
         expectedPlayers: existing.expectedPlayers ?? '',
         clubFixedFee: existing.clubFixedFee ?? '',
+        vatInclusive: !!existing.vatInclusive,
         slaBands: Array.isArray(existing.slaBands) ? existing.slaBands : [],
         // Expand stored slaBands into the per-team SLA map; fall back to the old
         // single slaHours for teams not covered by a band (legacy contracts).
@@ -1220,12 +1221,12 @@ function ContractForm({ navigate, editContractId }) {
           services,
         });
         await paymentService.replaceAllForContract(editContractId, schedule.map(inst => {
-          const vat = computeVAT(client, inst.amount);
+          const vat = computeVAT(client, inst.amount, form.vatInclusive);
           return {
             description: `${contract.title} — payment due ${fmtDate(inst.date)}`,
             dueDate: new Date(inst.date).toISOString(),
-            amount: inst.amount, vatRate: vat.vatRate, vatAmount: vat.vatAmount,
-            totalAmount: round2(inst.amount + vat.vatAmount), currency: form.currency,
+            amount: vat.netAmount, vatRate: vat.vatRate, vatAmount: vat.vatAmount,
+            totalAmount: round2(vat.netAmount + vat.vatAmount), currency: form.currency,
           };
         }));
         toast.push('Contract updated.', 'success');
@@ -1244,12 +1245,12 @@ function ContractForm({ navigate, editContractId }) {
           createdBy: auth.user.id,
         });
         for (const inst of schedule) {
-          const vat = computeVAT(client, inst.amount);
+          const vat = computeVAT(client, inst.amount, form.vatInclusive);
           await paymentService.create(contract.id, {
             description: `${contract.title} — payment due ${fmtDate(inst.date)}`,
             dueDate: new Date(inst.date).toISOString(),
-            amount: inst.amount, vatRate: vat.vatRate, vatAmount: vat.vatAmount,
-            totalAmount: round2(inst.amount + vat.vatAmount), currency: form.currency,
+            amount: vat.netAmount, vatRate: vat.vatRate, vatAmount: vat.vatAmount,
+            totalAmount: round2(vat.netAmount + vat.vatAmount), currency: form.currency,
           });
         }
         toast.push('Contract created.', 'success');
@@ -1501,6 +1502,34 @@ function ContractForm({ navigate, editContractId }) {
           </Field>
         </div>
         <p className="text-xs text-slate-400 -mt-3 mb-4">{form.paymentModel === 'club_players' ? 'Computed automatically: club fixed fee + projected player revenue, net of the club commission (see breakdown above).' : form.paymentModel === 'players_all' ? 'Computed automatically: projected player revenue, net of the club commission (see breakdown above).' : 'Value is computed automatically from the services above.'}</p>
+
+        {/* VAT-inclusive concession: when a client objects to VAT on top, agree an
+            all-in figure and treat the value as VAT-inclusive. VAT is still
+            charged & remitted (legal) — it's just backed out of the round number. */}
+        {(() => {
+          const client = clients?.find(c => c.id === form.clientId);
+          const vat = computeVAT(client, Number(form.value) || 0, form.vatInclusive);
+          const chargesVat = vat.vatRate > 0;
+          return (
+            <div className="mb-4 rounded-lg border border-[var(--border)] bg-slate-50/60 p-3">
+              <label className="flex items-start gap-2.5 text-sm text-slate-700 cursor-pointer">
+                <input type="checkbox" checked={!!form.vatInclusive} onChange={e=>set('vatInclusive', e.target.checked)} className="mt-0.5 w-4 h-4 rounded border-slate-300" />
+                <span>
+                  <span className="font-medium">Value already includes VAT</span>
+                  <span className="block text-xs text-slate-400 mt-0.5">Tick this when the client agreed an all-in price and doesn't want VAT added on top. VAT is still charged and remitted — it's calculated out of the figure above, not added to it.</span>
+                </span>
+              </label>
+              {chargesVat && Number(form.value) > 0 && (
+                <div className="mt-2 pt-2 border-t border-[var(--border)] text-xs text-slate-500 flex flex-wrap gap-x-4 gap-y-1">
+                  <span>Net: <span className="font-data text-slate-700">{fmtMoney(vat.netAmount, form.currency)}</span></span>
+                  <span>VAT ({Math.round(vat.vatRate*100)}%): <span className="font-data text-slate-700">{fmtMoney(vat.vatAmount, form.currency)}</span></span>
+                  <span>Client pays: <span className="font-data text-[var(--navy-deep)] font-semibold">{fmtMoney(round2(vat.netAmount + vat.vatAmount), form.currency)}</span></span>
+                </div>
+              )}
+              {!chargesVat && vat.note && <div className="mt-2 pt-2 border-t border-[var(--border)] text-xs text-slate-400">{vat.note} — no VAT applies, so this setting has no effect.</div>}
+            </div>
+          );
+        })()}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Field label="Start Date">
             <input type="date" value={form.startDate} onChange={e=>set('startDate',e.target.value)} className={inputCls(false)} />
@@ -2621,11 +2650,11 @@ function AddPaymentModal({ contract, client, onClose, onDone }) {
     if (Object.keys(e).length) return;
     setBusy(true);
     try {
-      const vat = computeVAT(client, Number(amount));
+      const vat = computeVAT(client, Number(amount), contract.vatInclusive);
       await paymentService.create(contract.id, {
         accountingRef: accountingRef.trim() || null, description, dueDate: new Date(dueDate).toISOString(),
-        amount: Number(amount), vatRate: vat.vatRate, vatAmount: vat.vatAmount,
-        totalAmount: round2(Number(amount) + vat.vatAmount), currency: contract.currency,
+        amount: vat.netAmount, vatRate: vat.vatRate, vatAmount: vat.vatAmount,
+        totalAmount: round2(vat.netAmount + vat.vatAmount), currency: contract.currency,
       });
       toast.push('Payment milestone added.', 'success');
       onDone();

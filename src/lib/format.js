@@ -51,19 +51,36 @@ export function validateEmail(email) {
 }
 
 /* VAT logic */
-export function computeVAT(client, amount) {
-  if (!client) return { vatRate: 0, vatAmount: 0, note: '' };
-  if (client.country === 'CY') {
-    return { vatRate: 0.19, vatAmount: round2(amount * 0.19), note: '' };
+// Compute VAT for a payment amount. When `inclusive` is true, `amount` is
+// treated as the VAT-INCLUSIVE (gross) figure the client agreed to pay — the
+// net and VAT are back-calculated OUT of it (net = gross ÷ 1.19), so the client
+// pays the round number while VAT is still charged and remitted. When false
+// (default), `amount` is net and VAT is added on top. The returned `amount` is
+// always the NET line amount, and `vatAmount` the tax, so callers can build
+// { amount, vatAmount, totalAmount: amount + vatAmount } consistently.
+export function computeVAT(client, amount, inclusive = false) {
+  const gross = Number(amount) || 0;
+  // Resolve the applicable rate + any note from the client's location/status.
+  let rate = 0, note = '';
+  if (!client) { rate = 0; }
+  else {
+    const EU_COUNTRIES = ['AT','BE','BG','HR','CY','CZ','DK','EE','FI','FR','DE','GR','HU','IE','IT','LV','LT','LU','MT','NL','PL','PT','RO','SK','SI','ES','SE'];
+    if (client.country === 'CY') rate = 0.19;
+    else if (EU_COUNTRIES.includes(client.country) && client.vatNumber) { rate = 0; note = 'VAT reverse charge applies (Article 196, EU VAT Directive).'; }
+    else if (EU_COUNTRIES.includes(client.country)) rate = 0.19;
+    else { rate = 0; note = 'Outside scope of VAT.'; }
   }
-  const EU_COUNTRIES = ['AT','BE','BG','HR','CY','CZ','DK','EE','FI','FR','DE','GR','HU','IE','IT','LV','LT','LU','MT','NL','PL','PT','RO','SK','SI','ES','SE'];
-  if (EU_COUNTRIES.includes(client.country) && client.vatNumber) {
-    return { vatRate: 0, vatAmount: 0, note: 'VAT reverse charge applies (Article 196, EU VAT Directive).' };
+
+  if (rate === 0) return { vatRate: 0, vatAmount: 0, netAmount: round2(gross), note };
+
+  if (inclusive) {
+    // `amount` is the agreed gross; split net + VAT out of it.
+    const net = round2(gross / (1 + rate));
+    const vat = round2(gross - net);
+    return { vatRate: rate, vatAmount: vat, netAmount: net, note };
   }
-  if (EU_COUNTRIES.includes(client.country)) {
-    return { vatRate: 0.19, vatAmount: round2(amount * 0.19), note: '' };
-  }
-  return { vatRate: 0, vatAmount: 0, note: 'Outside scope of VAT.' };
+  // `amount` is net; VAT added on top.
+  return { vatRate: rate, vatAmount: round2(gross * rate), netAmount: round2(gross), note };
 }
 export function round2(n) { return Math.round(n * 100) / 100; }
 
