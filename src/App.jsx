@@ -16,6 +16,7 @@ import {
   seasonLabelFromDates,
   commercialModelText,
   commercialValue,
+  isPlayerFunded,
   PAYMENT_MODEL_LABELS,
   SPECIAL_TERM_CLAUSES,
   parseSpecialTerms,
@@ -782,9 +783,18 @@ function CommercialBreakdown({ form, servicesTotal = 0 }) {
   // The CLUB pays the whole value. Components sum to a gross, then the club
   // commission is deducted to give the final contract value.
   const playerLine = cv.playerPortion > 0;
+  // A fee is set but no minimum floor (min players blank) → the player amount is
+  // variable, billed on actual enrolment. Show it as such rather than hiding the
+  // line, so it's clear WHY the contract value reads "Variable".
+  const variablePlayerLine = cv.fee > 0 && cv.playerPortion <= 0;
+  // Services are DELIVERABLES the player fees pay for — shown as "Included", never
+  // priced into the value (summing them would double-count). Only the club fixed
+  // fee + player fees build the value. A subtotal only makes sense when BOTH the
+  // club fee and player fees contribute (otherwise value = the single component).
+  const showSubtotal = cv.clubFee > 0 && playerLine;
   return (
     <div className="mt-3 pt-3 border-t border-[var(--border)] text-xs text-slate-600 space-y-1">
-      {cv.servicesTotal > 0 && <div className="flex justify-between"><span>Services (from selection above)</span><span className="font-data">{fmtMoney(cv.servicesTotal, cur)}</span></div>}
+      {cv.servicesTotal > 0 && <div className="flex justify-between text-slate-500"><span>Services (from selection above)</span><span className="font-data text-emerald-600">Included</span></div>}
       {cv.clubFee > 0 && <div className="flex justify-between"><span>Club fixed fee (per season)</span><span className="font-data">{fmtMoney(cv.clubFee, cur)}</span></div>}
       {playerLine && (
         <div className="flex justify-between">
@@ -792,7 +802,13 @@ function CommercialBreakdown({ form, servicesTotal = 0 }) {
           <span className="font-data">{fmtMoney(cv.playerPortion, cur)}</span>
         </div>
       )}
-      {(cv.servicesTotal > 0 || cv.clubFee > 0) && playerLine && (
+      {variablePlayerLine && (
+        <div className="flex justify-between text-slate-500">
+          <span>Player fees ({fmtMoney(cv.fee, cur)}/player{cv.months > 0 ? ` × ${cv.months} mo` : ''})</span>
+          <span className="font-data italic">Variable</span>
+        </div>
+      )}
+      {showSubtotal && (
         <div className="flex justify-between text-slate-500 pt-1 border-t border-dashed border-[var(--border)]"><span>Subtotal</span><span className="font-data">{fmtMoney(cv.gross, cur)}</span></div>
       )}
       {cv.pct > 0 && <div className="flex justify-between text-slate-500"><span>Less club commission ({cv.pct}%)</span><span className="font-data">− {fmtMoney(cv.commissionAmount, cur)}</span></div>}
@@ -802,8 +818,10 @@ function CommercialBreakdown({ form, servicesTotal = 0 }) {
       </div>
       <p className="text-[11px] text-slate-400 pt-1">
         {playerLine
-          ? `The club pays the full contract value: services${cv.clubFee > 0 ? ' + club fixed fee' : ''} + the player-fee amount (minimum players × fee × months)${cv.pct > 0 ? `, less the ${cv.pct}% club commission` : ''}. Player fees fund the club's payment; they are not collected separately.`
-          : 'Services total plus the club fixed fee.'}
+          ? `The club pays ${cv.clubFee > 0 ? 'the club fixed fee + ' : ''}the player-fee amount (minimum players × fee × months)${cv.pct > 0 ? `, less the ${cv.pct}% club commission` : ''}. The selected services are the deliverables these fees fund — they are not charged separately.`
+          : variablePlayerLine
+            ? 'No minimum number of players is set, so the contract value is variable — billed on actual enrolment (players × fee × months). The selected services are the deliverables the player fees fund. Enter a minimum-players figure to commit a fixed value.'
+            : 'The club fixed fee. The selected services are the deliverables it funds.'}
       </p>
     </div>
   );
@@ -2432,7 +2450,29 @@ function ContractDocumentBody({ contract, client, company }) {
                 <p className="text-sm text-slate-700 mb-8 whitespace-pre-line">{contract.description || 'The purpose of this Agreement is to define the terms of cooperation between the Parties for the provision of performance analysis and related services by the Service Provider to the Client.'}</p>
               )}
 
-              {scopeNum && (
+              {scopeNum && (() => {
+                // Player-funded / Shared: the contract value comes from the funding
+                // model, NOT the sum of service prices. To avoid double-counting, the
+                // platform-access line CARRIES the whole contract value (auto-filled
+                // from Commercial & Payment) and every other service shows "Included".
+                // The Total then equals the platform line = contract.value. Services-
+                // basis deals keep their real per-line prices.
+                const pf = isPlayerFunded(contract);
+                const anchorKey = lineItems.some(i => i.key === 'platform_access') ? 'platform_access' : (lineItems[0]?.key);
+                const rowAmount = (i) => {
+                  if (!pf) {
+                    return i.included
+                      ? (i.listPrice > 0
+                          ? <><span className="line-through text-slate-400">{fmtMoney(i.listPrice, contract.currency)}</span> <span className="text-emerald-600">Incl.</span></>
+                          : <span className="text-emerald-600">Included</span>)
+                      : fmtMoney(i.listPrice, contract.currency);
+                  }
+                  // player-funded: the anchor line carries the full value; rest Included
+                  return i.key === anchorKey
+                    ? fmtMoney(contract.value, contract.currency)
+                    : <span className="text-emerald-600">Included</span>;
+                };
+                return (
                 <React.Fragment>
                   <div className="sos-pill mb-4" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{scopeNum}.</span> Scope of Services</div>
                   <table className="w-full text-sm mb-8 border-collapse">
@@ -2457,11 +2497,7 @@ function ContractDocumentBody({ contract, client, company }) {
                             )}
                           </td>
                           <td className="py-2 px-3 text-right font-data whitespace-nowrap">
-                            {i.included
-                              ? (i.listPrice > 0
-                                  ? <><span className="line-through text-slate-400">{fmtMoney(i.listPrice, contract.currency)}</span> <span className="text-emerald-600">Incl.</span></>
-                                  : <span className="text-emerald-600">Included</span>)
-                              : fmtMoney(i.listPrice, contract.currency)}
+                            {rowAmount(i)}
                           </td>
                         </tr>
                       ))}
@@ -2472,7 +2508,8 @@ function ContractDocumentBody({ contract, client, company }) {
                     </tbody>
                   </table>
                 </React.Fragment>
-              )}
+                );
+              })()}
 
               {analysisNum && (
                 <React.Fragment>

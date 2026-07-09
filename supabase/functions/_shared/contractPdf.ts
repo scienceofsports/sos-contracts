@@ -832,27 +832,37 @@ export async function buildContractPdf(input: {
     text(c.description || 'The purpose of this Agreement is to define the terms of cooperation between the Parties for the provision of performance analysis and related services by the Service Provider to the Client.', { size: 10, gap: 10 });
   }
 
-  // --- Scope of Services — premium ruled TABLE (SERVICE | QTY). -------------
+  // --- Scope of Services — premium ruled TABLE (SERVICE | AMOUNT). ----------
+  // Player-funded / Shared: value comes from the funding model, so to avoid
+  // double-counting the platform-access line CARRIES the whole contract value and
+  // every other service shows "Included"; the Total equals it. Services-basis
+  // deals show real per-line prices. Robust to a stale billing_basis (a player
+  // payment model alone is enough). Mirrors ContractDocumentBody + contractPdf.js.
+  const svcModel = (c?.paymentModel ?? c?.payment_model);
+  const pf = ((c?.billingBasis ?? c?.billing_basis) === 'player_funded')
+    || svcModel === 'players_all' || svcModel === 'club_players';
+  const anchorKey = lineItems.some((i: Any) => i.key === 'platform_access') ? 'platform_access' : (lineItems[0] && lineItems[0].key);
+
+  // Local word-wrap helper (pdf-lib has no splitText). Returns wrapped lines.
+  const wrap = (str: string, f: Any, size: number, width: number): string[] => {
+    const words = String(str ?? '').split(/\s+/);
+    const lines: string[] = [];
+    let line = '';
+    for (const w of words) {
+      const test = line ? line + ' ' + w : w;
+      if (f.widthOfTextAtSize(test, size) > width && line) { lines.push(line); line = w; }
+      else line = test;
+    }
+    if (line) lines.push(line);
+    return lines;
+  };
+
   if (scopeNum) {
     pillHeader(scopeNum, 'Scope of Services');
 
     const cellPadX = 10;
     const qtyColW = 90;
     const svcColW = maxW - qtyColW;
-
-    // Local word-wrap helper (pdf-lib has no splitText). Returns wrapped lines.
-    const wrap = (str: string, f: Any, size: number, width: number): string[] => {
-      const words = String(str ?? '').split(/\s+/);
-      const lines: string[] = [];
-      let line = '';
-      for (const w of words) {
-        const test = line ? line + ' ' + w : w;
-        if (f.widthOfTextAtSize(test, size) > width && line) { lines.push(line); line = w; }
-        else line = test;
-      }
-      if (line) lines.push(line);
-      return lines;
-    };
 
     // Header row: navy band, white SERVICE / QTY.
     const headH = 20;
@@ -898,7 +908,17 @@ export async function buildContractPdf(input: {
       // + "Incl." so the value is visible but unbilled.
       const rightX = W - M - cellPadX;
       const amtBaseline = rowTop + 12;
-      if (i.included && i.listPrice > 0) {
+      if (pf) {
+        // Player-funded: anchor line carries the whole contract value; rest Included.
+        if (i.key === anchorKey) {
+          const vStr = fmtMoney(value, currency);
+          const pw = font.widthOfTextAtSize(vStr, 9.5);
+          page.drawText(vStr, { x: rightX - pw, y: py(amtBaseline), size: 9.5, font, color: BLACK });
+        } else {
+          const w = bold.widthOfTextAtSize('Included', 9.5);
+          page.drawText('Included', { x: rightX - w, y: py(amtBaseline), size: 9.5, font: bold, color: rgb(0.063, 0.588, 0.412) });
+        }
+      } else if (i.included && i.listPrice > 0) {
         // Waived a real value: struck-through list price + "Incl."
         const inclW = bold.widthOfTextAtSize('Incl.', 9.5);
         page.drawText('Incl.', { x: rightX - inclW, y: py(amtBaseline), size: 9.5, font: bold, color: rgb(0.063, 0.588, 0.412) });

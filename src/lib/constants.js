@@ -212,11 +212,19 @@ export const DEFAULT_KICKBACK_PCT = 25;
 // commission (kickback) is applied to the PLAYER revenue only; the club fixed
 // fee (Shared) is kept in full. Returns all parts so the UI + clause + PDFs show
 // an identical breakdown. NOTE: ported into both PDF generators — keep in sync.
-// `servicesTotal` = the chargeable services catalogue total the CLIENT pays on
-// top of the funding model (camera install, reports, etc.). When omitted it is
-// derived from contract.services, so the PDFs (which carry services in the
-// snapshot) compute it automatically. A Shared deal that also sells services
-// must charge BOTH — services + club fixed fee — so they are summed here.
+// `servicesTotal` = the services catalogue total, kept only for reference/display
+// (it is NOT added to the value — services are deliverables the player fees fund).
+//
+// True for a player-funded / shared deal — i.e. the value comes from the funding
+// model (club fee + player fees), not from priced services. Robust to a stale
+// `billing_basis`: a player payment model alone is enough. Ported into both PDF
+// generators — keep identical.
+export function isPlayerFunded(contract) {
+  const basis = contract?.billingBasis ?? contract?.billing_basis;
+  const model = contract?.paymentModel ?? contract?.payment_model;
+  return basis === 'player_funded' || model === 'players_all' || model === 'club_players';
+}
+
 export function commercialValue(contract, servicesTotal) {
   const model = contract?.paymentModel || null;
   const fee = Number(contract.playerMonthlyFee) || 0;
@@ -231,29 +239,33 @@ export function commercialValue(contract, servicesTotal) {
       ? Number(servicesTotal) || 0
       : computeServiceLineItems(contract.services).reduce((s, i) => s + i.amount, 0)
   ) * 100) / 100;
-  // MODEL: the CLUB pays the whole contract value in every funding model — the
-  // player fees are a way of FUNDING the club's payment, not a separate stream we
-  // collect from players. So the value SUMS its components and then the club
-  // commission is DEDUCTED from the total:
+  // MODEL: in a player-funded / shared deal the PLAYER FEES fund the club's
+  // payment — the selected services are the DELIVERABLES those fees pay for, NOT
+  // a separate charge added on top. Summing services + player fees double-counts
+  // (the platform access would be billed once as a service and again inside the
+  // fee that already buys it). So services are EXCLUDED from the value:
   //
   //   playerPortion = min players x fee x months   (the committed floor)
   //   clubPortion   = club fixed fee               (Shared only)
-  //   gross         = services + clubPortion + playerPortion
+  //   gross         = clubPortion + playerPortion  (services NOT added)
   //   value         = gross x (1 - commission%)
   //
-  // Worked (verified): Club-funded 10,000 @0% -> 10,000; Shared 5,000+5,000 @25%
-  // -> 7,500; Player-funded players 5,000 @25% -> 3,750.
+  // Worked: Shared 5,000 club fee + 5,000 player fees @25% -> 7,500. Player-funded
+  // 80 x 12 x 10 = 9,600 @50% -> 4,800 (services are deliverables, unpriced).
   const playerPortion = Math.round(minPlayers * fee * months * 100) / 100;
   const clubPortion = includeClubFee ? clubFee : 0;
-  const gross = Math.round((svc + clubPortion + playerPortion) * 100) / 100;
+  const gross = Math.round((clubPortion + playerPortion) * 100) / 100;
   const commissionAmount = Math.round(gross * (pct / 100) * 100) / 100;
   const guaranteed = Math.round((gross - commissionAmount) * 100) / 100;
   const hasPlayerFees = fee > 0;
   // No committed money at all (no services, no club fee, no min-player floor) ->
   // value is variable (billed purely on actual enrolment).
   const variableOnly = gross <= 0;
-  const stored = Number(contract.value) || 0;
-  const value = gross > 0 ? guaranteed : stored;
+  // A variable-only deal has NO committed floor (e.g. Player-funded with min
+  // players left blank), so it has no fixed contract value — return 0, never a
+  // leftover `stored` figure. Keeping a stale value here was the bug where the
+  // displayed value froze and stopped recomputing as the player inputs changed.
+  const value = gross > 0 ? guaranteed : 0;
   return {
     clubFee: clubPortion,
     servicesTotal: svc,

@@ -22,7 +22,7 @@
    ========================================================================= */
 import { jsPDF } from 'jspdf';
 import { fmtDate, fmtMoney, daysBetween } from './format.js';
-import { computeServiceLineItems, platformSeatsSummary, SERVICE_GROUPS, analysisScopeText, seasonLabelFromDates, commercialModelText, parseSpecialTerms, serviceLevelsLines, vatSummary, clientPartyClause } from './constants.js';
+import { computeServiceLineItems, platformSeatsSummary, SERVICE_GROUPS, analysisScopeText, seasonLabelFromDates, commercialModelText, parseSpecialTerms, serviceLevelsLines, vatSummary, clientPartyClause, isPlayerFunded } from './constants.js';
 
 export function generateContractPdf({ contract, client, company }) {
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
@@ -530,9 +530,16 @@ export function generateContractPdf({ contract, client, company }) {
     text(contract.description || 'The purpose of this Agreement is to define the terms of cooperation between the Parties for the provision of performance analysis and related services by the Service Provider to the Client.', { size: 10, gap: 10 });
   }
 
-  // --- Scope of Services — premium ruled TABLE (SERVICE | QTY). -------------
+  // --- Scope of Services — premium ruled TABLE (SERVICE | AMOUNT). ----------
+  // Player-funded / Shared: the value comes from the funding model, so to avoid
+  // double-counting the platform-access line CARRIES the whole contract value and
+  // every other service shows "Included"; the Total equals it. Services-basis
+  // deals show real per-line prices. Mirrors ContractDocumentBody + contractPdf.ts.
   if (scopeNum) {
     pillHeader(scopeNum, 'Scope of Services');
+
+    const pf = isPlayerFunded(contract);
+    const anchorKey = lineItems.some((i) => i.key === 'platform_access') ? 'platform_access' : (lineItems[0] && lineItems[0].key);
 
     const qtyColW = 90;                       // right column width for QTY
     const svcColW = maxW - qtyColW;
@@ -601,7 +608,16 @@ export function generateContractPdf({ contract, client, company }) {
       const amtBaseline = rowTop + 12;
       const rightX = W - M - cellPadX;
       doc.setFontSize(9.5);
-      if (i.included && i.listPrice > 0) {
+      if (pf) {
+        // Player-funded: anchor line carries the whole contract value; rest Included.
+        if (i.key === anchorKey) {
+          doc.setFont('helvetica', 'normal'); doc.setTextColor(...BLACK);
+          doc.text(fmtMoney(contract.value, contract.currency), rightX, amtBaseline, { align: 'right' });
+        } else {
+          doc.setFont('helvetica', 'bold'); doc.setTextColor(16, 150, 105);
+          doc.text('Included', rightX, amtBaseline, { align: 'right' });
+        }
+      } else if (i.included && i.listPrice > 0) {
         // Waived a real value: struck-through list price + "Incl."
         const inclW = doc.getTextWidth('Incl.');
         doc.setFont('helvetica', 'bold'); doc.setTextColor(16, 150, 105);
