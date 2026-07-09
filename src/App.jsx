@@ -610,6 +610,17 @@ function Dashboard({ navigate }) {
                 </tr>
               ))}
             </tbody>
+            {topClients.length > 0 && (
+              <tfoot>
+                <tr className="border-t-2 border-[var(--navy-deep)] font-semibold text-[var(--navy-deep)]">
+                  <td className="py-2.5 pr-4">Total</td>
+                  <td className="py-2.5 pr-4 font-data">{fmtMoney(topClients.reduce((s,t)=>s+t.totalValue,0),'EUR')}</td>
+                  <td className="py-2.5 pr-4 font-data text-emerald-600">{fmtMoney(topClients.reduce((s,t)=>s+t.collected,0),'EUR')}</td>
+                  <td className="py-2.5 pr-4 font-data text-amber-600">{fmtMoney(topClients.reduce((s,t)=>s+t.outstanding,0),'EUR')}</td>
+                  <td className="py-2.5 pr-4"></td>
+                </tr>
+              </tfoot>
+            )}
           </table>
         </div>
       </div>
