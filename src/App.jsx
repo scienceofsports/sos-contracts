@@ -423,6 +423,78 @@ function Dashboard({ navigate }) {
     return { client: cl, totalValue, collected, outstanding: outstandingC, endDate: latestEnd };
   }).sort((a,b)=>b.totalValue-a.totalValue);
 
+  /* ===== AGREEMENTS OVERVIEW — the "what have we agreed?" board ===============
+     Revenue by pipeline tier (annualised, net of VAT), club-status progress
+     against all clients, agreed SLA bands, and cameras still to install.
+     "Committed/agreed" for operational figures (SLA, cameras) = signed + active
+     only — a draft creates no delivery obligation. Revenue is shown per tier. */
+  const netAnnualised = (c) => {
+    // Annual run-rate, net of VAT. netFactor backs VAT out of a gross value; a
+    // net (ex-VAT) value is unchanged. Mirrors the board's "income is net" rule.
+    const annual = annualisedValue(c);
+    const client = clientMap[c.clientId];
+    const v = computeVAT(client, annual, c.vatInclusive);
+    return v.netAmount != null ? v.netAmount : annual;
+  };
+  const tierOf = (c) => {
+    const st = effectiveContractStatus(c);
+    if (st === 'signed' || st === 'active') return 'signed';
+    if (st === 'sent') return 'sent';
+    if (st === 'draft') return 'draft';
+    return null; // expired / cancelled / declined — not in the live pipeline
+  };
+  const TIERS = [
+    { key:'signed', label:'Signed / Active', hint:'committed', accent:'#10B981' },
+    { key:'sent',   label:'Sent — awaiting signature', hint:'in pipeline', accent:'#F59E0B' },
+    { key:'draft',  label:'Drafted', hint:'not yet sent', accent:'#64748B' },
+  ];
+  const revenueTiers = TIERS.map(t => {
+    const list = contracts.filter(c => tierOf(c) === t.key);
+    const clientsInTier = new Set(list.map(c => c.clientId)).size;
+    return { ...t, annual: list.reduce((s,c)=>s+netAnnualised(c),0), clubs: clientsInTier };
+  });
+
+  // Club-status progress vs. every client in the system. A client's status is
+  // its best contract: signed/active > sent > drafted > none.
+  const clientBestTier = (cl) => {
+    const cs = contracts.filter(c => c.clientId === cl.id).map(tierOf).filter(Boolean);
+    if (cs.includes('signed')) return 'signed';
+    if (cs.includes('sent')) return 'sent';
+    if (cs.includes('draft')) return 'draft';
+    return 'none';
+  };
+  const clubStatus = { signed:0, sent:0, draft:0, none:0 };
+  clients.forEach(cl => { clubStatus[clientBestTier(cl)]++; });
+  const totalClubs = clients.length;
+
+  // Agreed operational commitments — signed + active contracts only.
+  const committedContracts = contracts.filter(c => { const st = effectiveContractStatus(c); return st === 'signed' || st === 'active'; });
+
+  // SLA commitments: count clubs per agreed SLA band. A contract's bands come
+  // from slaBands (per-team hours) or fall back to its single slaHours (or 72).
+  // A club is counted under EACH distinct band it has agreed (mixed SLAs → in
+  // more than one band). Tightest band drives staffing, so we flag it.
+  const slaBandClubs = {}; // hours -> Set(clientId)
+  committedContracts.forEach(c => {
+    const bands = Array.isArray(c.slaBands) ? c.slaBands.filter(b => b && Array.isArray(b.teams) && b.teams.length && Number(b.hours)) : [];
+    const hoursList = bands.length ? [...new Set(bands.map(b => Number(b.hours)))] : [Number(c.slaHours) || 72];
+    hoursList.forEach(h => { (slaBandClubs[h] = slaBandClubs[h] || new Set()).add(c.clientId); });
+  });
+  const slaBandsView = Object.keys(slaBandClubs).map(Number).sort((a,b)=>a-b)
+    .map(h => ({ hours: h, clubs: slaBandClubs[h].size }));
+  const tightestSla = slaBandsView.length ? slaBandsView[0].hours : null;
+
+  // Cameras to install — sum of camera_installation qty across committed
+  // contracts (agreed, treated as the pending install workload).
+  let camerasToInstall = 0;
+  const cameraClubs = new Set();
+  committedContracts.forEach(c => {
+    const items = c.services ? computeServiceLineItems(c.services) : [];
+    const cam = items.find(i => i.key === 'camera_installation');
+    const qty = cam ? Number(cam.qty) || 0 : 0;
+    if (qty > 0) { camerasToInstall += qty; cameraClubs.add(c.clientId); }
+  });
+
   return (
     <div className="p-4 md:p-6 board-print">
       {/* Screen header — hidden when printing. */}
@@ -480,6 +552,70 @@ function Dashboard({ navigate }) {
           accent={overdue > 0 ? '#EF4444' : '#F59E0B'}
           onClick={()=>navigate('payments:receivables')}
         />
+      </div>
+
+      {/* AGREEMENTS OVERVIEW — "what have we agreed?" at a glance: revenue by
+          pipeline tier, club-status progress, agreed SLA bands, cameras to fit. */}
+      <div className="bg-white rounded-xl border border-[var(--border)] p-5 mb-6">
+        <div className="sos-pill mb-4">Agreements Overview</div>
+
+        {/* Annual value (net of VAT) by tier — the quick revenue answer. */}
+        <div className="text-[11px] uppercase tracking-wide text-slate-500 font-medium mb-2">Annual value (run-rate, ex-VAT)</div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+          {revenueTiers.map(t => (
+            <div key={t.key} className="rounded-lg border border-[var(--border)] p-4" style={{ borderLeft:`3px solid ${t.accent}` }}>
+              <div className="text-xs text-slate-500">{t.label}</div>
+              <div className="font-data text-2xl font-bold text-[var(--navy-deep)] mt-1">{fmtMoney(t.annual,'EUR')}</div>
+              <div className="text-[11px] text-slate-400 mt-0.5">{t.clubs} club{t.clubs===1?'':'s'} · {t.hint}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Club status vs. every client in the system. */}
+        <div className="text-[11px] uppercase tracking-wide text-slate-500 font-medium mb-2">Club status ({totalClubs} client{totalClubs===1?'':'s'})</div>
+        <div className="flex h-3 rounded-full overflow-hidden mb-2 bg-slate-100">
+          {[['signed','#10B981'],['sent','#F59E0B'],['draft','#64748B'],['none','#E2E8F0']].map(([k,c]) => (
+            clubStatus[k] > 0 ? <div key={k} style={{ width:`${(clubStatus[k]/Math.max(1,totalClubs))*100}%`, background:c }} title={`${k}: ${clubStatus[k]}`} /> : null
+          ))}
+        </div>
+        <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-slate-600 mb-6">
+          <span><span className="inline-block w-2.5 h-2.5 rounded-sm mr-1.5 align-middle" style={{ background:'#10B981' }} />Signed <strong>{clubStatus.signed}</strong></span>
+          <span><span className="inline-block w-2.5 h-2.5 rounded-sm mr-1.5 align-middle" style={{ background:'#F59E0B' }} />Sent <strong>{clubStatus.sent}</strong></span>
+          <span><span className="inline-block w-2.5 h-2.5 rounded-sm mr-1.5 align-middle" style={{ background:'#64748B' }} />Drafted <strong>{clubStatus.draft}</strong></span>
+          <span><span className="inline-block w-2.5 h-2.5 rounded-sm mr-1.5 align-middle" style={{ background:'#E2E8F0' }} />No contract yet <strong>{clubStatus.none}</strong></span>
+        </div>
+
+        {/* SLA commitments + cameras to install — the operational read (agreed
+            = signed/active). */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div>
+            <div className="text-[11px] uppercase tracking-wide text-slate-500 font-medium mb-2">Agreed SLA (signed &amp; active)</div>
+            {slaBandsView.length === 0 ? (
+              <div className="text-sm text-slate-400">No agreed SLAs yet.</div>
+            ) : (
+              <div className="space-y-1.5">
+                {slaBandsView.map(b => (
+                  <div key={b.hours} className="flex items-center gap-3 text-sm">
+                    <span className={`font-data w-12 ${b.hours===tightestSla ? 'text-[var(--navy-deep)] font-bold' : 'text-slate-600'}`}>{b.hours}h</span>
+                    <div className="flex-1 h-2 rounded-full bg-slate-100 overflow-hidden">
+                      <div style={{ width:`${(b.clubs/Math.max(1,committedContracts.length))*100}%`, background:'var(--cyan)' }} className="h-full" />
+                    </div>
+                    <span className="text-slate-600 w-16 text-right">{b.clubs} club{b.clubs===1?'':'s'}</span>
+                  </div>
+                ))}
+                {tightestSla && <div className="text-[11px] text-slate-400 pt-1">Tightest agreed SLA: <strong className="text-[var(--navy-deep)]">{tightestSla}h</strong> — drives staffing.</div>}
+              </div>
+            )}
+          </div>
+          <div>
+            <div className="text-[11px] uppercase tracking-wide text-slate-500 font-medium mb-2">Cameras to install</div>
+            <div className="rounded-lg border border-[var(--border)] p-4 flex items-baseline gap-3">
+              <span className="font-data text-3xl font-bold text-[var(--navy-deep)]">{camerasToInstall}</span>
+              <span className="text-sm text-slate-500">camera{camerasToInstall===1?'':'s'} across {cameraClubs.size} club{cameraClubs.size===1?'':'s'}</span>
+            </div>
+            <div className="text-[11px] text-slate-400 mt-1.5">Agreed in signed/active contracts — install workload.</div>
+          </div>
+        </div>
       </div>
 
       {/* NEXT 3 MONTHS CASHFLOW — expected money in, at a glance. */}
