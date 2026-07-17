@@ -292,6 +292,46 @@ export const contractService = {
     return { snapshot, status: req.status, signedPdfUrl };
   },
 
+  // How many signing links have been issued, per contract. One signing_requests
+  // row = one link emailed, so the count is simply the rows per contract — the
+  // history is already there for every contract ever sent through this backend,
+  // with no backfill. Returns a { [contractId]: count } map for the list view.
+  // NOTE: "Copy signing link" also issues a link when none is held in memory,
+  // so a count can legitimately exceed the number of deliberate resends.
+  getSendCounts: async () => {
+    const rows = unwrap(
+      await supabase.from('signing_requests').select('contract_id')
+    );
+    const counts = {};
+    (rows || []).forEach((r) => {
+      if (!r.contract_id) return;
+      counts[r.contract_id] = (counts[r.contract_id] || 0) + 1;
+    });
+    return counts;
+  },
+
+  // Every signing link issued for one contract, oldest first, for the detail
+  // page's link history. `expired` is derived live from expires_at rather than
+  // trusting the stored status, which only flips when the link is next touched.
+  getSigningLinks: async (contractId) => {
+    const rows = unwrap(
+      await supabase
+        .from('signing_requests')
+        .select('id, status, signer_email, created_at, expires_at')
+        .eq('contract_id', contractId)
+        .order('created_at', { ascending: true })
+    );
+    return (rows || []).map((r, i) => ({
+      id: r.id,
+      attempt: i + 1,
+      status: r.status,
+      signerEmail: r.signer_email ?? null,
+      sentAt: r.created_at ?? null,
+      expiresAt: r.expires_at ?? null,
+      expired: r.status !== 'signed' && !!r.expires_at && new Date(r.expires_at) < new Date(),
+    }));
+  },
+
   create: async (data) => {
     // Server-side contract-number generation (avoids client-side race).
     const contractNumber = unwrap(await supabase.rpc('next_contract_number'));

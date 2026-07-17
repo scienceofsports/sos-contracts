@@ -9,6 +9,24 @@ export function Badge({ status }) {
   return <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium capitalize ${s.bg} ${s.text}`}>{status ? status.replace('_',' ') : '—'}</span>;
 }
 
+// How many signing links have been issued for a contract. Counts from 1, so a
+// blank chip always means "never sent" and the number always means "links
+// issued". Stays quiet at 1× (normal) and warms up from the 2nd link on —
+// a club on its 3rd link is a different conversation from a fresh send.
+export function SendCountChip({ count }) {
+  const n = Number(count) || 0;
+  if (n < 1) return null;
+  const tone = n >= 3 ? 'bg-red-50 text-red-600'
+    : n === 2 ? 'bg-amber-50 text-amber-700'
+    : 'bg-slate-100 text-slate-500';
+  return (
+    <span
+      title={`${n} signing link${n === 1 ? '' : 's'} issued for this contract`}
+      className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-data font-medium ${tone}`}
+    >{n}×</span>
+  );
+}
+
 export function Skeleton({ className }) {
   return <div className={`skeleton rounded ${className||'h-4 w-full'}`}></div>;
 }

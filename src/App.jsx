@@ -38,6 +38,7 @@ import {
   effectiveStatus,
   daysOverdue,
   effectiveContractStatus,
+  SIGNING_LINK_DAYS,
   agingBucket,
   AGING_LABELS,
   toCSV,
@@ -57,6 +58,7 @@ import { ToastProvider, useToast } from './context/ToastContext.jsx';
 import { AuthProvider, useAuth } from './context/AuthContext.jsx';
 import {
   Badge,
+  SendCountChip,
   Skeleton,
   EmptyState,
   Modal,
@@ -775,6 +777,16 @@ function ContractsList({ navigate, filterStatus }) {
   // Column sort: click a header to sort by it; click again to flip direction.
   const [sort, setSort] = useState({ key: 'number', dir: 'asc' });
   const toggleSort = (key) => setSort(s => s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' });
+  // Signing links issued per contract, so a chased deal is visible at a glance.
+  // One query for the whole list; failure is non-fatal (the chip just hides).
+  const [sendCounts, setSendCounts] = useState({});
+  useEffect(() => {
+    let alive = true;
+    contractService.getSendCounts()
+      .then(counts => { if (alive) setSendCounts(counts); })
+      .catch(() => { /* chip is additive — never block the list on it */ });
+    return () => { alive = false; };
+  }, []);
 
   if (!contracts) return <div className="p-6 space-y-3">{[1,2,3,4].map(i=><Skeleton key={i} className="h-14 w-full" />)}</div>;
   const clientMap = Object.fromEntries(clients.map(c => [c.id, c]));
@@ -847,7 +859,12 @@ function ContractsList({ navigate, filterStatus }) {
                   <td className="py-3 px-4">{c.title}</td>
                   <td className="py-3 px-4">{clientMap[c.clientId]?.companyName || '—'}</td>
                   <td className="py-3 px-4 font-data">{fmtMoney(c.value, c.currency)}</td>
-                  <td className="py-3 px-4"><Badge status={effectiveContractStatus(c)} /></td>
+                  <td className="py-3 px-4">
+                    <div className="flex items-center gap-1.5">
+                      <Badge status={effectiveContractStatus(c)} />
+                      <SendCountChip count={sendCounts[c.id]} />
+                    </div>
+                  </td>
                   <td className="py-3 px-4">{c.startDate ? fmtDate(c.startDate) : '—'}</td>
                   <td className="py-3 px-4">{c.endDate ? fmtDate(c.endDate) : '—'}</td>
                 </tr>
@@ -1841,11 +1858,17 @@ function ContractDetail({ contractId, navigate }) {
   // editing; a string = the in-progress value. Reporting figure only.
   const [editingAnnual, setEditingAnnual] = useState(null);
   const [savingAnnual, setSavingAnnual] = useState(false);
+  // Every signing link ever issued for this contract, oldest first — the paper
+  // trail behind the send-count chip. Reloaded by load(), so a resend shows up.
+  const [signingLinks, setSigningLinks] = useState([]);
 
   const load = useCallback(async () => {
     const c = await contractService.getById(contractId);
     setContract(c);
     if (c) setClient(await clientService.getById(c.clientId));
+    // Additive history — never let a failure here blank the contract page.
+    try { setSigningLinks(await contractService.getSigningLinks(contractId)); }
+    catch (e) { setSigningLinks([]); }
     // Load the Certificate of Completion if the contract has been signed.
     if (c && c.signedAt) {
       try { setCertificate(await contractService.getCertificate(contractId)); }
@@ -2012,7 +2035,8 @@ function ContractDetail({ contractId, navigate }) {
           <div className="text-sm text-slate-400 font-data mt-1">{contract.contractNumber} · v{contract.version}</div>
         </div>
         <div className="flex items-center gap-2">
-          <Badge status={contract.status} />
+          <Badge status={effectiveContractStatus(contract)} />
+          <SendCountChip count={signingLinks.length} />
         </div>
       </div>
 
@@ -2045,6 +2069,57 @@ function ContractDetail({ contractId, navigate }) {
             <p className="text-[11px] text-amber-600 mt-1.5">The link is unique to this client and asks them to verify their email before signing.{!signLink && ' Generating it here also re-emails the link to the client.'}</p>
           </div>
           <p className="text-xs text-amber-600 mt-3">Sent to the wrong address? Update the client's email under Clients, then use “Resend / New link” above.</p>
+        </div>
+      )}
+
+      {/* Signing-link history — the paper trail behind the send-count chip.
+          Shows every link issued, when it was sent, and what became of it, so a
+          count that looks high can always be traced back to real sends. */}
+      {auth.isAdmin && signingLinks.length > 0 && (
+        <div className="bg-white rounded-xl border border-[var(--border)] p-5 mb-6 no-print">
+          <div className="flex items-center gap-2 mb-1">
+            <div className="font-heading text-base text-[var(--navy-deep)]">Signing links issued</div>
+            <SendCountChip count={signingLinks.length} />
+          </div>
+          <p className="text-xs text-slate-500 mb-4">
+            Each row is one link emailed to the client. Links stay valid for {SIGNING_LINK_DAYS} days.
+            {signingLinks.length > 1 && ' Only the newest link works — issuing a new one supersedes the previous.'}
+          </p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-slate-400 border-b border-[var(--border)]">
+                  <th className="py-2 pr-4 font-medium">#</th>
+                  <th className="py-2 pr-4 font-medium">Sent</th>
+                  <th className="py-2 pr-4 font-medium">To</th>
+                  <th className="py-2 pr-4 font-medium">Outcome</th>
+                </tr>
+              </thead>
+              <tbody>
+                {signingLinks.map((l, i) => {
+                  const isLatest = i === signingLinks.length - 1;
+                  const outcome = l.status === 'signed' ? { label: 'Signed', cls: 'text-emerald-600' }
+                    : l.status === 'declined' ? { label: 'Declined', cls: 'text-red-600' }
+                    : l.status === 'cancelled' ? { label: 'Cancelled', cls: 'text-slate-400' }
+                    : l.expired ? { label: `Expired ${l.expiresAt ? fmtDate(l.expiresAt) : ''}`.trim(), cls: 'text-red-500' }
+                    : isLatest ? { label: `Live — expires ${l.expiresAt ? fmtDate(l.expiresAt) : '—'}`, cls: 'text-amber-600' }
+                    : { label: 'Superseded', cls: 'text-slate-400' };
+                  return (
+                    <tr key={l.id} className="border-b border-[var(--border)] last:border-0">
+                      <td className="py-2.5 pr-4 font-data text-xs text-slate-400">{l.attempt}</td>
+                      <td className="py-2.5 pr-4 whitespace-nowrap">{l.sentAt ? fmtDateTime(l.sentAt) : '—'}</td>
+                      <td className="py-2.5 pr-4 text-slate-500">{l.signerEmail || '—'}</td>
+                      <td className={`py-2.5 pr-4 font-medium whitespace-nowrap ${outcome.cls}`}>{outcome.label}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-[11px] text-slate-400 mt-3">
+            “Copy signing link” also issues a link when one isn’t already open on this page, so a count can be
+            higher than the number of deliberate resends.
+          </p>
         </div>
       )}
 
