@@ -386,9 +386,16 @@ export function vatSummary(contract, fm, client) {
 
   const applies = vat > 0.005;
   const ratePct = rate ? Math.round(rate * 100) : 19;
+  // `net`/`vat`/`gross` are exposed so every renderer can show a reconciling
+  // Total-Contract-Value block on the SAME net basis: the headline value is
+  // always NET (ex-VAT), with VAT and the gross total shown as their own rows.
+  // This is the fix for the old contradiction where the Scope table printed the
+  // gross as "Total Contract Value" while the Fees sentence called the very same
+  // number "(exclusive of VAT)". net = contract.value everywhere now.
   if (applies) {
     return {
       applies: true,
+      net, vat, gross, ratePct,
       sentence: `The above amount is exclusive of VAT. VAT at ${ratePct}% (${fm(vat)}) applies, giving a total amount payable of ${fm(gross)}.`,
       amountLabel: 'Amount (incl. VAT)',
       note: '',
@@ -398,7 +405,8 @@ export function vatSummary(contract, fm, client) {
   let noteText = '';
   if (country && EU.includes(country) && country !== 'CY' && hasVatNo) noteText = 'The VAT reverse-charge mechanism applies (Article 196, EU VAT Directive); the Client shall self-account for VAT.';
   else if (country && !EU.includes(country)) noteText = 'This supply is outside the scope of Cyprus VAT.';
-  return { applies: false, sentence: noteText, amountLabel: 'Amount', note: noteText };
+  // No VAT: net === gross, vat 0. Renderers show a single Total row.
+  return { applies: false, net, vat: 0, gross: net, ratePct, sentence: noteText, amountLabel: 'Amount', note: noteText };
 }
 
 // Build a short SLA bullet that respects per-team SLA bands (not just the single

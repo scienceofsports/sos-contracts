@@ -2681,6 +2681,11 @@ function ContractDocumentBody({ contract, client, company }) {
                 // basis deals keep their real per-line prices.
                 const pf = isPlayerFunded(contract);
                 const anchorKey = lineItems.some(i => i.key === 'platform_access') ? 'platform_access' : (lineItems[0]?.key);
+                // Net/VAT/gross for the reconciling total block. `vs.net` is the
+                // headline value on the NET basis (equals contract.value for a
+                // normal deal; the backed-out net for a VAT-inclusive one), so the
+                // Scope total and the Fees sentence below can never disagree again.
+                const svs = vatSummary(contract, (a) => fmtMoney(a, contract.currency), client);
                 const rowAmount = (i) => {
                   if (!pf) {
                     return i.included
@@ -2691,7 +2696,7 @@ function ContractDocumentBody({ contract, client, company }) {
                   }
                   // player-funded: the anchor line carries the full value; rest Included
                   return i.key === anchorKey
-                    ? fmtMoney(contract.value, contract.currency)
+                    ? fmtMoney(svs.net, contract.currency)
                     : <span className="text-emerald-600">Included</span>;
                 };
                 return (
@@ -2724,9 +2729,21 @@ function ContractDocumentBody({ contract, client, company }) {
                         </tr>
                       ))}
                       <tr style={{ borderTop:'2px solid var(--navy-deep)' }}>
-                        <td className="py-3 px-3 font-semibold" style={{ color:'var(--navy-deep)' }}>Total Contract Value</td>
-                        <td className="py-3 px-3 text-right font-data font-bold" style={{ color:'var(--navy-deep)' }}>{fmtMoney(contract.value, contract.currency)}</td>
+                        <td className={`py-3 px-3 font-semibold ${svs.applies ? '' : ''}`} style={{ color:'var(--navy-deep)' }}>{svs.applies ? 'Total Contract Value (excl. VAT)' : 'Total Contract Value'}</td>
+                        <td className="py-3 px-3 text-right font-data font-bold" style={{ color:'var(--navy-deep)' }}>{fmtMoney(svs.net, contract.currency)}</td>
                       </tr>
+                      {svs.applies && (
+                        <React.Fragment>
+                          <tr>
+                            <td className="py-2 px-3 text-slate-600">VAT ({svs.ratePct}%)</td>
+                            <td className="py-2 px-3 text-right font-data text-slate-600">{fmtMoney(svs.vat, contract.currency)}</td>
+                          </tr>
+                          <tr style={{ borderTop:'1px solid var(--navy-deep)' }}>
+                            <td className="py-3 px-3 font-bold" style={{ color:'var(--navy-deep)' }}>Total incl. VAT</td>
+                            <td className="py-3 px-3 text-right font-data font-bold" style={{ color:'var(--navy-deep)' }}>{fmtMoney(svs.gross, contract.currency)}</td>
+                          </tr>
+                        </React.Fragment>
+                      )}
                     </tbody>
                   </table>
                 </React.Fragment>
@@ -2750,7 +2767,7 @@ function ContractDocumentBody({ contract, client, company }) {
               {(() => { const vs = vatSummary(contract, (a) => fmtMoney(a, contract.currency), client); return (
               <React.Fragment>
               <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{feesNum}.</span> Fees & Payment</div>
-              <p className="text-sm text-slate-700 mb-2">In consideration of the services provided under this Agreement, the Client shall pay the Service Provider a total of <strong>{fmtMoney(contract.value, contract.currency)}</strong>{vs.applies ? ' (exclusive of VAT)' : ''}, payable <strong>{contract.paymentType === 'one_time' ? 'in a single payment' : contract.paymentType === 'milestone' ? 'in instalments' : contract.paymentType.replace('_',' ')}</strong>, net {contract.paymentTermsDays} days from the date of a valid invoice.</p>
+              <p className="text-sm text-slate-700 mb-2">In consideration of the services provided under this Agreement, the Client shall pay the Service Provider a total of <strong>{fmtMoney(vs.net, contract.currency)}</strong>{vs.applies ? ' (exclusive of VAT)' : ''}, payable <strong>{contract.paymentType === 'one_time' ? 'in a single payment' : contract.paymentType === 'milestone' ? 'in instalments' : contract.paymentType.replace('_',' ')}</strong>, net {contract.paymentTermsDays} days from the date of a valid invoice.</p>
               {vs.sentence && <p className="text-sm text-slate-700 mb-2">{vs.sentence}</p>}
               {Array.isArray(contract.payments) && contract.payments.length > 1 && (
                 <table className="w-full text-sm mb-4 border-collapse">

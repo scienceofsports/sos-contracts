@@ -540,6 +540,9 @@ export function generateContractPdf({ contract, client, company }) {
 
     const pf = isPlayerFunded(contract);
     const anchorKey = lineItems.some((i) => i.key === 'platform_access') ? 'platform_access' : (lineItems[0] && lineItems[0].key);
+    // Net/VAT/gross on the NET basis, so this total block reconciles with the
+    // Fees sentence below (see vatSummary). vs.net is the headline value.
+    const scopeVs = vatSummary(contract, (a) => fmtMoney(a, contract.currency), client);
 
     const qtyColW = 90;                       // right column width for QTY
     const svcColW = maxW - qtyColW;
@@ -612,7 +615,7 @@ export function generateContractPdf({ contract, client, company }) {
         // Player-funded: anchor line carries the whole contract value; rest Included.
         if (i.key === anchorKey) {
           doc.setFont('helvetica', 'normal'); doc.setTextColor(...BLACK);
-          doc.text(fmtMoney(contract.value, contract.currency), rightX, amtBaseline, { align: 'right' });
+          doc.text(fmtMoney(scopeVs.net, contract.currency), rightX, amtBaseline, { align: 'right' });
         } else {
           doc.setFont('helvetica', 'bold'); doc.setTextColor(16, 150, 105);
           doc.text('Included', rightX, amtBaseline, { align: 'right' });
@@ -644,8 +647,10 @@ export function generateContractPdf({ contract, client, company }) {
       doc.line(M, y, W - M, y);
     });
 
-    // Total row: heavier top rule + navy bold total.
-    ensure(24);
+    // Total row(s): heavier top rule + navy bold total. On the NET basis: the
+    // headline is NET (ex-VAT); when VAT applies, VAT and the gross total follow
+    // as their own rows so the figures reconcile with the Fees sentence.
+    ensure(scopeVs.applies ? 52 : 24);
     doc.setDrawColor(...NAVY);
     doc.setLineWidth(1);
     doc.line(M, y, W - M, y);
@@ -653,9 +658,26 @@ export function generateContractPdf({ contract, client, company }) {
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(10.5);
     doc.setTextColor(...NAVY);
-    doc.text('Total Contract Value', M + cellPadX, y);
-    doc.text(fmtMoney(contract.value, contract.currency), W - M - cellPadX, y, { align: 'right' });
+    doc.text(scopeVs.applies ? 'Total Contract Value (excl. VAT)' : 'Total Contract Value', M + cellPadX, y);
+    doc.text(fmtMoney(scopeVs.net, contract.currency), W - M - cellPadX, y, { align: 'right' });
     y += 12;
+    if (scopeVs.applies) {
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9.5);
+      doc.setTextColor(90, 100, 110);
+      doc.text(`VAT (${scopeVs.ratePct}%)`, M + cellPadX, y);
+      doc.text(fmtMoney(scopeVs.vat, contract.currency), W - M - cellPadX, y, { align: 'right' });
+      y += 13;
+      doc.setDrawColor(...NAVY);
+      doc.setLineWidth(0.6);
+      doc.line(M, y - 9, W - M, y - 9);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10.5);
+      doc.setTextColor(...NAVY);
+      doc.text('Total incl. VAT', M + cellPadX, y);
+      doc.text(fmtMoney(scopeVs.gross, contract.currency), W - M - cellPadX, y, { align: 'right' });
+      y += 12;
+    }
   }
 
   // --- Scope of Analysis ---------------------------------------------------
@@ -686,7 +708,7 @@ export function generateContractPdf({ contract, client, company }) {
     ensure(40);
     pillHeader(feesNum, 'Fees & Payment');
     const vs = vatSummary(contract, (a) => fmtMoney(a, contract.currency), client);
-    text(`In consideration of the services provided under this Agreement, the Client shall pay the Service Provider a total of ${fmtMoney(contract.value, contract.currency)}${vs.applies ? ' (exclusive of VAT)' : ''}, payable ${payWord}, net ${contract.paymentTermsDays} days from the date of a valid invoice.`, { size: 10, gap: vs.sentence ? 3 : 6 });
+    text(`In consideration of the services provided under this Agreement, the Client shall pay the Service Provider a total of ${fmtMoney(vs.net, contract.currency)}${vs.applies ? ' (exclusive of VAT)' : ''}, payable ${payWord}, net ${contract.paymentTermsDays} days from the date of a valid invoice.`, { size: 10, gap: vs.sentence ? 3 : 6 });
     if (vs.sentence) text(vs.sentence, { size: 10, gap: 6 });
     // Instalment schedule table (only when more than one payment).
     const pays = Array.isArray(contract.payments) ? contract.payments : [];

@@ -121,7 +121,7 @@ function computeServiceLineItems(services: Any): Array<Any> {
 
 // Port of vatSummary — derive net/VAT/gross from payment rows. Keep in sync
 // with src/lib/constants.js.
-function vatSummary(contract: Any, fm: (a: Any) => string, client?: Any): { applies: boolean; sentence: string; amountLabel: string; note: string } {
+function vatSummary(contract: Any, fm: (a: Any) => string, client?: Any): { applies: boolean; net: number; vat: number; gross: number; ratePct: number; sentence: string; amountLabel: string; note: string } {
   const EU = ['AT','BE','BG','HR','CY','CZ','DK','EE','FI','FR','DE','GR','HU','IE','IT','LV','LT','LU','MT','NL','PL','PT','RO','SK','SI','ES','SE'];
   const country = client?.country || contract?.client?.country || contract?.clientCountry || null;
   const hasVatNo = client?.vatNumber || client?.vat_number || contract?.client?.vatNumber || contract?.clientVatNumber || null;
@@ -154,13 +154,15 @@ function vatSummary(contract: Any, fm: (a: Any) => string, client?: Any): { appl
 
   const applies = vat > 0.005;
   const ratePct = rate ? Math.round(rate * 100) : 19;
+  // net/vat/gross exposed so the Scope total block renders on the NET basis and
+  // reconciles with the Fees sentence (keep in sync with src/lib/constants.js).
   if (applies) {
-    return { applies: true, sentence: `The above amount is exclusive of VAT. VAT at ${ratePct}% (${fm(vat)}) applies, giving a total amount payable of ${fm(gross)}.`, amountLabel: 'Amount (incl. VAT)', note: '' };
+    return { applies: true, net, vat, gross, ratePct, sentence: `The above amount is exclusive of VAT. VAT at ${ratePct}% (${fm(vat)}) applies, giving a total amount payable of ${fm(gross)}.`, amountLabel: 'Amount (incl. VAT)', note: '' };
   }
   let noteText = '';
   if (country && EU.includes(country) && country !== 'CY' && hasVatNo) noteText = 'The VAT reverse-charge mechanism applies (Article 196, EU VAT Directive); the Client shall self-account for VAT.';
   else if (country && !EU.includes(country)) noteText = 'This supply is outside the scope of Cyprus VAT.';
-  return { applies: false, sentence: noteText, amountLabel: 'Amount', note: noteText };
+  return { applies: false, net, vat: 0, gross: net, ratePct, sentence: noteText, amountLabel: 'Amount', note: noteText };
 }
 
 const UNLIMITED_SEATS = -1;
@@ -842,6 +844,9 @@ export async function buildContractPdf(input: {
   const pf = ((c?.billingBasis ?? c?.billing_basis) === 'player_funded')
     || svcModel === 'players_all' || svcModel === 'club_players';
   const anchorKey = lineItems.some((i: Any) => i.key === 'platform_access') ? 'platform_access' : (lineItems[0] && lineItems[0].key);
+  // Net/VAT/gross on the NET basis so the Scope total reconciles with the Fees
+  // sentence. scopeVs.net is the headline value (keep in sync with the others).
+  const scopeVs = vatSummary(c, (a: Any) => fmtMoney(a, currency), cl);
 
   // Local word-wrap helper (pdf-lib has no splitText). Returns wrapped lines.
   const wrap = (str: string, f: Any, size: number, width: number): string[] => {
@@ -911,7 +916,7 @@ export async function buildContractPdf(input: {
       if (pf) {
         // Player-funded: anchor line carries the whole contract value; rest Included.
         if (i.key === anchorKey) {
-          const vStr = fmtMoney(value, currency);
+          const vStr = fmtMoney(scopeVs.net, currency);
           const pw = font.widthOfTextAtSize(vStr, 9.5);
           page.drawText(vStr, { x: rightX - pw, y: py(amtBaseline), size: 9.5, font, color: BLACK });
         } else {
@@ -939,15 +944,31 @@ export async function buildContractPdf(input: {
       page.drawLine({ start: { x: M, y: py(y) }, end: { x: W - M, y: py(y) }, thickness: 0.5, color: rgb(0.862, 0.878, 0.902) });
     });
 
-    // Total row.
-    ensure(24);
+    // Total row(s). NET basis: headline is NET (ex-VAT); when VAT applies, VAT
+    // and the gross total follow so the figures reconcile with the Fees sentence.
+    ensure(scopeVs.applies ? 52 : 24);
     page.drawLine({ start: { x: M, y: py(y) }, end: { x: W - M, y: py(y) }, thickness: 1, color: NAVY });
     y += 15;
-    page.drawText('Total Contract Value', { x: M + cellPadX, y: py(y), size: 10.5, font: bold, color: NAVY });
-    const totalStr = fmtMoney(value, currency);
+    const netLabel = scopeVs.applies ? 'Total Contract Value (excl. VAT)' : 'Total Contract Value';
+    page.drawText(netLabel, { x: M + cellPadX, y: py(y), size: 10.5, font: bold, color: NAVY });
+    const totalStr = fmtMoney(scopeVs.net, currency);
     const totalW2 = bold.widthOfTextAtSize(totalStr, 10.5);
     page.drawText(totalStr, { x: W - M - cellPadX - totalW2, y: py(y), size: 10.5, font: bold, color: NAVY });
     y += 12;
+    if (scopeVs.applies) {
+      const grey = rgb(0.353, 0.392, 0.431);
+      page.drawText(`VAT (${scopeVs.ratePct}%)`, { x: M + cellPadX, y: py(y), size: 9.5, font, color: grey });
+      const vatStr = fmtMoney(scopeVs.vat, currency);
+      const vatW = font.widthOfTextAtSize(vatStr, 9.5);
+      page.drawText(vatStr, { x: W - M - cellPadX - vatW, y: py(y), size: 9.5, font, color: grey });
+      y += 13;
+      page.drawLine({ start: { x: M, y: py(y - 9) }, end: { x: W - M, y: py(y - 9) }, thickness: 0.6, color: NAVY });
+      page.drawText('Total incl. VAT', { x: M + cellPadX, y: py(y), size: 10.5, font: bold, color: NAVY });
+      const grossStr = fmtMoney(scopeVs.gross, currency);
+      const grossW = bold.widthOfTextAtSize(grossStr, 10.5);
+      page.drawText(grossStr, { x: W - M - cellPadX - grossW, y: py(y), size: 10.5, font: bold, color: NAVY });
+      y += 12;
+    }
   }
 
   // --- Scope of Analysis ---------------------------------------------------
@@ -971,7 +992,7 @@ export async function buildContractPdf(input: {
     ensure(40);
     pillHeader(feesNum, 'Fees & Payment');
     const vs = vatSummary(c, (a: Any) => fmtMoney(a, currency), cl);
-    text(`In consideration of the services provided under this Agreement, the Client shall pay the Service Provider a total of ${fmtMoney(value, currency)}${vs.applies ? ' (exclusive of VAT)' : ''}, payable ${paymentType}, net ${paymentTermsDays} days from the date of a valid invoice.`, { size: 10, gap: vs.sentence ? 3 : 6 });
+    text(`In consideration of the services provided under this Agreement, the Client shall pay the Service Provider a total of ${fmtMoney(vs.net, currency)}${vs.applies ? ' (exclusive of VAT)' : ''}, payable ${paymentType}, net ${paymentTermsDays} days from the date of a valid invoice.`, { size: 10, gap: vs.sentence ? 3 : 6 });
     if (vs.sentence) text(vs.sentence, { size: 10, gap: 6 });
     // Instalment schedule table (only when more than one payment).
     if (payments.length > 1) {
