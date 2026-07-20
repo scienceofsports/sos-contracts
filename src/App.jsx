@@ -18,6 +18,7 @@ import {
   commercialValue,
   isPlayerFunded,
   vatSplit,
+  playerFundedScopeRows,
   PAYMENT_MODEL_LABELS,
   SPECIAL_TERM_CLAUSES,
   parseSpecialTerms,
@@ -2580,7 +2581,7 @@ function ClientFillHint({ children }) {
 // Shared, presentational rendering of the full contract document body.
 // Used by the admin ContractDocument view AND the client SigningFlow review
 // screen so both parties review EXACTLY the same legal document.
-function ContractDocumentBody({ contract, client, company }) {
+function ContractDocumentBody({ contract, client, company, showAdminWarnings = false }) {
   const lineItems = contract.services ? computeServiceLineItems(contract.services) : [];
   const termYears = contract.startDate && contract.endDate ? Math.max(1, Math.round(daysBetween(contract.startDate, contract.endDate)/365)) : null;
   // Client country as readable prose: admin stores an ISO code ("CY") for VAT;
@@ -2740,14 +2741,13 @@ function ContractDocumentBody({ contract, client, company }) {
               )}
 
               {scopeNum && (() => {
-                // Player-funded / Shared: the contract value comes from the funding
-                // model, NOT the sum of service prices. To avoid double-counting, the
-                // platform-access line CARRIES the whole contract value (auto-filled
-                // from Commercial & Payment) and every other service shows "Included".
-                // The Total then equals the platform line = contract.value. Services-
-                // basis deals keep their real per-line prices.
+                // Player-funded / Shared: itemise the deal so a club sees what it
+                // pays for — each PRICED service at its real price (these ARE the
+                // club-fee portion), plus a single "Player-funded contribution"
+                // line (value − club fee, VAT-free). Services-basis deals keep
+                // their existing per-line rendering. See playerFundedScopeRows.
                 const pf = isPlayerFunded(contract);
-                const anchorKey = lineItems.some(i => i.key === 'platform_access') ? 'platform_access' : (lineItems[0]?.key);
+                const pfRows = playerFundedScopeRows(contract, lineItems);
                 // Net/VAT/gross for the reconciling total block. `vs.net` is the
                 // headline value on the NET basis (equals contract.value for a
                 // normal deal; the backed-out net for a VAT-inclusive one), so the
@@ -2761,9 +2761,10 @@ function ContractDocumentBody({ contract, client, company }) {
                           : <span className="text-emerald-600">Included</span>)
                       : fmtMoney(i.listPrice, contract.currency);
                   }
-                  // player-funded: the anchor line carries the full value; rest Included
-                  return i.key === anchorKey
-                    ? fmtMoney(svs.net, contract.currency)
+                  // player-funded: each PRICED service shows its real price; zero-
+                  // priced catalogue items remain "Included" deliverables.
+                  return Number(i.listPrice) > 0
+                    ? fmtMoney(i.listPrice, contract.currency)
                     : <span className="text-emerald-600">Included</span>;
                 };
                 return (
@@ -2795,6 +2796,14 @@ function ContractDocumentBody({ contract, client, company }) {
                           </td>
                         </tr>
                       ))}
+                      {/* Player-funded contribution — the net player portion, a
+                          separate VAT-free line so the club sees it distinctly. */}
+                      {pf && pfRows?.playerLine && (
+                        <tr className="border-b border-[var(--border)]">
+                          <td className="py-2 px-3">{pfRows.playerLine.label}</td>
+                          <td className="py-2 px-3 text-right font-data whitespace-nowrap">{fmtMoney(pfRows.playerLine.amount, contract.currency)}</td>
+                        </tr>
+                      )}
                       <tr style={{ borderTop:'2px solid var(--navy-deep)' }}>
                         <td className={`py-3 px-3 font-semibold ${svs.applies ? '' : ''}`} style={{ color:'var(--navy-deep)' }}>{svs.applies ? 'Total Contract Value (excl. VAT)' : 'Total Contract Value'}</td>
                         <td className="py-3 px-3 text-right font-data font-bold" style={{ color:'var(--navy-deep)' }}>{fmtMoney(svs.net, contract.currency)}</td>
@@ -2813,6 +2822,14 @@ function ContractDocumentBody({ contract, client, company }) {
                       )}
                     </tbody>
                   </table>
+                  {/* Data-entry guard: if the priced services don't sum to the club
+                      fixed fee, the itemised table won't reconcile. Warn on the live
+                      admin render only (auth.isAdmin) — never on a client's document. */}
+                  {pf && pfRows && !pfRows.reconciles && showAdminWarnings && (
+                    <div className="no-print -mt-6 mb-8 text-xs rounded-lg border border-amber-200 bg-amber-50 text-amber-800 px-3 py-2">
+                      ⚠️ Priced services total {fmtMoney(pfRows.servicesSum, contract.currency)}, but the club fixed fee is {fmtMoney(pfRows.clubFee, contract.currency)}. Price the services so they sum to the club fee, or adjust the fee, so the itemised table reconciles.
+                    </div>
+                  )}
                 </React.Fragment>
                 );
               })()}
@@ -3099,7 +3116,7 @@ function ContractDocument({ contractId, navigate }) {
       )}
 
       <div className="bg-white rounded-xl border border-[var(--border)] p-10 overflow-hidden">
-        <ContractDocumentBody contract={contract} client={client} company={company} />
+        <ContractDocumentBody contract={contract} client={client} company={company} showAdminWarnings />
       </div>
     </div>
   );

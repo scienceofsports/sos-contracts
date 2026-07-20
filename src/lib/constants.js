@@ -317,6 +317,46 @@ export function vatSplit(contract) {
   return { vatableNet, exemptNet, isSplit: vatableNet > 0 && exemptNet > 0 };
 }
 
+// ITEMISED SCOPE ROWS for a player-funded / shared deal.
+// ---------------------------------------------------------------------------
+// Previously the Scope table dumped the WHOLE contract value onto the platform-
+// access line and marked every other service "Included" — which read as
+// "platform access costs €18,250". This helper instead itemises the deal so a
+// club sees what it's paying for:
+//   • each PRICED service at its real list price (these ARE the club fee portion)
+//   • a single "Player-funded contribution" line = value − club fee (net of the
+//     commission), which is VAT-free
+// The rows sum to the contract's net value. `reconciles` is false when the
+// priced services don't add up to the club fee (a data-entry mismatch the
+// document should warn about rather than silently mis-total).
+//
+// Returns { rows: [{label, amount, kind}], playerLine, servicesSum, clubFee,
+//           reconciles } — or null for a non-player-funded deal (caller keeps
+// its existing per-line rendering). `kind` is 'service' | 'player'.
+export function playerFundedScopeRows(contract, lineItems) {
+  if (!isPlayerFunded(contract)) return null;
+  const r2 = (n) => Math.round(n * 100) / 100;
+  const clubFee = r2(Number(contract?.clubFixedFee ?? contract?.club_fixed_fee) || 0);
+  const value = r2(Number(contract?.value) || 0);
+  // Priced services (real list price > 0) become the itemised club-fee lines;
+  // zero-priced catalogue items stay "Included" deliverables.
+  const items = Array.isArray(lineItems) ? lineItems : [];
+  const priced = items.filter(i => Number(i.listPrice) > 0);
+  const servicesSum = r2(priced.reduce((s, i) => s + Number(i.listPrice), 0));
+  // Player-funded contribution = whatever the value is beyond the club fee (i.e.
+  // the net player portion). For pure player-funded (no club fee) this is the
+  // whole value; for Shared it is value − clubFee.
+  const playerAmount = r2(value - clubFee);
+  return {
+    clubFee,
+    servicesSum,
+    playerLine: playerAmount > 0.005 ? { label: 'Player-funded contribution (net of commission)', amount: playerAmount, kind: 'player' } : null,
+    // Reconciles when the priced services sum to the club fee (within a cent).
+    // No priced services yet → not reconciled (nothing itemised to show).
+    reconciles: clubFee <= 0.005 ? true : Math.abs(servicesSum - clubFee) <= 0.01,
+  };
+}
+
 // Build the Commercial Terms clause parts from a contract + a money formatter
 // `fm(amount)`. Returns { intro, breakdown, commission } (any may be '').
 // The value is a PROJECTION from expected enrolment; player revenue is computed

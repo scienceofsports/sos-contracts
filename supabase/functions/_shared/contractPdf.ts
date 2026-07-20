@@ -855,7 +855,15 @@ export async function buildContractPdf(input: {
   const svcModel = (c?.paymentModel ?? c?.payment_model);
   const pf = ((c?.billingBasis ?? c?.billing_basis) === 'player_funded')
     || svcModel === 'players_all' || svcModel === 'club_players';
-  const anchorKey = lineItems.some((i: Any) => i.key === 'platform_access') ? 'platform_access' : (lineItems[0] && lineItems[0].key);
+  // Itemised player-funded scope: priced services + a player-funded contribution
+  // row (value − club fee, VAT-free). Local port of playerFundedScopeRows in
+  // src/lib/constants.js — keep in sync.
+  const r2pf = (n: number) => Math.round(n * 100) / 100;
+  const pfClubFee = r2pf(Number(c?.clubFixedFee ?? c?.club_fixed_fee) || 0);
+  const pfPlayerAmount = r2pf((Number(c?.value) || 0) - pfClubFee);
+  const pfPlayerLine = pf && pfPlayerAmount > 0.005
+    ? { label: 'Player-funded contribution (net of commission)', amount: pfPlayerAmount }
+    : null;
   // Net/VAT/gross on the NET basis so the Scope total reconciles with the Fees
   // sentence. scopeVs.net is the headline value (keep in sync with the others).
   const scopeVs = vatSummary(c, (a: Any) => fmtMoney(a, currency), cl);
@@ -926,9 +934,10 @@ export async function buildContractPdf(input: {
       const rightX = W - M - cellPadX;
       const amtBaseline = rowTop + 12;
       if (pf) {
-        // Player-funded: anchor line carries the whole contract value; rest Included.
-        if (i.key === anchorKey) {
-          const vStr = fmtMoney(scopeVs.net, currency);
+        // Player-funded: each PRICED service shows its real price; zero-priced
+        // catalogue items remain "Included". Player contribution added after loop.
+        if (Number(i.listPrice) > 0) {
+          const vStr = fmtMoney(i.listPrice, currency);
           const pw = font.widthOfTextAtSize(vStr, 9.5);
           page.drawText(vStr, { x: rightX - pw, y: py(amtBaseline), size: 9.5, font, color: BLACK });
         } else {
@@ -955,6 +964,18 @@ export async function buildContractPdf(input: {
       y = rowTop + rowH;
       page.drawLine({ start: { x: M, y: py(y) }, end: { x: W - M, y: py(y) }, thickness: 0.5, color: rgb(0.862, 0.878, 0.902) });
     });
+
+    // Player-funded contribution — the net player portion as its own VAT-free row.
+    if (pfPlayerLine) {
+      ensure(rowH);
+      const baseline = y + 12;
+      page.drawText(pfPlayerLine.label, { x: M + cellPadX, y: py(baseline), size: 9.5, font, color: BLACK });
+      const aStr = fmtMoney(pfPlayerLine.amount, currency);
+      const aw = font.widthOfTextAtSize(aStr, 9.5);
+      page.drawText(aStr, { x: W - M - cellPadX - aw, y: py(baseline), size: 9.5, font, color: BLACK });
+      y += rowH;
+      page.drawLine({ start: { x: M, y: py(y) }, end: { x: W - M, y: py(y) }, thickness: 0.5, color: rgb(0.862, 0.878, 0.902) });
+    }
 
     // Total row(s). NET basis: headline is NET (ex-VAT); when VAT applies, VAT
     // and the gross total follow so the figures reconcile with the Fees sentence.

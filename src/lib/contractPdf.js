@@ -22,7 +22,7 @@
    ========================================================================= */
 import { jsPDF } from 'jspdf';
 import { fmtDate, fmtMoney, daysBetween } from './format.js';
-import { computeServiceLineItems, platformSeatsSummary, SERVICE_GROUPS, analysisScopeText, seasonLabelFromDates, commercialModelText, parseSpecialTerms, serviceLevelsLines, vatSummary, clientPartyClause, isPlayerFunded } from './constants.js';
+import { computeServiceLineItems, platformSeatsSummary, SERVICE_GROUPS, analysisScopeText, seasonLabelFromDates, commercialModelText, parseSpecialTerms, serviceLevelsLines, vatSummary, clientPartyClause, isPlayerFunded, playerFundedScopeRows } from './constants.js';
 
 export function generateContractPdf({ contract, client, company }) {
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
@@ -539,7 +539,7 @@ export function generateContractPdf({ contract, client, company }) {
     pillHeader(scopeNum, 'Scope of Services');
 
     const pf = isPlayerFunded(contract);
-    const anchorKey = lineItems.some((i) => i.key === 'platform_access') ? 'platform_access' : (lineItems[0] && lineItems[0].key);
+    const pfRows = playerFundedScopeRows(contract, lineItems);
     // Net/VAT/gross on the NET basis, so this total block reconciles with the
     // Fees sentence below (see vatSummary). vs.net is the headline value.
     const scopeVs = vatSummary(contract, (a) => fmtMoney(a, contract.currency), client);
@@ -612,10 +612,12 @@ export function generateContractPdf({ contract, client, company }) {
       const rightX = W - M - cellPadX;
       doc.setFontSize(9.5);
       if (pf) {
-        // Player-funded: anchor line carries the whole contract value; rest Included.
-        if (i.key === anchorKey) {
+        // Player-funded: each PRICED service shows its real price; zero-priced
+        // catalogue items remain "Included" deliverables. The player-funded
+        // contribution is added as its own row after the loop.
+        if (Number(i.listPrice) > 0) {
           doc.setFont('helvetica', 'normal'); doc.setTextColor(...BLACK);
-          doc.text(fmtMoney(scopeVs.net, contract.currency), rightX, amtBaseline, { align: 'right' });
+          doc.text(fmtMoney(i.listPrice, contract.currency), rightX, amtBaseline, { align: 'right' });
         } else {
           doc.setFont('helvetica', 'bold'); doc.setTextColor(16, 150, 105);
           doc.text('Included', rightX, amtBaseline, { align: 'right' });
@@ -646,6 +648,17 @@ export function generateContractPdf({ contract, client, company }) {
       doc.setLineWidth(0.5);
       doc.line(M, y, W - M, y);
     });
+
+    // Player-funded contribution — the net player portion as its own VAT-free row.
+    if (pf && pfRows?.playerLine) {
+      ensure(rowH);
+      const baseline = y + 12;
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); doc.setTextColor(...BLACK);
+      doc.text(pfRows.playerLine.label, M + cellPadX, baseline);
+      doc.text(fmtMoney(pfRows.playerLine.amount, contract.currency), W - M - cellPadX, baseline, { align: 'right' });
+      y += rowH;
+      doc.setDrawColor(220, 224, 230); doc.setLineWidth(0.5); doc.line(M, y, W - M, y);
+    }
 
     // Total row(s): heavier top rule + navy bold total. On the NET basis: the
     // headline is NET (ex-VAT); when VAT applies, VAT and the gross total follow
