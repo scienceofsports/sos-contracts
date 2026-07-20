@@ -2747,7 +2747,7 @@ function ContractDocumentBody({ contract, client, company, showAdminWarnings = f
                 // line (value − club fee, VAT-free). Services-basis deals keep
                 // their existing per-line rendering. See playerFundedScopeRows.
                 const pf = isPlayerFunded(contract);
-                const pfRows = playerFundedScopeRows(contract, lineItems);
+                const pfRows = playerFundedScopeRows(contract, lineItems, (a) => fmtMoney(a, contract.currency));
                 // Net/VAT/gross for the reconciling total block. `vs.net` is the
                 // headline value on the NET basis (equals contract.value for a
                 // normal deal; the backed-out net for a VAT-inclusive one), so the

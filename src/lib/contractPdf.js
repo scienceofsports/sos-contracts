@@ -539,7 +539,7 @@ export function generateContractPdf({ contract, client, company }) {
     pillHeader(scopeNum, 'Scope of Services');
 
     const pf = isPlayerFunded(contract);
-    const pfRows = playerFundedScopeRows(contract, lineItems);
+    const pfRows = playerFundedScopeRows(contract, lineItems, (a) => fmtMoney(a, contract.currency));
     // Net/VAT/gross on the NET basis, so this total block reconciles with the
     // Fees sentence below (see vatSummary). vs.net is the headline value.
     const scopeVs = vatSummary(contract, (a) => fmtMoney(a, contract.currency), client);

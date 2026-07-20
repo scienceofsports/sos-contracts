@@ -861,8 +861,20 @@ export async function buildContractPdf(input: {
   const r2pf = (n: number) => Math.round(n * 100) / 100;
   const pfClubFee = r2pf(Number(c?.clubFixedFee ?? c?.club_fixed_fee) || 0);
   const pfPlayerAmount = r2pf((Number(c?.value) || 0) - pfClubFee);
+  // Spell out the derivation (players × fee × months, less commission %) when the
+  // inputs are set — keep in sync with playerFundedScopeRows in constants.js.
+  const pfMin = Number(c?.minPlayers ?? c?.min_players) || 0;
+  const pfFee = Number(c?.playerMonthlyFee ?? c?.player_monthly_fee) || 0;
+  const pfMonths = Number(c?.playerMonths ?? c?.player_months) || 0;
+  const pfRawPct = c?.kickbackPct ?? c?.kickback_pct;
+  const pfPct = (pfRawPct === '' || pfRawPct == null) ? 25 : Number(pfRawPct) || 0;
+  let pfLabel = 'Player-funded contribution (net of commission)';
+  if (pfMin > 0 && pfFee > 0 && pfMonths > 0) {
+    const commStr = pfPct > 0 ? `, less ${pfPct}% commission` : '';
+    pfLabel = `Player-funded contribution (${pfMin} × ${fmtMoney(pfFee, currency)} × ${pfMonths} months${commStr})`;
+  }
   const pfPlayerLine = pf && pfPlayerAmount > 0.005
-    ? { label: 'Player-funded contribution (net of commission)', amount: pfPlayerAmount }
+    ? { label: pfLabel, amount: pfPlayerAmount }
     : null;
   // Net/VAT/gross on the NET basis so the Scope total reconciles with the Fees
   // sentence. scopeVs.net is the headline value (keep in sync with the others).

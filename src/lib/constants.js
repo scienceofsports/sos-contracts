@@ -333,7 +333,11 @@ export function vatSplit(contract) {
 // Returns { rows: [{label, amount, kind}], playerLine, servicesSum, clubFee,
 //           reconciles } — or null for a non-player-funded deal (caller keeps
 // its existing per-line rendering). `kind` is 'service' | 'player'.
-export function playerFundedScopeRows(contract, lineItems) {
+// `fm` (optional) is a money formatter; when given, the player line spells out
+// the derivation — e.g. "Player-funded contribution (100 × €10 × 11 months, less
+// 25% commission)" — so the club sees where the amount comes from rather than a
+// bare figure. Falls back to a plain label when the player inputs aren't all set.
+export function playerFundedScopeRows(contract, lineItems, fm) {
   if (!isPlayerFunded(contract)) return null;
   const r2 = (n) => Math.round(n * 100) / 100;
   const clubFee = r2(Number(contract?.clubFixedFee ?? contract?.club_fixed_fee) || 0);
@@ -347,10 +351,23 @@ export function playerFundedScopeRows(contract, lineItems) {
   // the net player portion). For pure player-funded (no club fee) this is the
   // whole value; for Shared it is value − clubFee.
   const playerAmount = r2(value - clubFee);
+  // Spell out the derivation when we have the inputs: players × fee × months,
+  // less the commission %. Only show the parts that are actually set.
+  const minPlayers = Number(contract?.minPlayers ?? contract?.min_players) || 0;
+  const fee = Number(contract?.playerMonthlyFee ?? contract?.player_monthly_fee) || 0;
+  const months = Number(contract?.playerMonths ?? contract?.player_months) || 0;
+  const rawPct = contract?.kickbackPct ?? contract?.kickback_pct;
+  const pct = (rawPct === '' || rawPct == null) ? DEFAULT_KICKBACK_PCT : Number(rawPct) || 0;
+  const money = typeof fm === 'function' ? fm : (a) => String(a);
+  let label = 'Player-funded contribution (net of commission)';
+  if (minPlayers > 0 && fee > 0 && months > 0) {
+    const commStr = pct > 0 ? `, less ${pct}% commission` : '';
+    label = `Player-funded contribution (${minPlayers} × ${money(fee)} × ${months} months${commStr})`;
+  }
   return {
     clubFee,
     servicesSum,
-    playerLine: playerAmount > 0.005 ? { label: 'Player-funded contribution (net of commission)', amount: playerAmount, kind: 'player' } : null,
+    playerLine: playerAmount > 0.005 ? { label, amount: playerAmount, kind: 'player' } : null,
     // Reconciles when the priced services sum to the club fee (within a cent).
     // No priced services yet → not reconciled (nothing itemised to show).
     reconciles: clubFee <= 0.005 ? true : Math.abs(servicesSum - clubFee) <= 0.01,
