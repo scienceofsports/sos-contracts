@@ -17,6 +17,7 @@ import {
   commercialModelText,
   commercialValue,
   isPlayerFunded,
+  vatSplit,
   PAYMENT_MODEL_LABELS,
   SPECIAL_TERM_CLAUSES,
   parseSpecialTerms,
@@ -431,12 +432,20 @@ function Dashboard({ navigate }) {
      "Committed/agreed" for operational figures (SLA, cameras) = signed + active
      only — a draft creates no delivery obligation. Revenue is shown per tier. */
   const netAnnualised = (c) => {
-    // Annual run-rate, net of VAT. netFactor backs VAT out of a gross value; a
-    // net (ex-VAT) value is unchanged. Mirrors the board's "income is net" rule.
+    // Annual run-rate, net of VAT. For a VAT-inclusive deal we back VAT out of
+    // the gross; a net (ex-VAT) value is unchanged. On a player-funded / shared
+    // deal only the club fixed fee carries VAT, so back it out of the vatable
+    // portion only (the player-funded remainder is already VAT-free).
     const annual = annualisedValue(c);
     const client = clientMap[c.clientId];
-    const v = computeVAT(client, annual, c.vatInclusive);
-    return v.netAmount != null ? v.netAmount : annual;
+    const split = vatSplit(c);
+    // Scale the split to the annualised figure (annual may be value ÷ term years).
+    const factor = Number(c.value) > 0 ? annual / Number(c.value) : 1;
+    const vatablePart = round2(split.vatableNet * factor);
+    const exemptPart = round2(annual - vatablePart);
+    const v = computeVAT(client, vatablePart, c.vatInclusive);
+    const net = v.netAmount != null ? v.netAmount : vatablePart;
+    return round2(net + exemptPart);
   };
   const tierOf = (c) => {
     const st = effectiveContractStatus(c);
@@ -1414,6 +1423,33 @@ function ContractForm({ navigate, editContractId }) {
         ? installments.map(r => ({ date: r.date, amount: Number(r.amount) }))
         : recurringInstallments();
 
+      // Build the VAT-correct payment rows. For a player-funded / shared deal the
+      // player-funded portion carries NO SCIOS VAT (see vatSplit) — only the club
+      // fixed fee is taxable. Each instalment is a slice of the whole value, so we
+      // pro-rate its taxable share against the contract's vatable/exempt split and
+      // charge VAT only on the taxable slice. Normal deals: whole slice is taxable
+      // (exemptNet 0), so this reduces to the old behaviour. Same helper for the
+      // create + edit paths so they can never drift.
+      const totalValue = Number(form.value) || 0;
+      const split = vatSplit({ ...form, value: totalValue });
+      const buildRow = (inst) => {
+        const amt = Number(inst.amount) || 0;
+        // This instalment's taxable share = its pro-rata slice of vatableNet.
+        const taxableShare = totalValue > 0
+          ? round2(amt * (split.vatableNet / totalValue))
+          : amt;
+        const exemptShare = round2(amt - taxableShare);
+        const vat = computeVAT(client, taxableShare, form.vatInclusive);
+        // Row net = taxable net + exempt (VAT-free) net; VAT only on the taxable part.
+        const net = round2(vat.netAmount + exemptShare);
+        return {
+          description: `${form.title} — payment due ${fmtDate(inst.date)}`,
+          dueDate: new Date(inst.date).toISOString(),
+          amount: net, vatRate: vat.vatRate, vatAmount: vat.vatAmount,
+          totalAmount: round2(net + vat.vatAmount), currency: form.currency,
+        };
+      };
+
       let contract;
       if (isEdit) {
         contract = await contractService.update(editContractId, {
@@ -1427,15 +1463,7 @@ function ContractForm({ navigate, editContractId }) {
           endDate: form.endDate ? new Date(form.endDate).toISOString() : '',
           services,
         });
-        await paymentService.replaceAllForContract(editContractId, schedule.map(inst => {
-          const vat = computeVAT(client, inst.amount, form.vatInclusive);
-          return {
-            description: `${contract.title} — payment due ${fmtDate(inst.date)}`,
-            dueDate: new Date(inst.date).toISOString(),
-            amount: vat.netAmount, vatRate: vat.vatRate, vatAmount: vat.vatAmount,
-            totalAmount: round2(vat.netAmount + vat.vatAmount), currency: form.currency,
-          };
-        }));
+        await paymentService.replaceAllForContract(editContractId, schedule.map(buildRow));
         toast.push('Contract updated.', 'success');
       } else {
         contract = await contractService.create({
@@ -1452,13 +1480,7 @@ function ContractForm({ navigate, editContractId }) {
           createdBy: auth.user.id,
         });
         for (const inst of schedule) {
-          const vat = computeVAT(client, inst.amount, form.vatInclusive);
-          await paymentService.create(contract.id, {
-            description: `${contract.title} — payment due ${fmtDate(inst.date)}`,
-            dueDate: new Date(inst.date).toISOString(),
-            amount: vat.netAmount, vatRate: vat.vatRate, vatAmount: vat.vatAmount,
-            totalAmount: round2(vat.netAmount + vat.vatAmount), currency: form.currency,
-          });
+          await paymentService.create(contract.id, buildRow(inst));
         }
         toast.push('Contract created.', 'success');
       }
@@ -1715,22 +1737,30 @@ function ContractForm({ navigate, editContractId }) {
             charged & remitted (legal) — it's just backed out of the round number. */}
         {(() => {
           const client = clients?.find(c => c.id === form.clientId);
-          const vat = computeVAT(client, Number(form.value) || 0, form.vatInclusive);
-          const chargesVat = vat.vatRate > 0;
+          // VAT applies only to the vatable portion. For a player-funded / shared
+          // deal that's the club fixed fee; the player-funded remainder is VAT-free
+          // — so the preview matches the payment rows and the generated PDF.
+          const totalValue = Number(form.value) || 0;
+          const split = vatSplit({ ...form, value: totalValue });
+          const vat = computeVAT(client, split.vatableNet, form.vatInclusive);
+          const chargesVat = vat.vatRate > 0 && split.vatableNet > 0;
+          const clientPays = round2(vat.netAmount + vat.vatAmount + split.exemptNet);
           return (
             <div className="mb-4 rounded-lg border border-[var(--border)] bg-slate-50/60 p-3">
               <label className="flex items-start gap-2.5 text-sm text-slate-700 cursor-pointer">
                 <input type="checkbox" checked={!!form.vatInclusive} onChange={e=>set('vatInclusive', e.target.checked)} className="mt-0.5 w-4 h-4 rounded border-slate-300" />
                 <span>
                   <span className="font-medium">Value already includes VAT</span>
-                  <span className="block text-xs text-slate-400 mt-0.5">Tick this when the client agreed an all-in price and doesn't want VAT added on top. VAT is still charged and remitted — it's calculated out of the figure above, not added to it.</span>
+                  <span className="block text-xs text-slate-400 mt-0.5">Tick this when the client agreed an all-in price and doesn't want VAT added on top. VAT is still charged and remitted — it's calculated out of the figure above, not added to it.{split.isSplit ? ' On a player-funded deal, VAT sits on the club fixed fee only.' : ''}</span>
                 </span>
               </label>
-              {chargesVat && Number(form.value) > 0 && (
+              {chargesVat && totalValue > 0 && (
                 <div className="mt-2 pt-2 border-t border-[var(--border)] text-xs text-slate-500 flex flex-wrap gap-x-4 gap-y-1">
-                  <span>Net: <span className="font-data text-slate-700">{fmtMoney(vat.netAmount, form.currency)}</span></span>
+                  {split.isSplit && <span>Club fee (net): <span className="font-data text-slate-700">{fmtMoney(vat.netAmount, form.currency)}</span></span>}
+                  {!split.isSplit && <span>Net: <span className="font-data text-slate-700">{fmtMoney(vat.netAmount, form.currency)}</span></span>}
                   <span>VAT ({Math.round(vat.vatRate*100)}%): <span className="font-data text-slate-700">{fmtMoney(vat.vatAmount, form.currency)}</span></span>
-                  <span>Client pays: <span className="font-data text-[var(--navy-deep)] font-semibold">{fmtMoney(round2(vat.netAmount + vat.vatAmount), form.currency)}</span></span>
+                  {split.isSplit && <span>Player fees (no VAT): <span className="font-data text-slate-700">{fmtMoney(split.exemptNet, form.currency)}</span></span>}
+                  <span>Client pays: <span className="font-data text-[var(--navy-deep)] font-semibold">{fmtMoney(clientPays, form.currency)}</span></span>
                 </div>
               )}
               {!chargesVat && vat.note && <div className="mt-2 pt-2 border-t border-[var(--border)] text-xs text-slate-400">{vat.note} — no VAT applies, so this setting has no effect.</div>}
@@ -3044,6 +3074,12 @@ function AddPaymentModal({ contract, client, onClose, onDone }) {
   const [amount, setAmount] = useState('');
   const [dueDate, setDueDate] = useState('');
   const [accountingRef, setAccountingRef] = useState('');
+  // Player-funded money carries no SCIOS VAT. On a player-funded / shared deal
+  // the milestone can be flagged VAT-free (default ON for a pure player-funded
+  // contract, where nothing is taxable). Normal deals never see this toggle.
+  const isPF = isPlayerFunded(contract);
+  const isPurePlayerFunded = (contract?.paymentModel ?? contract?.payment_model) === 'players_all';
+  const [vatFree, setVatFree] = useState(isPurePlayerFunded);
   const [errors, setErrors] = useState({});
   const [busy, setBusy] = useState(false);
 
@@ -3056,7 +3092,11 @@ function AddPaymentModal({ contract, client, onClose, onDone }) {
     if (Object.keys(e).length) return;
     setBusy(true);
     try {
-      const vat = computeVAT(client, Number(amount), contract.vatInclusive);
+      // VAT-free milestone (player-funded money): store net = entered amount,
+      // no VAT. Otherwise VAT applies to the entered net as usual.
+      const vat = vatFree
+        ? { netAmount: round2(Number(amount)), vatRate: 0, vatAmount: 0 }
+        : computeVAT(client, Number(amount), contract.vatInclusive);
       await paymentService.create(contract.id, {
         accountingRef: accountingRef.trim() || null, description, dueDate: new Date(dueDate).toISOString(),
         amount: vat.netAmount, vatRate: vat.vatRate, vatAmount: vat.vatAmount,
@@ -3082,9 +3122,18 @@ function AddPaymentModal({ contract, client, onClose, onDone }) {
       <Field label="Description" required error={errors.description}>
         <input value={description} onChange={e=>setDescription(e.target.value)} className={inputCls(errors.description)} placeholder="e.g. Q1 Platform Access Fee" />
       </Field>
-      <Field label="Amount (excl. VAT)" required error={errors.amount}>
+      <Field label={vatFree ? 'Amount (VAT-free)' : 'Amount (excl. VAT)'} required error={errors.amount}>
         <input type="number" step="0.01" value={amount} onChange={e=>setAmount(e.target.value)} className={inputCls(errors.amount)} placeholder="3000.00" />
       </Field>
+      {isPF && (
+        <label className="flex items-start gap-2.5 text-sm text-slate-700 cursor-pointer mb-4 -mt-1">
+          <input type="checkbox" checked={vatFree} onChange={e=>setVatFree(e.target.checked)} className="mt-0.5 w-4 h-4 rounded border-slate-300" />
+          <span>
+            <span className="font-medium">Player-funded money (VAT-free)</span>
+            <span className="block text-xs text-slate-400 mt-0.5">Tick for the player-funded portion — this is collected from players and carries no SCIOS VAT. Leave unticked for the club fixed fee, which is taxable.</span>
+          </span>
+        </label>
+      )}
       <Field label="Due Date" required error={errors.dueDate}>
         <input type="date" value={dueDate} onChange={e=>setDueDate(e.target.value)} className={inputCls(errors.dueDate)} />
       </Field>
@@ -4149,9 +4198,14 @@ function normalizeSnapshot(snapshot) {
     createdAt: pick(c, 'createdAt', 'created_at'),
     sentAt: pick(c, 'sentAt', 'sent_at'),
     // Frozen payment schedule (snake or camel), mapped for the Fees table.
+    // vatAmount/vatRate are carried so vatSummary reads the REAL per-row VAT
+    // (which for a player-funded deal is VAT-on-club-fee-only) rather than
+    // falling back to re-deriving 19% on the whole net.
     payments: (Array.isArray(c?.payments) ? c.payments : []).map(p => ({
       dueDate: pick(p, 'dueDate', 'due_date'),
       amount: pick(p, 'amount'),
+      vatAmount: pick(p, 'vatAmount', 'vat_amount'),
+      vatRate: pick(p, 'vatRate', 'vat_rate'),
       totalAmount: pick(p, 'totalAmount', 'total_amount'),
     })),
     // status intentionally read from the request row, not the snapshot

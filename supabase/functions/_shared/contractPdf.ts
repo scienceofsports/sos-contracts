@@ -145,10 +145,19 @@ function vatSummary(contract: Any, fm: (a: Any) => string, client?: Any): { appl
   // (or EU client without a reverse-charge VAT number) always owes 19% even if
   // the frozen payment rows carry no vat_amount — so the review copy and the
   // signed copy always show identical VAT.
+  // For a player-funded / shared deal, VAT applies ONLY to the club fixed fee;
+  // the player-funded portion is VAT-free. So the fallback charges 19% on the
+  // vatable portion of the net, not the whole net (keep in sync with vatSplit in
+  // src/lib/constants.js).
+  const svcModel = (contract?.paymentModel ?? contract?.payment_model);
+  const isPF = ((contract?.billingBasis ?? contract?.billing_basis) === 'player_funded')
+    || svcModel === 'players_all' || svcModel === 'club_players';
   const chargeable = (country === 'CY') || (country && EU.includes(country) && !hasVatNo);
   if (vat <= 0.005 && chargeable && net > 0) {
     rate = rate || 0.19;
-    vat = Math.round(net * rate * 100) / 100;
+    const clubFee = Math.round((Number(contract?.clubFixedFee ?? contract?.club_fixed_fee) || 0) * 100) / 100;
+    const vatableNet = isPF ? Math.min(clubFee, net) : net;
+    vat = Math.round(vatableNet * rate * 100) / 100;
     gross = Math.round((net + vat) * 100) / 100;
   }
 

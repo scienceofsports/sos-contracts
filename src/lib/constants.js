@@ -279,6 +279,38 @@ export function commercialValue(contract, servicesTotal) {
   };
 }
 
+// VAT SPLIT for player-funded / shared deals.
+// ---------------------------------------------------------------------------
+// The Client (club) is invoiced for the whole contract value, but only the
+// CLUB FIXED FEE is a taxable SCIOS supply — the player-funded portion is money
+// the club collects from players (consumers) and passes through, so it carries
+// NO SCIOS VAT. This helper returns, for the whole contract, how the NET value
+// splits into a VAT-bearing part and a VAT-free part. Every VAT site (payment
+// rows, previews, all three document generators) derives from this so they
+// agree. For a normal services / club-funded deal the whole value is vatable.
+//
+// Returns { vatableNet, exemptNet, isSplit }:
+//   vatableNet — net amount that VAT is charged on (club fixed fee, or full value)
+//   exemptNet  — net amount with NO VAT (player-funded portion), 0 for normal deals
+//   isSplit    — true only when a player-funded deal actually has both parts
+// The two always sum to the contract's net value.
+export function vatSplit(contract) {
+  const r2 = (n) => Math.round(n * 100) / 100;   // local: round2 lives in format.js
+  const value = Number(contract?.value) || 0;
+  if (!isPlayerFunded(contract)) {
+    return { vatableNet: r2(value), exemptNet: 0, isSplit: false };
+  }
+  // Player-funded: only the club fixed fee is taxable. Shared (club_players)
+  // has one; pure Player-funded (players_all) has none → the whole value is
+  // player money and carries no VAT at all. The fixed fee is kept WHOLE (the
+  // club commission is treated as coming off the player portion only), which is
+  // also what the on-screen "guaranteed = club fixed fee" label promises.
+  const clubFee = r2(Number(contract?.clubFixedFee ?? contract?.club_fixed_fee) || 0);
+  const vatableNet = Math.min(clubFee, value);          // never exceed the value
+  const exemptNet = r2(value - vatableNet);
+  return { vatableNet, exemptNet, isSplit: vatableNet > 0 && exemptNet > 0 };
+}
+
 // Build the Commercial Terms clause parts from a contract + a money formatter
 // `fm(amount)`. Returns { intro, breakdown, commission } (any may be '').
 // The value is a PROJECTION from expected enrolment; player revenue is computed
@@ -377,10 +409,16 @@ export function vatSummary(contract, fm, client) {
   // still applies at 19%. This guarantees the review copy and the signed copy
   // show identical VAT regardless of whether the frozen payment rows happened to
   // carry a vat_amount — the earlier "review shows no VAT, signed shows VAT" bug.
+  // For a player-funded / shared deal, VAT applies ONLY to the club fixed fee
+  // (the player-funded portion is VAT-free — see vatSplit), so the fallback must
+  // charge 19% on the vatable portion of the net, NOT the whole net. This keeps
+  // the frozen/legacy view (where per-row vatAmount may be missing) consistent
+  // with the write path, instead of re-VATing the player money.
   const chargeable = (country === 'CY') || (country && EU.includes(country) && !hasVatNo);
   if (vat <= 0.005 && chargeable && net > 0) {
     rate = rate || 0.19;
-    vat = Math.round(net * rate * 100) / 100;
+    const split = vatSplit({ ...contract, value: net });
+    vat = Math.round(split.vatableNet * rate * 100) / 100;
     gross = Math.round((net + vat) * 100) / 100;
   }
 
