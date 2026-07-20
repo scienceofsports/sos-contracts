@@ -243,20 +243,26 @@ export function commercialValue(contract, servicesTotal) {
   // payment — the selected services are the DELIVERABLES those fees pay for, NOT
   // a separate charge added on top. Summing services + player fees double-counts
   // (the platform access would be billed once as a service and again inside the
-  // fee that already buys it). So services are EXCLUDED from the value:
+  // fee that already buys it). So services are EXCLUDED from the value.
+  //
+  // The club commission is deducted from the PLAYER FEES ONLY — the club fixed
+  // fee is kept WHOLE (it is the guaranteed fee, and VAT sits on it in full, so
+  // the commission must not erode it):
   //
   //   playerPortion = min players x fee x months   (the committed floor)
-  //   clubPortion   = club fixed fee               (Shared only)
+  //   clubPortion   = club fixed fee               (Shared only, kept whole)
+  //   commission    = playerPortion x commission%  (off player fees only)
   //   gross         = clubPortion + playerPortion  (services NOT added)
-  //   value         = gross x (1 - commission%)
+  //   value         = clubPortion + (playerPortion - commission)
   //
-  // Worked: Shared 5,000 club fee + 5,000 player fees @25% -> 7,500. Player-funded
-  // 80 x 12 x 10 = 9,600 @50% -> 4,800 (services are deliverables, unpriced).
+  // Worked: Shared 10,000 club fee + 11,000 player fees @25% -> commission 2,750,
+  // value 10,000 + 8,250 = 18,250. Player-funded 80 x 12 x 10 = 9,600 @50% ->
+  // 4,800 (no club fee, services are deliverables, unpriced).
   const playerPortion = Math.round(minPlayers * fee * months * 100) / 100;
   const clubPortion = includeClubFee ? clubFee : 0;
   const gross = Math.round((clubPortion + playerPortion) * 100) / 100;
-  const commissionAmount = Math.round(gross * (pct / 100) * 100) / 100;
-  const guaranteed = Math.round((gross - commissionAmount) * 100) / 100;
+  const commissionAmount = Math.round(playerPortion * (pct / 100) * 100) / 100;
+  const guaranteed = Math.round((clubPortion + playerPortion - commissionAmount) * 100) / 100;
   const hasPlayerFees = fee > 0;
   // No committed money at all (no services, no club fee, no min-player floor) ->
   // value is variable (billed purely on actual enrolment).
@@ -333,7 +339,7 @@ export function commercialModelText(contract, fm) {
   // Only assert a commission % when it was actually configured (legacy rows may
   // have none — don't invent a commission clause they never signed).
   const hasPct = (contract.kickbackPct !== '' && contract.kickbackPct != null && Number(contract.kickbackPct) > 0) || cv.pct > 0;
-  const commissionStr = hasPct ? ` A club commission of ${cv.pct}% is deducted from the total.` : '';
+  const commissionStr = hasPct ? ` A club commission of ${cv.pct}% is deducted from the player-participation fees.` : '';
   const fundStr = ' The full contract value is payable by the Client; player participation fees fund part of the Client\'s payment and are not collected separately from players.';
 
   if (model === 'club_players') {

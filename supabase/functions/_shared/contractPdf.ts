@@ -298,14 +298,17 @@ function commercialValue(c: Any, servicesTotal?: number) {
       ? Number(servicesTotal) || 0
       : computeServiceLineItems(c?.services).reduce((s: number, i: Any) => s + i.amount, 0)
   ) * 100) / 100;
-  // The CLUB pays the whole value in every model. Sum the components, then deduct
-  // the club commission from the total. Keep in sync with src/lib/constants.js.
-  //   value = (services + clubFee[Shared] + minPlayers*fee*months) * (1 - pct%)
+  // The CLUB pays the whole value. Club fixed fee is kept WHOLE; the commission
+  // is deducted from the PLAYER FEES ONLY. Services are DELIVERABLES the fees pay
+  // for — EXCLUDED from the value (not double-counted). Keep in sync with
+  // src/lib/constants.js.
+  //   value = clubFee[Shared] + (minPlayers*fee*months - commission)
+  //   commission = minPlayers*fee*months * pct%
   const playerPortion = Math.round(minPlayers * fee * months * 100) / 100;
   const clubPortion = includeClubFee ? clubFee : 0;
-  const gross = Math.round((svc + clubPortion + playerPortion) * 100) / 100;
-  const commissionAmount = Math.round(gross * (pct / 100) * 100) / 100;
-  const guaranteed = Math.round((gross - commissionAmount) * 100) / 100;
+  const gross = Math.round((clubPortion + playerPortion) * 100) / 100;
+  const commissionAmount = Math.round(playerPortion * (pct / 100) * 100) / 100;
+  const guaranteed = Math.round((clubPortion + playerPortion - commissionAmount) * 100) / 100;
   const hasPlayerFees = fee > 0;
   const variableOnly = gross <= 0;
   const stored = Number(c?.value) || 0;
@@ -336,7 +339,7 @@ function commercialModelText(c: Any, fm: (a: Any) => string): { intro: string; b
   const minStr = minP ? `, calculated on a minimum of ${minP} players` : '';
   const rawPct = c?.kickbackPct ?? c?.kickback_pct;
   const hasPct = (rawPct !== '' && rawPct != null && Number(rawPct) > 0) || cv.pct > 0;
-  const commissionStr = hasPct ? ` A club commission of ${cv.pct}% is deducted from the total.` : '';
+  const commissionStr = hasPct ? ` A club commission of ${cv.pct}% is deducted from the player-participation fees.` : '';
   const fundStr = ' The full contract value is payable by the Client; player participation fees fund part of the Client\'s payment and are not collected separately from players.';
 
   if (model === 'club_players') {

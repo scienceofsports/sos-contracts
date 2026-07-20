@@ -961,19 +961,29 @@ function CommercialBreakdown({ form, servicesTotal = 0 }) {
   // line, so it's clear WHY the contract value reads "Variable".
   const variablePlayerLine = cv.fee > 0 && cv.playerPortion <= 0;
   // Services are DELIVERABLES the player fees pay for — shown as "Included", never
-  // priced into the value (summing them would double-count). Only the club fixed
-  // fee + player fees build the value. A subtotal only makes sense when BOTH the
-  // club fee and player fees contribute (otherwise value = the single component).
-  const showSubtotal = cv.clubFee > 0 && playerLine;
+  // priced into the value (summing them would double-count). The commission is
+  // deducted from the PLAYER FEES ONLY; the club fixed fee is kept whole. So the
+  // commission line sits directly under the player-fees line, and the net player
+  // amount feeds the value alongside the whole club fee.
+  const netPlayer = round2(cv.playerPortion - cv.commissionAmount);
   return (
     <div className="mt-3 pt-3 border-t border-[var(--border)] text-xs text-slate-600 space-y-1">
       {cv.servicesTotal > 0 && <div className="flex justify-between text-slate-500"><span>Services (from selection above)</span><span className="font-data text-emerald-600">Included</span></div>}
-      {cv.clubFee > 0 && <div className="flex justify-between"><span>Club fixed fee (per season)</span><span className="font-data">{fmtMoney(cv.clubFee, cur)}</span></div>}
+      {cv.clubFee > 0 && <div className="flex justify-between"><span>Club fixed fee (per season, kept whole)</span><span className="font-data">{fmtMoney(cv.clubFee, cur)}</span></div>}
       {playerLine && (
         <div className="flex justify-between">
           <span>Player fees{cv.minPlayers > 0 ? ` (${cv.minPlayers} × ${fmtMoney(cv.fee, cur)}${cv.months > 0 ? ` × ${cv.months} mo` : ''})` : ''}</span>
           <span className="font-data">{fmtMoney(cv.playerPortion, cur)}</span>
         </div>
+      )}
+      {playerLine && cv.pct > 0 && (
+        <div className="flex justify-between text-slate-500">
+          <span>Less club commission ({cv.pct}% of player fees)</span>
+          <span className="font-data">− {fmtMoney(cv.commissionAmount, cur)}</span>
+        </div>
+      )}
+      {playerLine && cv.pct > 0 && (
+        <div className="flex justify-between text-slate-500"><span>Net player fees</span><span className="font-data">{fmtMoney(netPlayer, cur)}</span></div>
       )}
       {variablePlayerLine && (
         <div className="flex justify-between text-slate-500">
@@ -981,17 +991,13 @@ function CommercialBreakdown({ form, servicesTotal = 0 }) {
           <span className="font-data italic">Variable</span>
         </div>
       )}
-      {showSubtotal && (
-        <div className="flex justify-between text-slate-500 pt-1 border-t border-dashed border-[var(--border)]"><span>Subtotal</span><span className="font-data">{fmtMoney(cv.gross, cur)}</span></div>
-      )}
-      {cv.pct > 0 && <div className="flex justify-between text-slate-500"><span>Less club commission ({cv.pct}%)</span><span className="font-data">− {fmtMoney(cv.commissionAmount, cur)}</span></div>}
       <div className="flex justify-between font-semibold text-[var(--navy-deep)] pt-1 border-t border-[var(--border)]">
         <span>Contract value (club pays)</span>
         <span className="font-data">{cv.value > 0 ? fmtMoney(cv.value, cur) : 'Variable'}</span>
       </div>
       <p className="text-[11px] text-slate-400 pt-1">
         {playerLine
-          ? `The club pays ${cv.clubFee > 0 ? 'the club fixed fee + ' : ''}the player-fee amount (minimum players × fee × months)${cv.pct > 0 ? `, less the ${cv.pct}% club commission` : ''}. The selected services are the deliverables these fees fund — they are not charged separately.`
+          ? `The club pays ${cv.clubFee > 0 ? 'the club fixed fee (kept whole) + ' : ''}the player-fee amount (minimum players × fee × months)${cv.pct > 0 ? `, less the ${cv.pct}% club commission on the player fees only` : ''}. The selected services are the deliverables these fees fund — they are not charged separately.`
           : variablePlayerLine
             ? 'No minimum number of players is set, so the contract value is variable — billed on actual enrolment (players × fee × months). The selected services are the deliverables the player fees fund. Enter a minimum-players figure to commit a fixed value.'
             : 'The club fixed fee. The selected services are the deliverables it funds.'}
@@ -1108,7 +1114,8 @@ function ContractForm({ navigate, editContractId }) {
         if (existing.paymentType === 'one_time') {
           setOneTimeDate(existing.payments[0].dueDate.slice(0,10));
         } else if (existing.paymentType === 'milestone') {
-          setInstallments(existing.payments.map(p => ({ date: p.dueDate.slice(0,10), amount: String(p.amount) })));
+          // Schedule is GROSS: load each row's total (net + VAT), not the net.
+          setInstallments(existing.payments.map(p => ({ date: p.dueDate.slice(0,10), amount: String(p.totalAmount != null ? p.totalAmount : p.amount) })));
           // A saved schedule has deliberate DATES — keep them (don't re-roll from
           // the start date). Amounts still re-split if the user changes the value.
           datesTouched.current = true;
@@ -1137,6 +1144,25 @@ function ContractForm({ navigate, editContractId }) {
     })();
   }, [isEdit, editContractId]);
 
+  // GROSS contract total = net value + VAT (on the vatable portion only, per the
+  // player-funded VAT-split rule). The milestone schedule is built and displayed
+  // on this GROSS basis so its total matches what the Client actually pays; each
+  // gross instalment is split back into net + VAT at save time by buildRow.
+  // Declared here (before the schedule builders/effects that consume it) to avoid
+  // a temporal-dead-zone reference in those effects' dependency arrays.
+  const formClient = clients?.find(c => c.id === form.clientId);
+  const grossVatInfo = (() => {
+    const netValue = Number(form.value) || 0;
+    const split = vatSplit({ ...form, value: netValue });
+    const vat = computeVAT(formClient, split.vatableNet, form.vatInclusive);
+    // vatInclusive: value already gross → net = value; VAT is inside it.
+    const grossTotal = form.vatInclusive
+      ? round2(netValue)
+      : round2(netValue + vat.vatAmount);
+    return { netValue, grossTotal, vatAmount: vat.vatAmount, vatRate: vat.vatRate };
+  })();
+  const grossContractTotal = grossVatInfo.grossTotal;
+
   const RECURRING_MONTHS = { monthly: 1, quarterly: 3, annually: 12 };
 
   const recurringCount = () => {
@@ -1148,7 +1174,7 @@ function ContractForm({ navigate, editContractId }) {
   const recurringInstallments = () => {
     const count = recurringCount();
     if (!count || !firstDueDate) return [];
-    const total = Number(form.value) || 0;
+    const total = grossContractTotal;   // GROSS basis — instalments are what the Client pays
     const each = round2(total / count);
     return Array.from({ length: count }, (_, i) => {
       const d = new Date(firstDueDate);
@@ -1204,8 +1230,9 @@ function ContractForm({ navigate, editContractId }) {
   const datesTouched = useRef(false);
   useEffect(() => {
     if (form.paymentType !== 'milestone') return;
-    if (!form.startDate || !(Number(form.value) > 0)) return;
-    const gen = buildDefaultMilestones(form.startDate, form.value);
+    if (!form.startDate || !(grossContractTotal > 0)) return;
+    // GROSS basis: the schedule splits what the Client actually pays (incl. VAT).
+    const gen = buildDefaultMilestones(form.startDate, grossContractTotal);
     setInstallments(rows => {
       // First fill (no rows yet): take the whole generated schedule.
       if (!rows.length) return gen;
@@ -1215,7 +1242,7 @@ function ContractForm({ navigate, editContractId }) {
       // dates are there (default or user-picked). Re-split proportionally so a
       // custom split's shape is preserved; even split if the old total was zero.
       const oldTotal = rows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
-      const newTotal = Number(form.value) || 0;
+      const newTotal = grossContractTotal;
       let acc = 0;
       return rows.map((r, i) => {
         const share = oldTotal > 0 ? (Number(r.amount) || 0) / oldTotal : 1 / rows.length;
@@ -1227,7 +1254,7 @@ function ContractForm({ navigate, editContractId }) {
         };
       });
     });
-  }, [form.paymentType, form.startDate, form.value]);
+  }, [form.paymentType, form.startDate, grossContractTotal]);
 
   const generateTitle = (clientId, services) => {
     const clientName = clients?.find(c => c.id === clientId)?.companyName;
@@ -1384,7 +1411,7 @@ function ContractForm({ navigate, editContractId }) {
     if (form.paymentType === 'milestone') {
       if (!installments.length) e.installments = 'Add at least one installment.';
       else if (installments.some(r => !r.date || !r.amount || Number(r.amount) <= 0)) e.installments = 'Every installment needs a date and a positive amount.';
-      else if (Math.abs(milestoneTotal - Number(form.value)) > 0.01) e.installments = `Installments must add up to the contract value (${fmtMoney(form.value, form.currency)}).`;
+      else if (Math.abs(milestoneTotal - grossContractTotal) > 0.01) e.installments = `Installments must add up to the total payable incl. VAT (${fmtMoney(grossContractTotal, form.currency)}).`;
     }
     setErrors(e);
     return Object.keys(e).length === 0;
@@ -1417,36 +1444,43 @@ function ContractForm({ navigate, editContractId }) {
         ? Math.min(...slaBands.map(b => Number(b.hours)))
         : (Number(form.slaHours) || 0);
       const description = generateDescriptionFromServices(services, { slaBands, slaHours });
+      // The schedule is built on the GROSS basis (each instalment is the amount
+      // the Client actually pays, VAT included) so the schedule total equals what
+      // the Client owes. one_time / recurring build from grossContractTotal;
+      // milestone rows are already gross (the UI edits them as gross).
       const schedule = form.paymentType === 'one_time'
-        ? [{ date: oneTimeDate, amount: Number(form.value) }]
+        ? [{ date: oneTimeDate, amount: grossContractTotal }]
         : form.paymentType === 'milestone'
         ? installments.map(r => ({ date: r.date, amount: Number(r.amount) }))
         : recurringInstallments();
 
-      // Build the VAT-correct payment rows. For a player-funded / shared deal the
-      // player-funded portion carries NO SCIOS VAT (see vatSplit) — only the club
-      // fixed fee is taxable. Each instalment is a slice of the whole value, so we
-      // pro-rate its taxable share against the contract's vatable/exempt split and
-      // charge VAT only on the taxable slice. Normal deals: whole slice is taxable
-      // (exemptNet 0), so this reduces to the old behaviour. Same helper for the
-      // create + edit paths so they can never drift.
-      const totalValue = Number(form.value) || 0;
-      const split = vatSplit({ ...form, value: totalValue });
+      // Split each GROSS instalment back into net + VAT for storage. VAT applies
+      // only to the vatable portion of the contract (club fixed fee for a player-
+      // funded / shared deal; the whole value for a normal deal — see vatSplit).
+      // We pro-rate each instalment's gross against the contract's gross vatable
+      // vs exempt parts, then back the net + VAT out of the vatable slice. Same
+      // helper for create + edit so they can never drift.
+      const netValue = Number(form.value) || 0;
+      const split = vatSplit({ ...form, value: netValue });
+      const rate = grossVatInfo.vatRate || 0;
+      // Gross value of the vatable portion (net club fee + its VAT) and the exempt
+      // portion (player money, no VAT), used to slice each instalment by ratio.
+      const grossVatablePart = form.vatInclusive ? split.vatableNet : round2(split.vatableNet * (1 + rate));
+      const grossTotalForRatio = grossContractTotal || 1;
       const buildRow = (inst) => {
-        const amt = Number(inst.amount) || 0;
-        // This instalment's taxable share = its pro-rata slice of vatableNet.
-        const taxableShare = totalValue > 0
-          ? round2(amt * (split.vatableNet / totalValue))
-          : amt;
-        const exemptShare = round2(amt - taxableShare);
-        const vat = computeVAT(client, taxableShare, form.vatInclusive);
-        // Row net = taxable net + exempt (VAT-free) net; VAT only on the taxable part.
-        const net = round2(vat.netAmount + exemptShare);
+        const gross = Number(inst.amount) || 0;
+        // This instalment's vatable (gross) slice, pro-rata across the schedule.
+        const vatableGrossShare = round2(gross * (grossVatablePart / grossTotalForRatio));
+        const exemptShare = round2(gross - vatableGrossShare);
+        // Back net + VAT out of the vatable gross slice (it is VAT-inclusive).
+        const vNet = rate > 0 ? round2(vatableGrossShare / (1 + rate)) : vatableGrossShare;
+        const vVat = round2(vatableGrossShare - vNet);
+        const net = round2(vNet + exemptShare);   // exempt part is already net (no VAT)
         return {
           description: `${form.title} — payment due ${fmtDate(inst.date)}`,
           dueDate: new Date(inst.date).toISOString(),
-          amount: net, vatRate: vat.vatRate, vatAmount: vat.vatAmount,
-          totalAmount: round2(net + vat.vatAmount), currency: form.currency,
+          amount: net, vatRate: rate, vatAmount: vVat,
+          totalAmount: round2(net + vVat), currency: form.currency,
         };
       };
 
@@ -1822,7 +1856,10 @@ function ContractForm({ navigate, editContractId }) {
               ))}
             </div>
             <button onClick={addInstallmentRow} className="text-sm text-[var(--blue-primary)] hover:underline">+ Add Installment</button>
-            <p className="text-xs text-slate-500 mt-2">Total: {fmtMoney(milestoneTotal, form.currency)} of {fmtMoney(form.value, form.currency)}</p>
+            <p className="text-xs text-slate-500 mt-2">
+              Total: {fmtMoney(milestoneTotal, form.currency)} of {fmtMoney(grossContractTotal, form.currency)}
+              {grossVatInfo.vatAmount > 0.005 && <span className="text-slate-400"> — instalments include VAT ({fmtMoney(grossVatInfo.vatAmount, form.currency)} on {fmtMoney(grossContractTotal - grossVatInfo.vatAmount, form.currency)} net)</span>}
+            </p>
           </div>
         )}
         </CollapsibleSection>
