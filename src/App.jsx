@@ -11,6 +11,8 @@ import {
   platformSeatsSummary,
   generateDescriptionFromServices,
   summarizeAgreement,
+  slaLabel,
+  cameraLabel,
   analysisScopeText,
   clientEntityDescriptor,
   seasonLabelFromDates,
@@ -350,6 +352,11 @@ function ReminderBanners({ contracts, clients, navigate }) {
 
 function Dashboard({ navigate }) {
   const { contracts, clients } = useContractsData();
+  // Sort state for the Client Operations Overview table. Default: highest annual
+  // value first (most valuable clients on top). Click a header to sort; click
+  // again to flip direction.
+  const [opsSort, setOpsSort] = useState({ key: 'annual', dir: 'desc' });
+  const toggleOpsSort = (key) => setOpsSort(s => s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: key === 'name' ? 'asc' : 'desc' });
 
   if (!contracts) {
     return (
@@ -507,6 +514,47 @@ function Dashboard({ navigate }) {
     if (qty > 0) { camerasToInstall += qty; cameraClubs.add(c.clientId); }
   });
 
+  // CLIENT OPERATIONS OVERVIEW — one row per client, showing their most-advanced
+  // contract, with the annual run-rate, status, SLA and cameras in one scan. All
+  // clients are shown (even without a contract) and sorted by status priority.
+  const opsStatusRank = { active: 6, signed: 5, sent: 4, draft: 3, expired: 2, declined: 1, cancelled: 0, none: -1 };
+  const opsRows = clients.map(cl => {
+    const clientContracts = contracts.filter(c => c.clientId === cl.id);
+    // Pick the most-advanced contract (by effective status) as the client's lead.
+    const lead = clientContracts.slice().sort((a, b) =>
+      (opsStatusRank[effectiveContractStatus(b)] ?? -1) - (opsStatusRank[effectiveContractStatus(a)] ?? -1)
+    )[0] || null;
+    const st = lead ? effectiveContractStatus(lead) : 'none';
+    return {
+      id: cl.id,
+      name: cl.companyName || '—',
+      annual: lead ? annualisedValue(lead) : 0,
+      status: st,
+      sla: lead ? slaLabel(lead) : '—',
+      cameras: lead ? cameraLabel(lead) : '—',
+      currency: lead?.currency || 'EUR',
+      leadId: lead?.id || null,
+    };
+  });
+  // Sortable: click a header to sort by that column. Value/status sort
+  // numerically (by amount / status rank); the rest by text. Ties break on name.
+  const opsSortVal = (r) => {
+    switch (opsSort.key) {
+      case 'name':    return r.name.toLowerCase();
+      case 'annual':  return r.annual;
+      case 'status':  return opsStatusRank[r.status] ?? -1;
+      case 'sla':     return r.sla === '—' ? Infinity : parseInt(r.sla, 10); // tightest first when asc
+      case 'cameras': return r.cameras;
+      default:        return r.name.toLowerCase();
+    }
+  };
+  opsRows.sort((a, b) => {
+    const va = opsSortVal(a), vb = opsSortVal(b);
+    let cmp = typeof va === 'number' && typeof vb === 'number' ? va - vb : String(va).localeCompare(String(vb));
+    if (cmp === 0) cmp = a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+    return opsSort.dir === 'asc' ? cmp : -cmp;
+  });
+
   return (
     <div className="p-4 md:p-6 board-print">
       {/* Screen header — hidden when printing. */}
@@ -627,6 +675,50 @@ function Dashboard({ navigate }) {
             </div>
             <div className="text-[11px] text-slate-400 mt-1.5">Agreed in signed/active contracts — install workload.</div>
           </div>
+        </div>
+      </div>
+
+      {/* CLIENT OPERATIONS OVERVIEW — one row per client: annual value, status,
+          SLA, cameras. Everything for a client in a single scannable line. */}
+      <div className="bg-white rounded-xl border border-[var(--border)] p-5 mb-6">
+        <div className="flex items-center justify-between mb-4">
+          <div className="sos-pill">Client Operations Overview</div>
+          <div className="text-[11px] text-slate-400">{opsRows.length} client{opsRows.length===1?'':'s'} · annual run-rate ex-VAT</div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-xs uppercase tracking-wide text-slate-400 border-b border-[var(--border)] select-none">
+                {[
+                  { key:'name', label:'Client', cls:'pr-4' },
+                  { key:'annual', label:'Annual Value', cls:'px-4 text-right' },
+                  { key:'status', label:'Status', cls:'px-4' },
+                  { key:'sla', label:'SLA', cls:'px-4' },
+                  { key:'cameras', label:'Cameras', cls:'px-4' },
+                ].map(col => (
+                  <th key={col.key} className={`py-2.5 cursor-pointer hover:text-slate-600 transition ${col.cls}`} onClick={()=>toggleOpsSort(col.key)}>
+                    {col.label}
+                    <span className="ml-1 text-slate-300">{opsSort.key === col.key ? (opsSort.dir === 'asc' ? '▲' : '▼') : '↕'}</span>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {opsRows.map(r => (
+                <tr
+                  key={r.id}
+                  className={`border-b border-[var(--border)] last:border-0 ${r.leadId ? 'cursor-pointer hover:bg-slate-50' : ''}`}
+                  onClick={r.leadId ? (()=>navigate('contract:'+r.leadId)) : undefined}
+                >
+                  <td className="py-3 pr-4 font-medium text-[var(--navy-deep)]">{r.name}</td>
+                  <td className="py-3 px-4 text-right font-data">{r.status === 'none' ? <span className="text-slate-300">—</span> : fmtMoney(r.annual, r.currency)}</td>
+                  <td className="py-3 px-4">{r.status === 'none' ? <span className="text-xs text-slate-400">No contract</span> : <Badge status={r.status} />}</td>
+                  <td className="py-3 px-4 font-data text-slate-600">{r.sla}</td>
+                  <td className="py-3 px-4 text-slate-600">{r.cameras}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
 

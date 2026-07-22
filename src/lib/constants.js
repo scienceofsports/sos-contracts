@@ -532,6 +532,51 @@ function slaSummaryLine(contract) {
   return 'SLA: ' + sorted.map(b => `${Number(b.hours)}h (${b.teams.join(', ')})`).join('; ');
 }
 
+// COMPACT operations summaries for the Dashboard overview table.
+// slaLabel: short SLA for a table cell — "24h", "72h", or "24h+" when the
+// contract has mixed per-team bands (tightest shown, "+" flags the mix). "—"
+// when there's no match-analysis SLA (e.g. platform-only deals).
+export function slaLabel(contract) {
+  const bands = Array.isArray(contract?.slaBands)
+    ? contract.slaBands.filter(b => b && Array.isArray(b.teams) && b.teams.length && Number(b.hours)) : [];
+  if (bands.length) {
+    const hours = bands.map(b => Number(b.hours));
+    const min = Math.min(...hours);
+    const mixed = new Set(hours).size > 1;
+    return `${min}h${mixed ? '+' : ''}`;
+  }
+  // Fall back to the single slaHours only when it was explicitly set.
+  const h = Number(contract?.slaHours);
+  return h > 0 ? `${h}h` : '—';
+}
+
+// cameraLabel: what recording hardware the deal includes — "2× Fixed", "1× VEO",
+// "1× VEO + 2× Fixed", or "—". Reads the priced services first (the accurate,
+// contracted source). If none are priced, it FALLS BACK to scanning the special
+// terms + description for camera mentions, so cameras recorded as prose (not yet
+// a priced service) still surface — flagged with "*" so you can tell it came from
+// text, not a priced line. Fix a "*" row by pricing the camera as a service.
+export function cameraLabel(contract) {
+  const items = computeServiceLineItems(contract?.services);
+  const byKey = Object.fromEntries(items.map(i => [i.key, i]));
+  const parts = [];
+  const veo = byKey['veo_camera'];
+  const fixed = byKey['camera_installation'];
+  if (veo && !veo.included) parts.push(`${veo.qty || 1}× VEO`);
+  if (fixed && !fixed.included) parts.push(`${fixed.qty || 1}× Fixed`);
+  if (parts.length) return parts.join(' + ');
+  // Fallback: scan prose (special terms + description) for camera mentions.
+  const terms = parseSpecialTerms(contract?.specialTerms).map(t => t.text).join(' ');
+  const text = `${terms} ${contract?.description || ''}`.toLowerCase();
+  const hasVeo = /\bveo\b/.test(text);
+  const hasFixed = /\b(fixed|robotic)\s+camera|camera\s+install/.test(text);
+  const hasCam = /\bcamera\b/.test(text);
+  if (hasVeo) return 'VEO *';
+  if (hasFixed) return 'Fixed *';
+  if (hasCam) return 'Camera *';
+  return '—';
+}
+
 // Short, scannable bullet summary of the agreement for the admin Contract
 // Details panel — just WHAT is included, no marketing prose. Pass the whole
 // contract (or an object with .services, .slaBands, .slaHours). Returns an array
