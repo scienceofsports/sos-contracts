@@ -425,15 +425,6 @@ function Dashboard({ navigate }) {
 
   const unsignedAging = contracts.filter(c => c.status === 'sent').map(c => ({ ...c, daysSince: daysBetween(c.sentAt, now) })).sort((a,b)=>b.daysSince-a.daysSince);
 
-  const topClients = clients.map(cl => {
-    const clientContracts = contracts.filter(c => c.clientId === cl.id);
-    const totalValue = clientContracts.reduce((s,c)=>s+Number(c.value||0),0);
-    const collected = clientContracts.flatMap(c=>c.payments).filter(p=>p.status==='paid').reduce((s,p)=>s+Number(p.paidAmount||0),0);
-    const outstandingC = clientContracts.flatMap(c=>c.payments).filter(p=>p.status!=='paid').reduce((s,p)=>s+Number(p.totalAmount||0),0);
-    const latestEnd = clientContracts.reduce((latest,c) => c.endDate && (!latest || new Date(c.endDate)>new Date(latest)) ? c.endDate : latest, null);
-    return { client: cl, totalValue, collected, outstanding: outstandingC, endDate: latestEnd };
-  }).sort((a,b)=>b.totalValue-a.totalValue);
-
   /* ===== AGREEMENTS OVERVIEW — the "what have we agreed?" board ===============
      Revenue by pipeline tier (annualised, net of VAT), club-status progress
      against all clients, agreed SLA bands, and cameras still to install.
@@ -525,6 +516,14 @@ function Dashboard({ navigate }) {
       (opsStatusRank[effectiveContractStatus(b)] ?? -1) - (opsStatusRank[effectiveContractStatus(a)] ?? -1)
     )[0] || null;
     const st = lead ? effectiveContractStatus(lead) : 'none';
+    // Money position is summed across ALL the client's contracts (money owed is
+    // money owed, regardless of which contract). Annual/status/SLA/cameras
+    // describe the LEAD contract (their current operational deal).
+    const allPays = clientContracts.flatMap(c => c.payments || []);
+    const collected = allPays.filter(p => p.status === 'paid').reduce((s, p) => s + Number(p.paidAmount || 0), 0);
+    const outstanding = allPays.filter(p => p.status !== 'paid').reduce((s, p) => s + Number(p.totalAmount || 0), 0);
+    // Latest end date across the client's contracts — when the relationship runs to.
+    const endDate = clientContracts.reduce((latest, c) => c.endDate && (!latest || new Date(c.endDate) > new Date(latest)) ? c.endDate : latest, null);
     return {
       id: cl.id,
       name: cl.companyName || '—',
@@ -532,6 +531,9 @@ function Dashboard({ navigate }) {
       status: st,
       sla: lead ? slaLabel(lead) : '—',
       cameras: lead ? cameraLabel(lead) : '—',
+      collected,
+      outstanding,
+      endDate,
       currency: lead?.currency || 'EUR',
       leadId: lead?.id || null,
     };
@@ -540,12 +542,15 @@ function Dashboard({ navigate }) {
   // numerically (by amount / status rank); the rest by text. Ties break on name.
   const opsSortVal = (r) => {
     switch (opsSort.key) {
-      case 'name':    return r.name.toLowerCase();
-      case 'annual':  return r.annual;
-      case 'status':  return opsStatusRank[r.status] ?? -1;
-      case 'sla':     return r.sla === '—' ? Infinity : parseInt(r.sla, 10); // tightest first when asc
-      case 'cameras': return r.cameras;
-      default:        return r.name.toLowerCase();
+      case 'name':        return r.name.toLowerCase();
+      case 'annual':      return r.annual;
+      case 'status':      return opsStatusRank[r.status] ?? -1;
+      case 'sla':         return r.sla === '—' ? Infinity : parseInt(r.sla, 10); // tightest first when asc
+      case 'cameras':     return r.cameras;
+      case 'collected':   return r.collected;
+      case 'outstanding': return r.outstanding;
+      case 'endDate':     return r.endDate ? new Date(r.endDate).getTime() : Infinity; // undated sinks last
+      default:            return r.name.toLowerCase();
     }
   };
   opsRows.sort((a, b) => {
@@ -554,6 +559,11 @@ function Dashboard({ navigate }) {
     if (cmp === 0) cmp = a.name.toLowerCase().localeCompare(b.name.toLowerCase());
     return opsSort.dir === 'asc' ? cmp : -cmp;
   });
+  // Column totals (the summable columns; status / SLA / cameras are categories).
+  const opsAnnualTotal = opsRows.reduce((s, r) => s + (Number(r.annual) || 0), 0);
+  const opsCollectedTotal = opsRows.reduce((s, r) => s + (Number(r.collected) || 0), 0);
+  const opsOutstandingTotal = opsRows.reduce((s, r) => s + (Number(r.outstanding) || 0), 0);
+  const opsWithContract = opsRows.filter(r => r.status !== 'none').length;
 
   return (
     <div className="p-4 md:p-6 board-print">
@@ -695,6 +705,9 @@ function Dashboard({ navigate }) {
                   { key:'status', label:'Status', cls:'px-4' },
                   { key:'sla', label:'SLA', cls:'px-4' },
                   { key:'cameras', label:'Cameras', cls:'px-4' },
+                  { key:'collected', label:'Collected', cls:'px-4 text-right' },
+                  { key:'outstanding', label:'Outstanding', cls:'px-4 text-right' },
+                  { key:'endDate', label:'End Date', cls:'px-4' },
                 ].map(col => (
                   <th key={col.key} className={`py-2.5 cursor-pointer hover:text-slate-600 transition ${col.cls}`} onClick={()=>toggleOpsSort(col.key)}>
                     {col.label}
@@ -715,9 +728,24 @@ function Dashboard({ navigate }) {
                   <td className="py-3 px-4">{r.status === 'none' ? <span className="text-xs text-slate-400">No contract</span> : <Badge status={r.status} />}</td>
                   <td className="py-3 px-4 font-data text-slate-600">{r.sla}</td>
                   <td className="py-3 px-4 text-slate-600">{r.cameras}</td>
+                  <td className="py-3 px-4 text-right font-data text-emerald-600">{r.collected > 0 ? fmtMoney(r.collected, r.currency) : <span className="text-slate-300">—</span>}</td>
+                  <td className="py-3 px-4 text-right font-data text-amber-600">{r.outstanding > 0 ? fmtMoney(r.outstanding, r.currency) : <span className="text-slate-300">—</span>}</td>
+                  <td className="py-3 px-4 text-slate-600 whitespace-nowrap">{r.endDate ? fmtDate(r.endDate) : <span className="text-slate-300">—</span>}</td>
                 </tr>
               ))}
             </tbody>
+            <tfoot>
+              <tr style={{ borderTop:'2px solid var(--navy-deep)' }}>
+                <td className="py-3 pr-4 font-semibold text-[var(--navy-deep)]">Total <span className="text-xs font-normal text-slate-400">({opsWithContract} with contract)</span></td>
+                <td className="py-3 px-4 text-right font-data font-bold text-[var(--navy-deep)]">{fmtMoney(opsAnnualTotal, 'EUR')}</td>
+                <td className="py-3 px-4"></td>
+                <td className="py-3 px-4"></td>
+                <td className="py-3 px-4"></td>
+                <td className="py-3 px-4 text-right font-data font-bold text-emerald-600">{fmtMoney(opsCollectedTotal, 'EUR')}</td>
+                <td className="py-3 px-4 text-right font-data font-bold text-amber-600">{fmtMoney(opsOutstandingTotal, 'EUR')}</td>
+                <td className="py-3 px-4"></td>
+              </tr>
+            </tfoot>
           </table>
         </div>
       </div>
@@ -834,36 +862,6 @@ function Dashboard({ navigate }) {
         </div>
       )}
 
-      <div className="bg-white rounded-xl border border-[var(--border)] p-5">
-        <div className="sos-pill mb-4">Top Clients by Value</div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead><tr className="text-left text-xs text-slate-400 border-b border-[var(--border)]"><th className="py-2 pr-4">Client</th><th className="py-2 pr-4">Total Value</th><th className="py-2 pr-4">Collected</th><th className="py-2 pr-4">Outstanding</th><th className="py-2 pr-4">End Date</th></tr></thead>
-            <tbody>
-              {topClients.map(t => (
-                <tr key={t.client.id} className="border-b border-[var(--border)] last:border-0 cursor-pointer hover:bg-slate-50" onClick={()=>navigate('client:'+t.client.id)}>
-                  <td className="py-2.5 pr-4">{t.client.companyName}</td>
-                  <td className="py-2.5 pr-4 font-data">{fmtMoney(t.totalValue,'EUR')}</td>
-                  <td className="py-2.5 pr-4 font-data text-emerald-600">{fmtMoney(t.collected,'EUR')}</td>
-                  <td className="py-2.5 pr-4 font-data text-amber-600">{fmtMoney(t.outstanding,'EUR')}</td>
-                  <td className="py-2.5 pr-4">{t.endDate ? fmtDate(t.endDate) : '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-            {topClients.length > 0 && (
-              <tfoot>
-                <tr className="border-t-2 border-[var(--navy-deep)] font-semibold text-[var(--navy-deep)]">
-                  <td className="py-2.5 pr-4">Total</td>
-                  <td className="py-2.5 pr-4 font-data">{fmtMoney(topClients.reduce((s,t)=>s+t.totalValue,0),'EUR')}</td>
-                  <td className="py-2.5 pr-4 font-data text-emerald-600">{fmtMoney(topClients.reduce((s,t)=>s+t.collected,0),'EUR')}</td>
-                  <td className="py-2.5 pr-4 font-data text-amber-600">{fmtMoney(topClients.reduce((s,t)=>s+t.outstanding,0),'EUR')}</td>
-                  <td className="py-2.5 pr-4"></td>
-                </tr>
-              </tfoot>
-            )}
-          </table>
-        </div>
-      </div>
     </div>
   );
 }

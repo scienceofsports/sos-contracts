@@ -560,10 +560,14 @@ export function cameraLabel(contract) {
   const items = computeServiceLineItems(contract?.services);
   const byKey = Object.fromEntries(items.map(i => [i.key, i]));
   const parts = [];
+  // A SELECTED camera is provided regardless of whether its price is separately
+  // charged or bundled ("Included") — the Cameras column tracks hardware, not
+  // pricing. So we count it whenever the service line is present (computeService-
+  // LineItems only returns selected services), not only when it's separately priced.
   const veo = byKey['veo_camera'];
   const fixed = byKey['camera_installation'];
-  if (veo && !veo.included) parts.push(`${veo.qty || 1}× VEO`);
-  if (fixed && !fixed.included) parts.push(`${fixed.qty || 1}× Fixed`);
+  if (veo) parts.push(`${veo.qty || 1}× VEO`);
+  if (fixed) parts.push(`${fixed.qty || 1}× Fixed`);
   if (parts.length) return parts.join(' + ');
   // Fallback: scan prose (special terms + description) for camera mentions.
   const terms = parseSpecialTerms(contract?.specialTerms).map(t => t.text).join(' ');
