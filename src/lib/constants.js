@@ -573,11 +573,12 @@ export function cameraLabel(contract) {
   const terms = parseSpecialTerms(contract?.specialTerms).map(t => t.text).join(' ');
   const text = `${terms} ${contract?.description || ''}`.toLowerCase();
   const hasVeo = /\bveo\b/.test(text);
-  const hasFixed = /\b(fixed|robotic)\s+camera|camera\s+install/.test(text);
   const hasCam = /\bcamera\b/.test(text);
   if (hasVeo) return 'VEO *';
-  if (hasFixed) return 'Fixed *';
-  if (hasCam) return 'Camera *';
+  // Any other camera mention defaults to Fixed — a plain camera install is a
+  // fixed camera unless it's explicitly a VEO. (Still asterisked: it's from
+  // text, not a priced service.)
+  if (hasCam) return 'Fixed *';
   return '—';
 }
 
