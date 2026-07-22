@@ -531,10 +531,11 @@ export function generateContractPdf({ contract, client, company }) {
   }
 
   // --- Scope of Services — premium ruled TABLE (SERVICE | AMOUNT). ----------
-  // Player-funded / Shared: the value comes from the funding model, so to avoid
-  // double-counting the platform-access line CARRIES the whole contract value and
-  // every other service shows "Included"; the Total equals it. Services-basis
-  // deals show real per-line prices. Mirrors ContractDocumentBody + contractPdf.ts.
+  // Player-funded / Shared: itemised via playerFundedScopeRows — each PRICED
+  // service at its real price (these ARE the club-fee portion) plus a single
+  // "Player-funded contribution" row (value − club fee, VAT-free); the rows sum
+  // to the value. Services-basis deals show real per-line prices. Mirrors
+  // ContractDocumentBody + contractPdf.ts.
   if (scopeNum) {
     pillHeader(scopeNum, 'Scope of Services');
 

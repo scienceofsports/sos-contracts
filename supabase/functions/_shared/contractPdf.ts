@@ -78,6 +78,8 @@ const SERVICE_CATALOG: Array<{ key: string; label: string; group: string; unit: 
     detail: 'Video + data combined, match events & clips, player comparisons, team & player rankings — everything accessible in one place.' },
   { key: 'camera_installation', label: 'Installation of Fixed Camera', group: 'Recording Services', unit: 'per_unit', defaultRate: 500,
     detail: 'One-off installation of fixed/robotic camera(s) at the club\'s venue, priced per camera.' },
+  { key: 'veo_camera', label: 'VEO Camera', group: 'Recording Services', unit: 'flat', defaultRate: 0,
+    detail: 'Provision of a VEO automated (robotic) camera for the season, enabling the club to record its own home and away matches — no operator required.' },
   { key: 'physical_data', label: 'Match Physical Performance Data', group: 'Recording Services', unit: 'per_match', defaultRate: 100,
     detail: 'Match physical data, player load tracking and performance benchmarks to protect players and reduce injury risk.' },
   { key: 'live_broadcasting', label: 'Live Match Broadcasting', group: 'Recording Services', unit: 'per_match', defaultRate: 100,
@@ -311,8 +313,9 @@ function commercialValue(c: Any, servicesTotal?: number) {
   const guaranteed = Math.round((clubPortion + playerPortion - commissionAmount) * 100) / 100;
   const hasPlayerFees = fee > 0;
   const variableOnly = gross <= 0;
-  const stored = Number(c?.value) || 0;
-  const value = gross > 0 ? guaranteed : stored;
+  // Variable-only deal (no committed floor) has NO fixed value — return 0, never
+  // a stale stored figure. Matches constants.js (the "frozen value" bug-fix).
+  const value = gross > 0 ? guaranteed : 0;
   return {
     clubFee: clubPortion,
     servicesTotal: svc,
@@ -847,9 +850,9 @@ export async function buildContractPdf(input: {
   }
 
   // --- Scope of Services — premium ruled TABLE (SERVICE | AMOUNT). ----------
-  // Player-funded / Shared: value comes from the funding model, so to avoid
-  // double-counting the platform-access line CARRIES the whole contract value and
-  // every other service shows "Included"; the Total equals it. Services-basis
+  // Player-funded / Shared: itemised — each PRICED service at its real price
+  // (these ARE the club-fee portion) plus a single "Player-funded contribution"
+  // row (value − club fee, VAT-free); the rows sum to the value. Services-basis
   // deals show real per-line prices. Robust to a stale billing_basis (a player
   // payment model alone is enough). Mirrors ContractDocumentBody + contractPdf.js.
   const svcModel = (c?.paymentModel ?? c?.payment_model);

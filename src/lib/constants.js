@@ -36,6 +36,8 @@ export const SERVICE_CATALOG = [
     detail:'Video + data combined, match events & clips, player comparisons, team & player rankings — everything accessible in one place.' },
   { key:'camera_installation', label:'Installation of Fixed Camera', group:'Recording Services', unit:'per_unit', defaultRate:500, defaultQty:1,
     detail:'One-off installation of fixed/robotic camera(s) at the club\'s venue, priced per camera.' },
+  { key:'veo_camera', label:'VEO Camera', group:'Recording Services', unit:'flat', defaultRate:0, defaultQty:1,
+    detail:'Provision of a VEO automated (robotic) camera for the season, enabling the club to record its own home and away matches — no operator required.' },
   { key:'physical_data', label:'Match Physical Performance Data', group:'Recording Services', unit:'per_match', defaultRate:100, defaultQty:0,
     detail:'Match physical data, player load tracking and performance benchmarks to protect players and reduce injury risk.' },
   { key:'live_broadcasting', label:'Live Match Broadcasting', group:'Recording Services', unit:'per_match', defaultRate:100, defaultQty:0,
