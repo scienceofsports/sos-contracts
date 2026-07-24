@@ -5,8 +5,18 @@
 // (OTP-verified email, server timestamp, IP, user-agent, consents) and the
 // document hash. Returns the PDF bytes + its SHA-256.
 // ============================================================================
-import { PDFDocument, StandardFonts, rgb } from 'https://esm.sh/pdf-lib@1.17.1';
+// NOTE: pdf-lib is imported LAZILY (dynamic import inside buildCertificate) rather
+// than at module top-level. Loading pdf-lib's dependency tree at boot was crashing
+// the Supabase edge runtime with BOOT_ERROR, taking down record-signature (the Sign
+// button) for every signer. Deferring the import to first use keeps the module's
+// boot path free of pdf-lib. `rgb` is only a plain colour factory, so we inline it
+// here (byte-identical to pdf-lib's rgb()) to keep the top-level colour constants.
 import { sha256Hex } from './evidence.ts';
+
+// Mirrors pdf-lib's rgb(): returns { type: 'RGB', red, green, blue }. Stable across
+// pdf-lib 1.x. Lets the colour constants below evaluate without importing pdf-lib.
+const rgb = (red: number, green: number, blue: number) =>
+  ({ type: 'RGB' as const, red, green, blue });
 
 const NAVY = rgb(0.039, 0.102, 0.247);   // #0A1A3F
 const CYAN = rgb(0.133, 0.780, 0.902);   // #22C7E6
@@ -38,6 +48,8 @@ export async function buildCertificate(input: {
   signatureImageBytes: Uint8Array | null;
   contractNumber: string;
 }): Promise<{ bytes: Uint8Array; sha256: string }> {
+  // Lazy-load pdf-lib on first use (see top-of-file note). `rgb` is inlined above.
+  const { PDFDocument, StandardFonts } = await import('https://esm.sh/pdf-lib@1.17.1');
   const { snapshot, signer } = input;
   const c = snapshot.contract || {};
   const cl = snapshot.client || {};

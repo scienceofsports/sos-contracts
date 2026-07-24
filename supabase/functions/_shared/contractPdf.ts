@@ -13,8 +13,18 @@
 // The snapshot is the FROZEN document_snapshot: raw DB rows (snake_case). A
 // small `pick()` helper reads snake OR camel so this stays robust.
 // ============================================================================
-import { PDFDocument, StandardFonts, rgb } from 'https://esm.sh/pdf-lib@1.17.1';
+// NOTE: pdf-lib is imported LAZILY (dynamic import inside buildContractPdf) rather
+// than at module top-level. Loading pdf-lib's dependency tree at boot was crashing
+// the Supabase edge runtime with BOOT_ERROR, taking down record-signature (the Sign
+// button) for every signer. Deferring the import to first use keeps the module's
+// boot path free of pdf-lib. `rgb` is only a plain colour factory, so we inline it
+// here (byte-identical to pdf-lib's rgb()) to keep the top-level colour constants.
 import { sha256Hex } from './evidence.ts';
+
+// Mirrors pdf-lib's rgb(): returns { type: 'RGB', red, green, blue }. Stable across
+// pdf-lib 1.x. Lets the colour constants below evaluate without importing pdf-lib.
+const rgb = (red: number, green: number, blue: number) =>
+  ({ type: 'RGB' as const, red, green, blue });
 
 const NAVY = rgb(0.039, 0.102, 0.247);   // #0A1A3F
 const CYAN = rgb(0.133, 0.780, 0.902);   // #22C7E6
@@ -379,6 +389,8 @@ export async function buildContractPdf(input: {
   };
   signatureImageBytes: Uint8Array | null;
 }): Promise<{ bytes: Uint8Array; sha256: string }> {
+  // Lazy-load pdf-lib on first use (see top-of-file note). `rgb` is inlined above.
+  const { PDFDocument, StandardFonts } = await import('https://esm.sh/pdf-lib@1.17.1');
   const { snapshot, signer } = input;
   const c = snapshot?.contract || {};
   const cl = snapshot?.client || {};
@@ -1232,7 +1244,10 @@ export async function buildContractPdf(input: {
   // can reserve the SAME vertical space in BOTH columns and keep the signature
   // lines aligned. The party heading stays the Client (bound); the caption just
   // records who actually signed and under what authority.
-  const wrap = (str: string, size: number, maxWidth: number, maxLines: number): string[] => {
+  // Renamed from `wrap` to avoid colliding with the earlier word-wrap helper
+  // declared above in this same function scope (a duplicate `const wrap` was a
+  // SyntaxError that stopped the whole function booting).
+  const wrapCaption = (str: string, size: number, maxWidth: number, maxLines: number): string[] => {
     const words = str.split(' ');
     const lines: string[] = [];
     let line = '';
@@ -1248,8 +1263,8 @@ export async function buildContractPdf(input: {
   let repLines: string[] = [];
   if (signer.onBehalf && signer.representativeCompany) {
     const reg = signer.representativeRegistration ? ` (Reg. No. ${signer.representativeRegistration})` : '';
-    repLines = wrap(`Signed by ${signer.representativeCompany}${reg}, as duly authorised representative`, 7, colW, 2);
-    if (signer.authorityBasis) repLines = repLines.concat(wrap(`Authority: ${signer.authorityBasis}`, 7, colW, 1));
+    repLines = wrapCaption(`Signed by ${signer.representativeCompany}${reg}, as duly authorised representative`, 7, colW, 2);
+    if (signer.authorityBasis) repLines = repLines.concat(wrapCaption(`Authority: ${signer.authorityBasis}`, 7, colW, 1));
   }
   const capReserve = repLines.length ? repLines.length * 8 + 4 : 0;
 
