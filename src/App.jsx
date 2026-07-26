@@ -2301,6 +2301,55 @@ function ContractDetail({ contractId, navigate }) {
             <div className="flex justify-between"><dt className="text-slate-500">Client</dt><dd className="font-medium">{client?.companyName}</dd></div>
             <div className="flex justify-between"><dt className="text-slate-500">Type</dt><dd className="capitalize">{contract.type.replace('_',' ')}</dd></div>
             <div className="flex justify-between"><dt className="text-slate-500">Value</dt><dd className="font-data text-right">{fmtMoney(contract.value, contract.currency)}{contractTermYears(contract) >= 1.5 && <div className="text-xs text-slate-400 font-normal">≈ {fmtMoney(annualisedValue(contract), contract.currency)}/yr over {Math.round(contractTermYears(contract))} yrs{contract.annualValueOverride != null && ' · pinned'}</div>}</dd></div>
+            {/* Funding model + how the value was derived. Without this the panel
+                shows a bare Value with no indication that it is a player-fee
+                projection (rate × months × min players, less commission) rather
+                than a flat priced fee — the single most important thing to see
+                on a Shared / Player-funded deal. */}
+            {(() => {
+              const model = contract.paymentModel ?? contract.payment_model;
+              if (!model) return null;
+              const label = PAYMENT_MODEL_LABELS[model];
+              if (!label) return null;
+              const short = label.split(' — ')[0];
+              const pf = isPlayerFunded(contract);
+              const cv = pf ? commercialValue(contract) : null;
+              const split = pf ? vatSplit(contract) : null;
+              const money = (n) => fmtMoney(n, contract.currency);
+              return (
+                <>
+                  <div className="flex justify-between"><dt className="text-slate-500">Funding</dt><dd className="text-right">{short}</dd></div>
+                  {pf && cv?.hasPlayerFees && (
+                    <div className="flex justify-between gap-3">
+                      <dt className="text-slate-500">Player fees</dt>
+                      <dd className="font-data text-right">
+                        {money(cv.playerPortion)}
+                        <div className="text-xs text-slate-400 font-normal">
+                          {cv.minPlayers} × {money(cv.fee)}{cv.months > 1 ? ` × ${cv.months} mo` : ''}
+                          {cv.pct > 0 ? ` · less ${cv.pct}% commission (${money(cv.commissionAmount)})` : ''}
+                        </div>
+                      </dd>
+                    </div>
+                  )}
+                  {pf && cv?.clubFee > 0 && (
+                    <div className="flex justify-between"><dt className="text-slate-500">Club fixed fee</dt><dd className="font-data text-right">{money(cv.clubFee)}</dd></div>
+                  )}
+                  {pf && split && split.exemptNet > 0 && (
+                    <div className="flex justify-between gap-3">
+                      <dt className="text-slate-500">VAT basis</dt>
+                      <dd className="text-right text-xs text-slate-500">
+                        {split.isSplit
+                          ? <>VAT on club fee {money(split.vatableNet)} only · {money(split.exemptNet)} player fees VAT-free</>
+                          : <>Player-funded — no VAT on {money(split.exemptNet)}</>}
+                      </dd>
+                    </div>
+                  )}
+                  {pf && cv?.variableOnly && (
+                    <div className="flex justify-between"><dt className="text-slate-500">Basis</dt><dd className="text-right text-xs text-slate-500">Billed on actual enrolment — no committed floor</dd></div>
+                  )}
+                </>
+              );
+            })()}
             {/* Display-only annual run-rate override. Admin-only, shown once a
                 contract is signed/active (drafts recompute from dates on save).
                 Reporting figure — never changes the signed value or dates. */}

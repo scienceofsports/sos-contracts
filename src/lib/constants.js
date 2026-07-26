@@ -313,7 +313,14 @@ export function vatSplit(contract) {
   // player money and carries no VAT at all. The fixed fee is kept WHOLE (the
   // club commission is treated as coming off the player portion only), which is
   // also what the on-screen "guaranteed = club fixed fee" label promises.
-  const clubFee = r2(Number(contract?.clubFixedFee ?? contract?.club_fixed_fee) || 0);
+  // Pure Player-funded (players_all) EXCLUDES the club fixed fee from the value
+  // (see `includeClubFee` in commercialValue) — so a fee left over in the form
+  // from a previous model must not be carved out of the value as vatable here.
+  // Only Shared (club_players) actually has a club fee inside the value.
+  const model = contract?.paymentModel ?? contract?.payment_model;
+  const clubFee = model === 'players_all'
+    ? 0
+    : r2(Number(contract?.clubFixedFee ?? contract?.club_fixed_fee) || 0);
   const vatableNet = Math.min(clubFee, value);          // never exceed the value
   const exemptNet = r2(value - vatableNet);
   return { vatableNet, exemptNet, isSplit: vatableNet > 0 && exemptNet > 0 };
@@ -342,7 +349,12 @@ export function vatSplit(contract) {
 export function playerFundedScopeRows(contract, lineItems, fm) {
   if (!isPlayerFunded(contract)) return null;
   const r2 = (n) => Math.round(n * 100) / 100;
-  const clubFee = r2(Number(contract?.clubFixedFee ?? contract?.club_fixed_fee) || 0);
+  // Same rule as vatSplit/commercialValue: only Shared carries a club fixed fee
+  // inside the value; on pure Player-funded the whole value is player money.
+  const pfModel = contract?.paymentModel ?? contract?.payment_model;
+  const clubFee = pfModel === 'players_all'
+    ? 0
+    : r2(Number(contract?.clubFixedFee ?? contract?.club_fixed_fee) || 0);
   const value = r2(Number(contract?.value) || 0);
   // Priced services (real list price > 0) become the itemised club-fee lines;
   // zero-priced catalogue items stay "Included" deliverables.

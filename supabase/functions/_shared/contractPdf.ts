@@ -167,7 +167,11 @@ function vatSummary(contract: Any, fm: (a: Any) => string, client?: Any): { appl
   const chargeable = (country === 'CY') || (country && EU.includes(country) && !hasVatNo);
   if (vat <= 0.005 && chargeable && net > 0) {
     rate = rate || 0.19;
-    const clubFee = Math.round((Number(contract?.clubFixedFee ?? contract?.club_fixed_fee) || 0) * 100) / 100;
+    // Pure Player-funded excludes the club fixed fee from the value, so a stale
+    // fee must not be treated as vatable here (keep in sync with vatSplit).
+    const clubFee = svcModel === 'players_all'
+      ? 0
+      : Math.round((Number(contract?.clubFixedFee ?? contract?.club_fixed_fee) || 0) * 100) / 100;
     const vatableNet = isPF ? Math.min(clubFee, net) : net;
     vat = Math.round(vatableNet * rate * 100) / 100;
     gross = Math.round((net + vat) * 100) / 100;
@@ -874,7 +878,9 @@ export async function buildContractPdf(input: {
   // row (value − club fee, VAT-free). Local port of playerFundedScopeRows in
   // src/lib/constants.js — keep in sync.
   const r2pf = (n: number) => Math.round(n * 100) / 100;
-  const pfClubFee = r2pf(Number(c?.clubFixedFee ?? c?.club_fixed_fee) || 0);
+  const pfClubFee = svcModel === 'players_all'
+    ? 0
+    : r2pf(Number(c?.clubFixedFee ?? c?.club_fixed_fee) || 0);
   const pfPlayerAmount = r2pf((Number(c?.value) || 0) - pfClubFee);
   // Spell out the derivation (players × fee × months, less commission %) when the
   // inputs are set — keep in sync with playerFundedScopeRows in constants.js.
