@@ -26,6 +26,7 @@ import {
   parseSpecialTerms,
   serviceLevelsLines,
   vatSummary,
+  paymentTimingWording,
 } from './lib/constants.js';
 import {
   nowISO,
@@ -2992,10 +2993,10 @@ function ContractDocumentBody({ contract, client, company, showAdminWarnings = f
                 </React.Fragment>
               )}
 
-              {(() => { const vs = vatSummary(contract, (a) => fmtMoney(a, contract.currency), client); return (
+              {(() => { const vs = vatSummary(contract, (a) => fmtMoney(a, contract.currency), client); const pt = paymentTimingWording(contract); return (
               <React.Fragment>
               <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{feesNum}.</span> Fees & Payment</div>
-              <p className="text-sm text-slate-700 mb-2">In consideration of the services provided under this Agreement, the Client shall pay the Service Provider a total of <strong>{fmtMoney(vs.net, contract.currency)}</strong>{vs.applies ? ' (exclusive of VAT)' : ''}, payable <strong>{contract.paymentType === 'one_time' ? 'in a single payment' : contract.paymentType === 'milestone' ? 'in instalments' : contract.paymentType.replace('_',' ')}</strong>, net {contract.paymentTermsDays} days from the date of a valid invoice.</p>
+              <p className="text-sm text-slate-700 mb-2">In consideration of the services provided under this Agreement, the Client shall pay the Service Provider a total of <strong>{fmtMoney(vs.net, contract.currency)}</strong>{vs.applies ? ' (exclusive of VAT)' : ''}, payable <strong>{contract.paymentType === 'one_time' ? 'in a single payment' : contract.paymentType === 'milestone' ? 'in instalments' : contract.paymentType.replace('_',' ')}</strong>{pt.timingPhrase}</p>
               {vs.sentence && <p className="text-sm text-slate-700 mb-2">{vs.sentence}</p>}
               {Array.isArray(contract.payments) && contract.payments.length > 1 && (
                 <table className="w-full text-sm mb-4 border-collapse">
@@ -3017,9 +3018,10 @@ function ContractDocumentBody({ contract, client, company, showAdminWarnings = f
                   </tbody>
                 </table>
               )}
+              {pt.advanceInvoiceSentence && <p className="text-sm text-slate-700 mb-2">{pt.advanceInvoiceSentence}</p>}
+              <p className="text-sm text-slate-700 mb-4">All payments shall be made by bank transfer following the issuance of a valid invoice by the Service Provider{pt.advanceInvoiceSentence ? ' for the applicable instalment' : ''}, in accordance with applicable VAT regulations. A late payment penalty of {contract.latePaymentPenalty}% per month applies to overdue amounts.</p>
               </React.Fragment>
               ); })()}
-              <p className="text-sm text-slate-700 mb-4">All payments shall be made by bank transfer following the issuance of a valid invoice by the Service Provider, in accordance with applicable VAT regulations. A late payment penalty of {contract.latePaymentPenalty}% per month applies to overdue amounts.</p>
               {(company.bankName || company.bankIBAN || company.bankSWIFT) && (
                 <div className="text-sm text-slate-700 mb-8 rounded-lg p-4" style={{ background:'rgba(10,26,63,0.04)', border:'1px solid var(--border)' }}>
                   <div className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color:'var(--navy-deep)' }}>Bank Details (Service Provider)</div>

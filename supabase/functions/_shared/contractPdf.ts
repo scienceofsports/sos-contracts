@@ -190,6 +190,27 @@ function vatSummary(contract: Any, fm: (a: Any) => string, client?: Any): { appl
   return { applies: false, net, vat: 0, gross: net, ratePct, sentence: noteText, amountLabel: 'Amount', note: noteText };
 }
 
+// Port of paymentTimingWording — net terms vs a dated instalment schedule are
+// mutually exclusive payment triggers; stating both contradicts itself. When a
+// dated schedule exists the fixed dates govern and we promise an invoice ahead
+// of each. Keep in sync with src/lib/constants.js. Reads snake_case too, since
+// the frozen document_snapshot may carry either casing.
+function paymentTimingWording(contract: Any): { timingPhrase: string; advanceInvoiceSentence: string } {
+  const pays = Array.isArray(contract?.payments) ? contract.payments : [];
+  const dated = pays.length > 1 && pays.every((p: Any) => p?.dueDate || p?.due_date);
+  if (dated) {
+    return {
+      timingPhrase: ' in accordance with the payment schedule set out below.',
+      advanceInvoiceSentence: 'The Service Provider shall issue a separate invoice for each instalment in advance of its due date.',
+    };
+  }
+  const days = contract?.paymentTermsDays ?? contract?.payment_terms_days;
+  return {
+    timingPhrase: days != null ? `, net ${days} days from the date of a valid invoice.` : '.',
+    advanceInvoiceSentence: '',
+  };
+}
+
 const UNLIMITED_SEATS = -1;
 function seatLabel(count: Any, singular: string, plural: string): string {
   if (count === UNLIMITED_SEATS) return `Unlimited ${plural}`;
@@ -1076,7 +1097,8 @@ export async function buildContractPdf(input: {
     ensure(40);
     pillHeader(feesNum, 'Fees & Payment');
     const vs = vatSummary(c, (a: Any) => fmtMoney(a, currency), cl);
-    text(`In consideration of the services provided under this Agreement, the Client shall pay the Service Provider a total of ${fmtMoney(vs.net, currency)}${vs.applies ? ' (exclusive of VAT)' : ''}, payable ${paymentType}, net ${paymentTermsDays} days from the date of a valid invoice.`, { size: 10, gap: vs.sentence ? 3 : 6 });
+    const pt = paymentTimingWording(c);
+    text(`In consideration of the services provided under this Agreement, the Client shall pay the Service Provider a total of ${fmtMoney(vs.net, currency)}${vs.applies ? ' (exclusive of VAT)' : ''}, payable ${paymentType}${pt.timingPhrase}`, { size: 10, gap: vs.sentence ? 3 : 6 });
     if (vs.sentence) text(vs.sentence, { size: 10, gap: 6 });
     // Instalment schedule table (only when more than one payment).
     if (payments.length > 1) {
@@ -1106,7 +1128,8 @@ export async function buildContractPdf(input: {
       }
       y += 8;
     }
-    text(`All payments shall be made by bank transfer following the issuance of a valid invoice by the Service Provider, in accordance with applicable VAT regulations. A late payment penalty of ${latePaymentPenalty}% per month applies to overdue amounts.`, { size: 10, gap: 10 });
+    if (pt.advanceInvoiceSentence) text(pt.advanceInvoiceSentence, { size: 10, gap: 6 });
+    text(`All payments shall be made by bank transfer following the issuance of a valid invoice by the Service Provider${pt.advanceInvoiceSentence ? ' for the applicable instalment' : ''}, in accordance with applicable VAT regulations. A late payment penalty of ${latePaymentPenalty}% per month applies to overdue amounts.`, { size: 10, gap: 10 });
   }
   {
     const bankName = pick(co, 'bankName', 'bank_name');

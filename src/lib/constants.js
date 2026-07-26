@@ -551,6 +551,35 @@ export function vatSummary(contract, fm, client) {
   return { applies: false, net, vat: 0, gross: net, ratePct, sentence: noteText, amountLabel: 'Amount', note: noteText };
 }
 
+// Payment-timing wording for the Fees clause. Two payment triggers exist and
+// they are mutually exclusive — stating both is a contradiction a client can
+// exploit:
+//   * NET TERMS  — "net N days from the date of a valid invoice". The due date
+//     floats with whenever the invoice is issued. Correct for a single payment.
+//   * FIXED DATES — an instalment schedule with explicit due dates. The dates
+//     govern; "net 30" is then meaningless (invoice on 01/08 for a 15/08
+//     instalment and the two rules disagree by a fortnight).
+// So when the contract carries a real dated instalment schedule, we DROP the net
+// terms and instead promise an invoice ahead of each due date — which is also
+// what makes the fixed dates collectable.
+// Returns { timingPhrase, advanceInvoiceSentence } — the latter '' when not
+// applicable. NOTE: ported into both PDF generators; keep all three in sync.
+export function paymentTimingWording(contract) {
+  const pays = Array.isArray(contract?.payments) ? contract.payments : [];
+  const dated = pays.length > 1 && pays.every(p => p?.dueDate || p?.due_date);
+  if (dated) {
+    return {
+      timingPhrase: ' in accordance with the payment schedule set out below.',
+      advanceInvoiceSentence: 'The Service Provider shall issue a separate invoice for each instalment in advance of its due date.',
+    };
+  }
+  const days = contract?.paymentTermsDays ?? contract?.payment_terms_days;
+  return {
+    timingPhrase: days != null ? `, net ${days} days from the date of a valid invoice.` : '.',
+    advanceInvoiceSentence: '',
+  };
+}
+
 // Build a short SLA bullet that respects per-team SLA bands (not just the single
 // slaHours). Single SLA -> "24-hour SLA on key analytical outputs after each
 // match"; mixed -> "SLA: 24h (U17, U19, Men's); 72h (U14, U15, U16)".

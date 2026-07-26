@@ -22,7 +22,7 @@
    ========================================================================= */
 import { jsPDF } from 'jspdf';
 import { fmtDate, fmtMoney, daysBetween } from './format.js';
-import { computeServiceLineItems, platformSeatsSummary, SERVICE_GROUPS, analysisScopeText, seasonLabelFromDates, commercialModelText, parseSpecialTerms, serviceLevelsLines, vatSummary, clientPartyClause, isPlayerFunded, playerFundedScopeRows } from './constants.js';
+import { computeServiceLineItems, platformSeatsSummary, SERVICE_GROUPS, analysisScopeText, seasonLabelFromDates, commercialModelText, parseSpecialTerms, serviceLevelsLines, vatSummary, paymentTimingWording, clientPartyClause, isPlayerFunded, playerFundedScopeRows } from './constants.js';
 
 export function generateContractPdf({ contract, client, company }) {
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
@@ -722,7 +722,8 @@ export function generateContractPdf({ contract, client, company }) {
     ensure(40);
     pillHeader(feesNum, 'Fees & Payment');
     const vs = vatSummary(contract, (a) => fmtMoney(a, contract.currency), client);
-    text(`In consideration of the services provided under this Agreement, the Client shall pay the Service Provider a total of ${fmtMoney(vs.net, contract.currency)}${vs.applies ? ' (exclusive of VAT)' : ''}, payable ${payWord}, net ${contract.paymentTermsDays} days from the date of a valid invoice.`, { size: 10, gap: vs.sentence ? 3 : 6 });
+    const pt = paymentTimingWording(contract);
+    text(`In consideration of the services provided under this Agreement, the Client shall pay the Service Provider a total of ${fmtMoney(vs.net, contract.currency)}${vs.applies ? ' (exclusive of VAT)' : ''}, payable ${payWord}${pt.timingPhrase}`, { size: 10, gap: vs.sentence ? 3 : 6 });
     if (vs.sentence) text(vs.sentence, { size: 10, gap: 6 });
     // Instalment schedule table (only when more than one payment).
     const pays = Array.isArray(contract.payments) ? contract.payments : [];
@@ -749,7 +750,8 @@ export function generateContractPdf({ contract, client, company }) {
       });
       y += 8;
     }
-    text(`All payments shall be made by bank transfer following the issuance of a valid invoice by the Service Provider, in accordance with applicable VAT regulations. A late payment penalty of ${contract.latePaymentPenalty}% per month applies to overdue amounts.`, { size: 10, gap: 10 });
+    if (pt.advanceInvoiceSentence) text(pt.advanceInvoiceSentence, { size: 10, gap: 6 });
+    text(`All payments shall be made by bank transfer following the issuance of a valid invoice by the Service Provider${pt.advanceInvoiceSentence ? ' for the applicable instalment' : ''}, in accordance with applicable VAT regulations. A late payment penalty of ${contract.latePaymentPenalty}% per month applies to overdue amounts.`, { size: 10, gap: 10 });
   }
 
   // --- Tinted bank-details box. --------------------------------------------
