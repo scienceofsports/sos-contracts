@@ -27,6 +27,7 @@ import {
   serviceLevelsLines,
   vatSummary,
   paymentTimingWording,
+  agreementDate,
 } from './lib/constants.js';
 import {
   nowISO,
@@ -2770,7 +2771,7 @@ function ContractDocumentBody({ contract, client, company, showAdminWarnings = f
         })()}
 
         <p className="text-sm text-slate-700 mb-6">
-          This Agreement is made on <strong>{fmtDate(contract.createdAt || contract.sentAt || new Date().toISOString())}</strong> between:
+          This Agreement is made on <strong>{fmtDate(agreementDate(contract))}</strong> between:
         </p>
         <p className="text-sm text-slate-700 mb-4">
           <strong>{company.name}</strong>, a company registered under the laws of the Republic of Cyprus with registration number {company.registrationNumber}, VAT number {company.vatNumber}, having its registered office at {company.registeredAddress} (the "Service Provider"),
@@ -3131,7 +3132,7 @@ function ContractDocumentBody({ contract, client, company, showAdminWarnings = f
                 signature={company.signatoryName}
                 name={company.signatoryName}
                 title={company.signatoryTitle}
-                date={fmtDate(contract.signedAt || contract.sentAt || contract.createdAt)}
+                date={fmtDate(agreementDate(contract))}
               />
             ) : (
               <SignatureLines />

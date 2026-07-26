@@ -22,7 +22,7 @@
    ========================================================================= */
 import { jsPDF } from 'jspdf';
 import { fmtDate, fmtMoney, daysBetween } from './format.js';
-import { computeServiceLineItems, platformSeatsSummary, SERVICE_GROUPS, analysisScopeText, seasonLabelFromDates, commercialModelText, parseSpecialTerms, serviceLevelsLines, vatSummary, paymentTimingWording, clientPartyClause, isPlayerFunded, playerFundedScopeRows } from './constants.js';
+import { computeServiceLineItems, platformSeatsSummary, SERVICE_GROUPS, analysisScopeText, seasonLabelFromDates, commercialModelText, parseSpecialTerms, serviceLevelsLines, vatSummary, paymentTimingWording, agreementDate, clientPartyClause, isPlayerFunded, playerFundedScopeRows } from './constants.js';
 
 export function generateContractPdf({ contract, client, company }) {
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
@@ -405,7 +405,7 @@ export function generateContractPdf({ contract, client, company }) {
   rule();
 
   // --- Preamble — both parties, full details. ------------------------------
-  text(`This Agreement is made on ${fmtDate(contract.createdAt || contract.sentAt || new Date().toISOString())} between:`, { size: 10, gap: 4 });
+  text(`This Agreement is made on ${fmtDate(agreementDate(contract))} between:`, { size: 10, gap: 4 });
   text(`${company?.name || '—'}, a company registered under the laws of the Republic of Cyprus with registration number ${company?.registrationNumber || '—'}, VAT number ${company?.vatNumber || '—'}, having its registered office at ${company?.registeredAddress || '—'} (the "Service Provider"),`, { size: 10, gap: 2 });
   text('and', { size: 10, gap: 2 });
   // Blank client fields show a bracketed "[ … ]" placeholder so it's obvious
@@ -885,7 +885,9 @@ export function generateContractPdf({ contract, client, company }) {
   const heads = [`For and on behalf of ${companyName}`, `For and on behalf of ${clientName}`];
 
   const signed = !!contract.signedAt;
-  const provDate = contract.signedAt || contract.sentAt || contract.createdAt;
+  // The provider counter-signs as of the agreement date — NOT sentAt, which
+  // moves on every re-send and split this date from the "made on" line above.
+  const provDate = agreementDate(contract);
   const cols = [
     // Provider column = Scios authorised signatory (auto counter-signature).
     { sigImg: company?.signatorySignature || null, sigFallback: company?.signatoryName || '', name: company?.signatoryName || '', title: company?.signatoryTitle || '', date: (company?.signatoryName ? fmtDate(provDate) : '') },

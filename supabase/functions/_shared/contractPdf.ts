@@ -190,6 +190,14 @@ function vatSummary(contract: Any, fm: (a: Any) => string, client?: Any): { appl
   return { applies: false, net, vat: 0, gross: net, ratePct, sentence: noteText, amountLabel: 'Amount', note: noteText };
 }
 
+// Port of agreementDate — THE date of the agreement, used for both the "made
+// on" line and the provider's countersignature so the two can never disagree.
+// Pinned to createdAt, not sentAt (which moves on every re-send). Keep in sync
+// with src/lib/constants.js.
+function agreementDate(contract: Any): string {
+  return pick(contract, 'createdAt', 'created_at', 'sentAt', 'sent_at') || new Date().toISOString();
+}
+
 // Port of paymentTimingWording — net terms vs a dated instalment schedule are
 // mutually exclusive payment triggers; stating both contradicts itself. When a
 // dated schedule exists the fixed dates govern and we promise an invoice ahead
@@ -727,7 +735,7 @@ export async function buildContractPdf(input: {
   const governingLaw = pick(c, 'governingLaw', 'governing_law');
   const jurisdiction = c.jurisdiction;
   const specialTerms = pick(c, 'specialTerms', 'special_terms');
-  const madeOn = pick(c, 'createdAt', 'created_at', 'sentAt', 'sent_at') || new Date().toISOString();
+  const madeOn = agreementDate(c);
 
   const companyName = co.name || '—';
   const companyReg = pick(co, 'registrationNumber', 'registration_number') || '—';
@@ -1283,7 +1291,12 @@ export async function buildContractPdf(input: {
   const clientSig = await embedImageBytes(input.signatureImageBytes);
 
   const cols = [
-    { sig: providerSig, sigFallback: providerName, name: providerName, title: providerTitle, date: signedAtFmt },
+    // Provider counter-signs as of the AGREEMENT date (same value as the "made
+    // on" line above) — not the client's signing timestamp, which is a fact
+    // about the client's act, not ours.
+    { sig: providerSig, sigFallback: providerName, name: providerName, title: providerTitle, date: fmtDate(agreementDate(c)) },
+    // Client column keeps the real captured signing timestamp — this is
+    // evidence of when they actually signed and must never be normalised.
     { sig: clientSig, sigFallback: signer.name, name: signer.name, title: signer.title || '', date: signedAtFmt },
   ];
 

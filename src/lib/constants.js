@@ -551,6 +551,25 @@ export function vatSummary(contract, fm, client) {
   return { applies: false, net, vat: 0, gross: net, ratePct, sentence: noteText, amountLabel: 'Amount', note: noteText };
 }
 
+// THE date of the agreement — the single source for both the "This Agreement is
+// made on …" line and the Service Provider's countersignature date, so the two
+// can never disagree within one document.
+//
+// Pinned to createdAt (when the agreement was drawn up), NOT sentAt. sentAt is
+// derived from the LAST send event, so every re-send silently re-dated the
+// document — and because the made-on line and the signature block fell back
+// through sentAt differently, a re-sent contract could print "made on 07/07"
+// against a countersignature of 17/07. The agreement date is a fact about the
+// document, not about how many times it was emailed.
+//
+// Falls back to sentAt then now() only when createdAt is missing (legacy rows).
+// NOTE: ported into both PDF generators; keep all three in sync.
+export function agreementDate(contract) {
+  return contract?.createdAt || contract?.created_at
+    || contract?.sentAt || contract?.sent_at
+    || new Date().toISOString();
+}
+
 // Payment-timing wording for the Fees clause. Two payment triggers exist and
 // they are mutually exclusive — stating both is a contradiction a client can
 // exploit:
