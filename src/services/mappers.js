@@ -122,7 +122,12 @@ export function contractFromRow(row, payments = [], events = []) {
   // Derive signer/consent/audit fields from the tamper-evident signature_events
   // ledger (the authoritative source), so the admin UI reflects real signings.
   const signedEvent = (events || []).find((e) => e.event_type === 'signed') || null;
-  const sentEvent = (events || []).find((e) => e.event_type === 'sent') || null;
+  // LAST 'sent' event, not the first: events arrive in ascending time order, and
+  // a contract can be re-sent many times (expired link, wrong address, revised
+  // terms). `sentAt` drives the signing-link expiry in effectiveContractStatus,
+  // so taking the first send made a freshly re-sent contract show as 'Expired'
+  // for as long as the ORIGINAL link had been dead.
+  const sentEvent = [...(events || [])].reverse().find((e) => e.event_type === 'sent') || null;
   const auditLog = (events || [])
     .slice()
     .sort((a, b) => new Date(a.server_timestamp || a.created_at) - new Date(b.server_timestamp || b.created_at))
