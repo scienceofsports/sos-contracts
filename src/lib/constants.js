@@ -205,6 +205,18 @@ export const PAYMENT_MODEL_LABELS = {
   players_all: 'Player-funded — fees are collected directly from players',
 };
 
+// Opening line of the Commercial Terms clause, per funding model. Deliberately
+// separate from PAYMENT_MODEL_LABELS: those describe the models to an admin
+// choosing one, and read as statements of fact once printed in a signed contract
+// (e.g. "fees are collected directly from players" is untrue — the Client
+// collects from families through its own offices and pays the Service Provider).
+// NOTE: ported into both PDF generators — keep in sync.
+export const DOCUMENT_MODEL_INTRO = {
+  club_all: 'Club-funded',
+  club_players: 'Shared funding — a fixed fee, with the remainder funded by player participation',
+  players_all: 'Player-funded — the fees are funded by player participation and paid by the Client',
+};
+
 // Default club commission / kickback rate on player fees when none is entered.
 export const DEFAULT_KICKBACK_PCT = 25;
 
@@ -400,7 +412,12 @@ export function commercialModelText(contract, fm) {
   if (basis !== 'player_funded' || !model) return { intro: '', breakdown: '', commission: '' };
   const cv = commercialValue(contract);
   const minP = Number(contract.minPlayers) || 0;
-  const intro = PAYMENT_MODEL_LABELS[model] || '';
+  // The UI labels describe the models to an admin picking one ("fees are collected
+  // directly from players") — which is factually WRONG in the contract: the Client
+  // collects and pays the Service Provider, nothing is collected from players by
+  // us. The next sentence of the clause says exactly that, so the label contradicts
+  // it. Use document wording here instead. NOTE: ported into both PDF generators.
+  const intro = DOCUMENT_MODEL_INTRO[model] || PAYMENT_MODEL_LABELS[model] || '';
   // The CLUB pays the whole contract value in every model. Player fees FUND the
   // Client's payment (min players × fee × months); they are not collected from
   // players separately. The club commission is DEDUCTED from the total.
@@ -417,7 +434,11 @@ export function commercialModelText(contract, fm) {
   // have none — don't invent a commission clause they never signed).
   const hasPct = (contract.kickbackPct !== '' && contract.kickbackPct != null && Number(contract.kickbackPct) > 0) || cv.pct > 0;
   const commissionStr = hasPct ? ` A club commission of ${cv.pct}% is deducted from the player-participation fees.` : '';
-  const fundStr = ' The full contract value is payable by the Client; player participation fees fund part of the Client\'s payment and are not collected separately from players.';
+  // On players_all the player fees fund the WHOLE payment, not "part" of it — the
+  // "part" wording only describes Shared, where a club fixed fee covers the rest.
+  const fundStr = model === 'players_all'
+    ? ' The full contract value is payable by the Client; the player-participation fees fund the Client\'s payment and are not collected from players by the Service Provider.'
+    : ' The full contract value is payable by the Client; player participation fees fund part of the Client\'s payment and are not collected separately from players.';
 
   if (model === 'club_players') {
     // Shared: services + club fixed fee + player fees, less commission — all paid

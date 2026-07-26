@@ -294,6 +294,16 @@ const PAYMENT_MODEL_LABELS: Record<string, string> = {
   players_all: 'Player-funded — fees are collected directly from players',
 };
 
+// Contract wording for the Commercial Terms opening line — the UI labels above
+// read as false statements once printed in a signed agreement (nothing is
+// collected from players by the Service Provider; the Client collects and pays).
+// Keep in sync with DOCUMENT_MODEL_INTRO in src/lib/constants.js.
+const DOCUMENT_MODEL_INTRO: Record<string, string> = {
+  club_all: 'Club-funded',
+  club_players: 'Shared funding — a fixed fee, with the remainder funded by player participation',
+  players_all: 'Player-funded — the fees are funded by player participation and paid by the Client',
+};
+
 // Port of commercialValue + commercialModelText. Accepts snake_case or
 // camelCase. NEW per-player model: the contract value is the GUARANTEED club
 // fixed fee only; player fees are a per-player-per-month rate billed on actual
@@ -346,7 +356,7 @@ function commercialModelText(c: Any, fm: (a: Any) => string): { intro: string; b
   if (basis !== 'player_funded' || !model) return { intro: '', breakdown: '', commission: '' };
   const cv = commercialValue(c);
   const minP = Number(c?.minPlayers ?? c?.min_players) || 0;
-  const intro = PAYMENT_MODEL_LABELS[model] || '';
+  const intro = DOCUMENT_MODEL_INTRO[model] || PAYMENT_MODEL_LABELS[model] || '';
   // Keep in sync with src/lib/constants.js: the CLUB pays the whole value; player
   // fees fund the Client's payment; the commission is deducted from the total.
   // A single-period deal is a one-off per-player season fee, not a subscription
@@ -360,7 +370,10 @@ function commercialModelText(c: Any, fm: (a: Any) => string): { intro: string; b
   const rawPct = c?.kickbackPct ?? c?.kickback_pct;
   const hasPct = (rawPct !== '' && rawPct != null && Number(rawPct) > 0) || cv.pct > 0;
   const commissionStr = hasPct ? ` A club commission of ${cv.pct}% is deducted from the player-participation fees.` : '';
-  const fundStr = ' The full contract value is payable by the Client; player participation fees fund part of the Client\'s payment and are not collected separately from players.';
+  // players_all: the fees fund the WHOLE payment (keep in sync with constants.js).
+  const fundStr = model === 'players_all'
+    ? ' The full contract value is payable by the Client; the player-participation fees fund the Client\'s payment and are not collected from players by the Service Provider.'
+    : ' The full contract value is payable by the Client; player participation fees fund part of the Client\'s payment and are not collected separately from players.';
 
   if (model === 'club_players') {
     const feeClause = cv.clubFee > 0
