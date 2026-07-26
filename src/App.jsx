@@ -1388,7 +1388,12 @@ function ContractForm({ navigate, editContractId }) {
       // Club-funded) — a stale figure must never slip through as the agreed fee.
       // Club-funded re-derives its value from the services total via the effect.
       const value = (model === 'club_players' || model === 'players_all') ? '' : f.value;
-      return { ...f, paymentModel: model, billingBasis, value };
+      // The club fixed fee only exists on Shared — its input is hidden for the
+      // other models but the stored figure survived, so a fee left from a previous
+      // model kept being treated as the vatable portion (a €2,500 fee showed as
+      // €475 VAT on a pure player-funded deal). Clear it whenever it can't apply.
+      const clubFixedFee = model === 'club_players' ? f.clubFixedFee : '';
+      return { ...f, paymentModel: model, billingBasis, value, clubFixedFee };
     });
   };
 

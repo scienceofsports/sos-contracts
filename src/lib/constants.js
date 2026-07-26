@@ -376,7 +376,9 @@ export function playerFundedScopeRows(contract, lineItems, fm) {
   let label = 'Player-funded contribution (net of commission)';
   if (minPlayers > 0 && fee > 0 && months > 0) {
     const commStr = pct > 0 ? `, less ${pct}% commission` : '';
-    label = `Player-funded contribution (${minPlayers} × ${money(fee)} × ${months} months${commStr})`;
+    // Single period = a one-off per-player season fee; don't render "× 1 months".
+    const perStr = months === 1 ? ' for the season' : ` × ${months} months`;
+    label = `Player-funded contribution (${minPlayers} × ${money(fee)}${perStr}${commStr})`;
   }
   return {
     clubFee,
@@ -402,9 +404,13 @@ export function commercialModelText(contract, fm) {
   // The CLUB pays the whole contract value in every model. Player fees FUND the
   // Client's payment (min players × fee × months); they are not collected from
   // players separately. The club commission is DEDUCTED from the total.
-  const monthsStr = cv.months ? ` over ${cv.months} months` : '';
+  // A single-period deal is a one-off per-player fee for the season, NOT a monthly
+  // subscription — saying "per player per month over 1 months" invites the club to
+  // read it as recurring (and is ungrammatical). Word it per-season instead.
+  const oneOff = cv.months === 1;
+  const monthsStr = oneOff ? ' for the season' : (cv.months ? ` per month over ${cv.months} months` : '');
   const playerFeeStr = cv.fee
-    ? `a player-participation fee of ${fm(cv.fee)} per player per month${monthsStr}`
+    ? `a player-participation fee of ${fm(cv.fee)} per player${monthsStr}`
     : `a player-participation fee agreed with the Client${monthsStr}`;
   const minStr = minP ? `, calculated on a minimum of ${minP} players` : '';
   // Only assert a commission % when it was actually configured (legacy rows may

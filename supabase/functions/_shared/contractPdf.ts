@@ -349,9 +349,12 @@ function commercialModelText(c: Any, fm: (a: Any) => string): { intro: string; b
   const intro = PAYMENT_MODEL_LABELS[model] || '';
   // Keep in sync with src/lib/constants.js: the CLUB pays the whole value; player
   // fees fund the Client's payment; the commission is deducted from the total.
-  const monthsStr = cv.months ? ` over ${cv.months} months` : '';
+  // A single-period deal is a one-off per-player season fee, not a subscription
+  // (keep in sync with commercialModelText in src/lib/constants.js).
+  const oneOff = cv.months === 1;
+  const monthsStr = oneOff ? ' for the season' : (cv.months ? ` per month over ${cv.months} months` : '');
   const playerFeeStr = cv.fee
-    ? `a player-participation fee of ${fm(cv.fee)} per player per month${monthsStr}`
+    ? `a player-participation fee of ${fm(cv.fee)} per player${monthsStr}`
     : `a player-participation fee agreed with the Client${monthsStr}`;
   const minStr = minP ? `, calculated on a minimum of ${minP} players` : '';
   const rawPct = c?.kickbackPct ?? c?.kickback_pct;
@@ -892,7 +895,9 @@ export async function buildContractPdf(input: {
   let pfLabel = 'Player-funded contribution (net of commission)';
   if (pfMin > 0 && pfFee > 0 && pfMonths > 0) {
     const commStr = pfPct > 0 ? `, less ${pfPct}% commission` : '';
-    pfLabel = `Player-funded contribution (${pfMin} × ${fmtMoney(pfFee, currency)} × ${pfMonths} months${commStr})`;
+    // Single period = a one-off per-player season fee; don't render "× 1 months".
+    const perStr = pfMonths === 1 ? ' for the season' : ` × ${pfMonths} months`;
+    pfLabel = `Player-funded contribution (${pfMin} × ${fmtMoney(pfFee, currency)}${perStr}${commStr})`;
   }
   const pfPlayerLine = pf && pfPlayerAmount > 0.005
     ? { label: pfLabel, amount: pfPlayerAmount }
