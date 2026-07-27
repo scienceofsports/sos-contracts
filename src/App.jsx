@@ -3435,19 +3435,53 @@ function MarkPaidModal({ contract, payment, onClose, onDone }) {
 /* =========================================================================
    PAYMENTS (Receivables + History)
    ========================================================================= */
+// AR aging buckets, oldest-money-last. Drives the aging tiles, the aging column
+// sort order and the exported chase list.
+const AGING_ORDER = ['current', 'd1_30', 'd31_60', 'd61_90', 'd90_plus'];
+
 function PaymentsReceivables({ navigate }) {
   const { contracts, clients } = useContractsData();
   const auth = useAuth();
   const toast = useToast();
   const [reminderPayment, setReminderPayment] = useState(null);
   const [markPaid, setMarkPaid] = useState(null);
+  // Oldest due first by default — the chase list reads top-down by urgency.
+  const [sort, setSort] = useState({ key: 'dueDate', dir: 'asc' });
+  const toggleSort = (key) => setSort(s => s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' });
 
   if (!contracts) return <div className="p-6"><Skeleton className="h-96 w-full" /></div>;
   const clientMap = Object.fromEntries(clients.map(c => [c.id, c]));
   // Signed/active contracts ONLY — an unsigned contract's payment schedule is a
   // proposal, not a debt. See isReceivableContract.
   const rows = receivableRows(contracts);
-  rows.sort((a,b) => new Date(a.dueDate) - new Date(b.dueDate));
+
+  // Sort key extractors per column. Money and dates sort numerically; aging and
+  // status sort by severity (most urgent first when descending), not alphabet.
+  const STATUS_SEVERITY = { overdue: 0, disputed: 1, pending: 2 };
+  const sortVal = (p) => {
+    switch (sort.key) {
+      case 'description': return (p.description || '').toLowerCase();
+      case 'client': return (clientMap[p.contract.clientId]?.companyName || '').toLowerCase();
+      case 'total':  return Number(p.totalAmount || 0);
+      case 'aging':  return AGING_ORDER.indexOf(agingBucket(p));
+      case 'status': { const st = effectiveStatus(p); return (STATUS_SEVERITY[st] ?? 9) * 100000 - daysOverdue(p); }
+      default:       return p.dueDate ? new Date(p.dueDate).getTime() : Infinity; // 'dueDate'; undated sinks last
+    }
+  };
+  rows.sort((a, b) => {
+    const va = sortVal(a), vb = sortVal(b);
+    let cmp = typeof va === 'number' && typeof vb === 'number' ? va - vb : String(va).localeCompare(String(vb));
+    // Ties fall back to due date so the order is stable and still chase-ordered.
+    if (cmp === 0 && sort.key !== 'dueDate') cmp = new Date(a.dueDate) - new Date(b.dueDate);
+    return sort.dir === 'asc' ? cmp : -cmp;
+  });
+
+  const SortHeader = ({ label, col, extra }) => (
+    <th className={`py-3 px-4 cursor-pointer select-none hover:text-slate-600 transition ${extra||''}`} onClick={()=>toggleSort(col)}>
+      {label}
+      <span className="ml-1 text-slate-400">{sort.key === col ? (sort.dir === 'asc' ? '▲' : '▼') : '↕'}</span>
+    </th>
+  );
   // Summary totals for the chase list.
   const totalOutstanding = rows.reduce((s,p)=>s+Number(p.totalAmount||0), 0);
   const totalOverdue = rows.filter(p=>effectiveStatus(p)==='overdue').reduce((s,p)=>s+Number(p.totalAmount||0), 0);
@@ -3457,7 +3491,6 @@ function PaymentsReceivables({ navigate }) {
   // aging tiles and the exported chase list.
   const agingTotals = { current: 0, d1_30: 0, d31_60: 0, d61_90: 0, d90_plus: 0 };
   rows.forEach(p => { agingTotals[agingBucket(p)] += Number(p.totalAmount || 0); });
-  const AGING_ORDER = ['current', 'd1_30', 'd31_60', 'd61_90', 'd90_plus'];
 
   // Export the chase list as a CSV your accountant can work from directly.
   const exportChaseList = () => {
@@ -3510,7 +3543,17 @@ function PaymentsReceivables({ navigate }) {
       {rows.length === 0 ? <EmptyState title="Nothing outstanding" icon="🎉" /> : (
         <div className="bg-white rounded-xl border border-[var(--border)] overflow-x-auto">
           <table className="w-full text-sm">
-            <thead><tr className="text-left text-xs text-slate-400 border-b border-[var(--border)]"><th className="py-3 px-4">Description</th><th className="py-3 px-4">Client</th><th className="py-3 px-4">Due</th><th className="py-3 px-4">Total</th><th className="py-3 px-4">Aging</th><th className="py-3 px-4">Status</th><th className="py-3 px-4"></th></tr></thead>
+            <thead>
+              <tr className="text-left text-xs text-slate-400 border-b border-[var(--border)]">
+                <SortHeader label="Description" col="description" />
+                <SortHeader label="Client" col="client" />
+                <SortHeader label="Due" col="dueDate" />
+                <SortHeader label="Total" col="total" />
+                <SortHeader label="Aging" col="aging" />
+                <SortHeader label="Status" col="status" />
+                <th className="py-3 px-4"></th>
+              </tr>
+            </thead>
             <tbody>
               {rows.map(p => (
                 <tr key={p.id} className="border-b border-[var(--border)] last:border-0 hover:bg-slate-50">
