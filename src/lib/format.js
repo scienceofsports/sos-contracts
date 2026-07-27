@@ -162,6 +162,58 @@ export const AGING_LABELS = {
   d90_plus: '90+ days',
 };
 
+/* ---------------------------------------------------------------------------
+   Financial year + receivable horizons
+
+   SCIOS's financial year ends 30 June, so FY2027 = 01/07/2026 → 30/06/2027.
+   We label a year by the calendar year it ENDS in, matching how the accounts
+   are filed.
+   --------------------------------------------------------------------------- */
+export const FY_END_MONTH = 6; // June (1-based); the FY closes on the 30th.
+
+// The financial year a date falls in, labelled by its ending calendar year.
+export function financialYearOf(date) {
+  const d = new Date(date);
+  if (isNaN(d)) return null;
+  // Jan–Jun belong to the FY ending this calendar year; Jul–Dec to the next.
+  return d.getMonth() + 1 <= FY_END_MONTH ? d.getFullYear() : d.getFullYear() + 1;
+}
+
+// First instant of a financial year (00:00 on 1 July of the preceding year).
+export function financialYearStart(fy) { return new Date(fy - 1, FY_END_MONTH, 1); }
+// Exclusive end of a financial year (00:00 on 1 July of the ending year).
+export function financialYearEnd(fy) { return new Date(fy, FY_END_MONTH, 1); }
+
+// "FY26/27" — how the year reads on a board pack.
+export function financialYearLabel(fy) {
+  if (fy == null) return '—';
+  return `FY${String(fy - 1).slice(-2)}/${String(fy).slice(-2)}`;
+}
+
+// Which collection horizon a payment sits in. This is the distinction that
+// keeps a receivable (money you can chase today) apart from contracted backlog
+// (signed money that simply isn't due yet):
+//   overdue  — past its due date
+//   due_30   — falls due within the next 30 days
+//   this_fy  — due later, but still inside the current financial year
+//   future   — due in a later financial year; NOT a receivable
+export function receivableHorizon(payment, now = new Date()) {
+  if (effectiveStatus(payment) === 'overdue') return 'overdue';
+  if (!payment?.dueDate) return 'this_fy';
+  const due = new Date(payment.dueDate);
+  if (isNaN(due)) return 'this_fy';
+  const days = Math.ceil((due.getTime() - now.getTime()) / 86400000);
+  if (days <= 30) return 'due_30';
+  return financialYearOf(due) > financialYearOf(now) ? 'future' : 'this_fy';
+}
+
+export const HORIZON_LABELS = {
+  overdue: 'Overdue',
+  due_30: 'Due in 30 days',
+  this_fy: 'Later this FY',
+  future: 'Future years',
+};
+
 // Serialize an array of row objects to a CSV string. `columns` is an array of
 // { key, label } (or { label, value: row=>… } for computed cells). Values are
 // quoted and internal quotes doubled, per RFC 4180.

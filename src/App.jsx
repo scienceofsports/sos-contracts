@@ -48,6 +48,10 @@ import {
   SIGNING_LINK_DAYS,
   agingBucket,
   AGING_LABELS,
+  receivableHorizon,
+  HORIZON_LABELS,
+  financialYearOf,
+  financialYearLabel,
   toCSV,
   downloadFile,
 } from './lib/format.js';
@@ -3448,12 +3452,39 @@ function PaymentsReceivables({ navigate }) {
   // Oldest due first by default — the chase list reads top-down by urgency.
   const [sort, setSort] = useState({ key: 'dueDate', dir: 'asc' });
   const toggleSort = (key) => setSort(s => s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' });
+  // Default to the current financial year: a multi-year deal's 2029 instalment
+  // is contracted backlog, not money you can collect, and letting it into the
+  // default view distorts every read of the current position.
+  const [horizonFilter, setHorizonFilter] = useState('this_fy');
 
   if (!contracts) return <div className="p-6"><Skeleton className="h-96 w-full" /></div>;
   const clientMap = Object.fromEntries(clients.map(c => [c.id, c]));
   // Signed/active contracts ONLY — an unsigned contract's payment schedule is a
   // proposal, not a debt. See isReceivableContract.
-  const rows = receivableRows(contracts);
+  const allRows = receivableRows(contracts);
+  allRows.forEach(p => { p.horizon = receivableHorizon(p); });
+
+  // The four horizon totals. `collectable` (overdue + due within 30 days) is the
+  // real "can I bank this soon" figure; `backlog` is signed future-year money
+  // that must never be presented as a receivable.
+  const horizonTotals = { overdue: 0, due_30: 0, this_fy: 0, future: 0 };
+  allRows.forEach(p => { horizonTotals[p.horizon] += Number(p.totalAmount || 0); });
+  const collectable = horizonTotals.overdue + horizonTotals.due_30;
+  const dueThisFY = collectable + horizonTotals.this_fy;
+  const backlog = horizonTotals.future;
+  const currentFY = financialYearOf(new Date());
+
+  // Backlog split by the FY it lands in, so multi-year deals read as a schedule.
+  const backlogByFY = {};
+  allRows.filter(p => p.horizon === 'future').forEach(p => {
+    const fy = financialYearOf(p.dueDate);
+    backlogByFY[fy] = (backlogByFY[fy] || 0) + Number(p.totalAmount || 0);
+  });
+  const backlogYears = Object.keys(backlogByFY).map(Number).sort((a,b)=>a-b);
+
+  const rows = horizonFilter === 'all' ? allRows
+    : horizonFilter === 'overdue' ? allRows.filter(p => p.horizon === 'overdue')
+    : allRows.filter(p => p.horizon !== 'future'); // 'this_fy'
 
   // Sort key extractors per column. Money and dates sort numerically; aging and
   // status sort by severity (most urgent first when descending), not alphabet.
@@ -3463,6 +3494,7 @@ function PaymentsReceivables({ navigate }) {
       case 'description': return (p.description || '').toLowerCase();
       case 'client': return (clientMap[p.contract.clientId]?.companyName || '').toLowerCase();
       case 'total':  return Number(p.totalAmount || 0);
+      case 'fy':     return financialYearOf(p.dueDate) ?? Infinity;
       case 'aging':  return AGING_ORDER.indexOf(agingBucket(p));
       case 'status': { const st = effectiveStatus(p); return (STATUS_SEVERITY[st] ?? 9) * 100000 - daysOverdue(p); }
       default:       return p.dueDate ? new Date(p.dueDate).getTime() : Infinity; // 'dueDate'; undated sinks last
@@ -3482,15 +3514,15 @@ function PaymentsReceivables({ navigate }) {
       <span className="ml-1 text-slate-400">{sort.key === col ? (sort.dir === 'asc' ? '▲' : '▼') : '↕'}</span>
     </th>
   );
-  // Summary totals for the chase list.
-  const totalOutstanding = rows.reduce((s,p)=>s+Number(p.totalAmount||0), 0);
-  const totalOverdue = rows.filter(p=>effectiveStatus(p)==='overdue').reduce((s,p)=>s+Number(p.totalAmount||0), 0);
-  const cur = rows[0]?.currency || 'EUR';
+  const cur = allRows[0]?.currency || 'EUR';
 
-  // AR aging: total per bucket (Current / 1–30 / 31–60 / 61–90 / 90+), driving the
-  // aging tiles and the exported chase list.
+  // AR aging: total per bucket (Current / 1–30 / 31–60 / 61–90 / 90+).
+  // ONLY money that is actually due belongs here — a payment scheduled for 2029
+  // is not "Current", it simply hasn't been billed yet. Including it made the
+  // Current tile meaningless and inflated the apparent collectable position.
+  const agingRows = allRows.filter(p => p.horizon === 'overdue' || p.horizon === 'due_30');
   const agingTotals = { current: 0, d1_30: 0, d31_60: 0, d61_90: 0, d90_plus: 0 };
-  rows.forEach(p => { agingTotals[agingBucket(p)] += Number(p.totalAmount || 0); });
+  agingRows.forEach(p => { agingTotals[agingBucket(p)] += Number(p.totalAmount || 0); });
 
   // Export the chase list as a CSV your accountant can work from directly.
   const exportChaseList = () => {
@@ -3500,11 +3532,13 @@ function PaymentsReceivables({ navigate }) {
       { label: 'Contract No.', value: p => p.contract.contractNumber || '' },
       { label: 'Description', value: p => p.description || '' },
       { label: 'Due Date', value: p => fmtDate(p.dueDate) },
+      { label: 'Financial Year', value: p => financialYearLabel(financialYearOf(p.dueDate)) },
+      { label: 'Horizon', value: p => HORIZON_LABELS[p.horizon] || '' },
       { label: 'Amount', value: p => Number(p.totalAmount || 0).toFixed(2) },
       { label: 'Currency', value: p => p.currency || cur },
-      { label: 'Status', value: p => effectiveStatus(p) },
+      { label: 'Status', value: p => p.horizon === 'future' ? 'scheduled' : effectiveStatus(p) },
       { label: 'Days Overdue', value: p => String(daysOverdue(p)) },
-      { label: 'Aging Bucket', value: p => AGING_LABELS[agingBucket(p)] },
+      { label: 'Aging Bucket', value: p => p.horizon === 'future' ? 'Not yet due' : AGING_LABELS[agingBucket(p)] },
       { label: 'Contact', value: p => clientMap[p.contract.clientId]?.contactName || '' },
       { label: 'Contact Email', value: p => clientMap[p.contract.clientId]?.contactEmail || '' },
     ]);
@@ -3520,13 +3554,37 @@ function PaymentsReceivables({ navigate }) {
           <button onClick={exportChaseList} className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-lg border border-[var(--border)] hover:bg-slate-50 transition">⬇ Export chase list (CSV)</button>
         )}
       </div>
-      {rows.length > 0 && (
+      {allRows.length > 0 && (
         <>
-          <div className="grid grid-cols-2 sm:grid-cols-2 gap-3 mb-3">
-            <div className="bg-white rounded-xl border border-[var(--border)] p-4"><div className="text-xs text-slate-400 mb-1">Total Outstanding</div><div className="font-display text-xl text-[var(--navy-deep)]">{fmtMoney(totalOutstanding, cur)}</div></div>
-            <div className="bg-white rounded-xl border border-red-200 p-4"><div className="text-xs text-red-500 mb-1">Overdue</div><div className="font-display text-xl text-red-600">{fmtMoney(totalOverdue, cur)}</div></div>
+          {/* Collection horizons. The lead figures are what can actually be
+              banked; contracted backlog is deliberately demoted so it can't be
+              mistaken for a current receivable. */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+            <div className="bg-white rounded-xl border border-red-200 p-4">
+              <div className="text-xs text-red-500 mb-1">Overdue</div>
+              <div className="font-display text-xl text-red-600">{fmtMoney(horizonTotals.overdue, cur)}</div>
+              <div className="text-[11px] text-slate-400 mt-1">Chase today</div>
+            </div>
+            <div className="bg-white rounded-xl border border-amber-200 p-4">
+              <div className="text-xs text-amber-600 mb-1">Due in 30 days</div>
+              <div className="font-display text-xl text-amber-700">{fmtMoney(horizonTotals.due_30, cur)}</div>
+              <div className="text-[11px] text-slate-400 mt-1">Collectable now: {fmtMoney(collectable, cur)}</div>
+            </div>
+            <div className="bg-white rounded-xl border border-[var(--border)] p-4">
+              <div className="text-xs text-slate-400 mb-1">Due this FY</div>
+              <div className="font-display text-xl text-[var(--navy-deep)]">{fmtMoney(dueThisFY, cur)}</div>
+              <div className="text-[11px] text-slate-400 mt-1">{financialYearLabel(currentFY)} · to 30 Jun</div>
+            </div>
+            <div className="bg-white rounded-xl border border-[var(--border)] border-dashed p-4">
+              <div className="text-xs text-slate-400 mb-1">Contracted backlog</div>
+              <div className="font-display text-xl text-slate-500">{fmtMoney(backlog, cur)}</div>
+              <div className="text-[11px] text-slate-400 mt-1">
+                {backlogYears.length ? `${backlogYears.map(financialYearLabel).join(' · ')} — not yet due` : 'No future-year instalments'}
+              </div>
+            </div>
           </div>
-          {/* AR aging breakdown */}
+          {/* AR aging breakdown — due/overdue money only (see agingRows). */}
+          <div className="text-[11px] text-slate-400 mb-2">Aging of money already due — excludes future-year instalments</div>
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-6">
             {AGING_ORDER.map(key => {
               const overdueBucket = key !== 'current';
@@ -3540,7 +3598,25 @@ function PaymentsReceivables({ navigate }) {
           </div>
         </>
       )}
-      {rows.length === 0 ? <EmptyState title="Nothing outstanding" icon="🎉" /> : (
+      {allRows.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 mb-3">
+          {[
+            { key: 'overdue', label: 'Overdue only' },
+            { key: 'this_fy', label: `This FY (${financialYearLabel(currentFY)})` },
+            { key: 'all', label: 'All incl. future years' },
+          ].map(opt => (
+            <button
+              key={opt.key}
+              onClick={()=>setHorizonFilter(opt.key)}
+              className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition ${horizonFilter === opt.key ? 'bg-[var(--navy-deep)] text-white border-[var(--navy-deep)]' : 'border-[var(--border)] text-slate-600 hover:bg-slate-50'}`}
+            >{opt.label}</button>
+          ))}
+          <span className="text-[11px] text-slate-400 ml-1">
+            {rows.length} of {allRows.length} instalments · {fmtMoney(rows.reduce((s,p)=>s+Number(p.totalAmount||0),0), cur)}
+          </span>
+        </div>
+      )}
+      {rows.length === 0 ? <EmptyState title={horizonFilter === 'overdue' ? 'Nothing overdue' : 'Nothing outstanding'} icon="🎉" /> : (
         <div className="bg-white rounded-xl border border-[var(--border)] overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
@@ -3548,6 +3624,7 @@ function PaymentsReceivables({ navigate }) {
                 <SortHeader label="Description" col="description" />
                 <SortHeader label="Client" col="client" />
                 <SortHeader label="Due" col="dueDate" />
+                <SortHeader label="FY" col="fy" />
                 <SortHeader label="Total" col="total" />
                 <SortHeader label="Aging" col="aging" />
                 <SortHeader label="Status" col="status" />
@@ -3555,20 +3632,30 @@ function PaymentsReceivables({ navigate }) {
               </tr>
             </thead>
             <tbody>
-              {rows.map(p => (
-                <tr key={p.id} className="border-b border-[var(--border)] last:border-0 hover:bg-slate-50">
+              {rows.map(p => {
+                // Future-year instalments are shown greyed: contracted, but not
+                // billable yet — so no reminder is offered against them.
+                const isFuture = p.horizon === 'future';
+                return (
+                <tr key={p.id} className={`border-b border-[var(--border)] last:border-0 hover:bg-slate-50 ${isFuture ? 'text-slate-400' : ''}`}>
                   <td className="py-3 px-4 text-xs">{p.description}</td>
                   <td className="py-3 px-4">{clientMap[p.contract.clientId]?.companyName}</td>
                   <td className="py-3 px-4">{fmtDate(p.dueDate)}</td>
-                  <td className="py-3 px-4 font-data">{fmtMoney(p.totalAmount, p.currency)}</td>
-                  <td className="py-3 px-4 text-xs text-slate-500">{AGING_LABELS[agingBucket(p)]}</td>
-                  <td className="py-3 px-4"><Badge status={effectiveStatus(p)} />{daysOverdue(p) > 0 && <span className="ml-1 text-[10px] text-red-500">{daysOverdue(p)}d</span>}</td>
+                  <td className="py-3 px-4 text-xs">{financialYearLabel(financialYearOf(p.dueDate))}</td>
+                  <td className={`py-3 px-4 font-data ${isFuture ? '' : 'text-[var(--navy-deep)]'}`}>{fmtMoney(p.totalAmount, p.currency)}</td>
+                  <td className="py-3 px-4 text-xs text-slate-500">{isFuture ? <span className="text-slate-400">Not yet due</span> : AGING_LABELS[agingBucket(p)]}</td>
+                  <td className="py-3 px-4">
+                    {isFuture
+                      ? <span className="text-[11px] text-slate-400 border border-[var(--border)] rounded px-1.5 py-0.5">Scheduled</span>
+                      : <><Badge status={effectiveStatus(p)} />{daysOverdue(p) > 0 && <span className="ml-1 text-[10px] text-red-500">{daysOverdue(p)}d</span>}</>}
+                  </td>
                   <td className="py-3 px-4 space-x-2">
-                    <button onClick={()=>setReminderPayment(p)} className="text-blue-600 hover:underline text-xs">Send Reminder</button>
+                    {!isFuture && <button onClick={()=>setReminderPayment(p)} className="text-blue-600 hover:underline text-xs">Send Reminder</button>}
                     {auth.isAdmin && <button onClick={()=>setMarkPaid(p)} className="text-emerald-600 hover:underline text-xs">Mark Paid</button>}
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -4080,12 +4167,17 @@ function BoardExport() {
   const lifetimeValue = active.reduce((s,c)=>s+Number(c.value||0),0);
   const allPayments = contracts.flatMap(c=>c.payments);
   const ytd = allPayments.filter(p=>p.status==='paid' && new Date(p.paidAt).getFullYear()===now.getFullYear()).reduce((s,p)=>s+Number(p.paidAmount||0),0);
-  // Outstanding on the board = signed contracts only, matching Receivables.
-  const outstanding = receivableRows(contracts).reduce((s,p)=>s+Number(p.totalAmount||0),0);
+  // Outstanding on the board = signed contracts only, matching Receivables, and
+  // split by horizon: what's collectable this FY vs contracted future-year
+  // backlog. Reporting them as one number overstates the current position.
+  const boardRows = receivableRows(contracts);
+  const boardFuture = boardRows.filter(p => receivableHorizon(p) === 'future');
+  const backlog = boardFuture.reduce((s,p)=>s+Number(p.totalAmount||0),0);
+  const outstanding = boardRows.reduce((s,p)=>s+Number(p.totalAmount||0),0) - backlog;
   const renewalPipeline = contracts.filter(c=>c.status==='active' && c.endDate && daysBetween(now,c.endDate)>=0 && daysBetween(now,c.endDate)<=60).length;
 
   const download = () => {
-    const rows = [['Metric','Value'],['MRR',mrr.toFixed(2)],['ARR (annualised)',arr.toFixed(2)],['Total active value (lifetime)',lifetimeValue.toFixed(2)],['YTD Revenue',ytd.toFixed(2)],['Outstanding',outstanding.toFixed(2)],['Renewal Pipeline (60d)',renewalPipeline]];
+    const rows = [['Metric','Value'],['MRR',mrr.toFixed(2)],['ARR (annualised)',arr.toFixed(2)],['Total active value (lifetime)',lifetimeValue.toFixed(2)],['YTD Revenue',ytd.toFixed(2)],['Outstanding (due this FY)',outstanding.toFixed(2)],['Contracted backlog (future FYs)',backlog.toFixed(2)],['Renewal Pipeline (60d)',renewalPipeline]];
     downloadFile('﻿'+rows.map(r=>r.join(',')).join('\r\n'), 'sos-board-export.csv');
     toast.push('Board export downloaded.', 'success');
   };
@@ -4099,7 +4191,8 @@ function BoardExport() {
           <div className="flex justify-between"><dt className="text-slate-500">ARR (annualised)</dt><dd className="font-data">{fmtMoney(arr,'EUR')}</dd></div>
           <div className="flex justify-between"><dt className="text-slate-500">Total active value (lifetime)</dt><dd className="font-data">{fmtMoney(lifetimeValue,'EUR')}</dd></div>
           <div className="flex justify-between"><dt className="text-slate-500">YTD Revenue</dt><dd className="font-data">{fmtMoney(ytd,'EUR')}</dd></div>
-          <div className="flex justify-between"><dt className="text-slate-500">Outstanding</dt><dd className="font-data">{fmtMoney(outstanding,'EUR')}</dd></div>
+          <div className="flex justify-between"><dt className="text-slate-500">Outstanding <span className="text-xs text-slate-400">(due this FY)</span></dt><dd className="font-data">{fmtMoney(outstanding,'EUR')}</dd></div>
+          <div className="flex justify-between"><dt className="text-slate-500">Contracted backlog <span className="text-xs text-slate-400">(future FYs)</span></dt><dd className="font-data text-slate-500">{fmtMoney(backlog,'EUR')}</dd></div>
           <div className="flex justify-between"><dt className="text-slate-500">Renewal Pipeline (60d)</dt><dd className="font-data">{renewalPipeline}</dd></div>
         </dl>
         <button onClick={download} className="w-full py-2.5 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">Download CSV</button>
