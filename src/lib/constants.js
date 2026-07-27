@@ -659,11 +659,15 @@ export function slaLabel(contract) {
 }
 
 // cameraLabel: what recording hardware the deal includes — "2× Fixed", "1× VEO",
-// "1× VEO + 2× Fixed", or "—". Reads the priced services first (the accurate,
-// contracted source). If none are priced, it FALLS BACK to scanning the special
-// terms + description for camera mentions, so cameras recorded as prose (not yet
-// a priced service) still surface — flagged with "*" so you can tell it came from
-// text, not a priced line. Fix a "*" row by pricing the camera as a service.
+// "1× VEO + 2× Fixed", or "—". The ticked Recording Services are the ONLY source:
+// if no camera service is selected, the club has no camera and this returns "—".
+//
+// It deliberately does NOT scan the special terms / description for the word
+// "camera". That fallback used to exist (flagged with "*") to surface cameras
+// recorded as prose, but contract prose also mentions cameras that are NOT sold —
+// e.g. an upsell clause offering camera analysis as a future add-on — so a text
+// match reported "has a fixed camera" when the truth was "a camera was discussed".
+// Cameras are priced hardware: if one is being provided, it is a ticked service.
 export function cameraLabel(contract) {
   const items = computeServiceLineItems(contract?.services);
   const byKey = Object.fromEntries(items.map(i => [i.key, i]));
@@ -676,18 +680,7 @@ export function cameraLabel(contract) {
   const fixed = byKey['camera_installation'];
   if (veo) parts.push(`${veo.qty || 1}× VEO`);
   if (fixed) parts.push(`${fixed.qty || 1}× Fixed`);
-  if (parts.length) return parts.join(' + ');
-  // Fallback: scan prose (special terms + description) for camera mentions.
-  const terms = parseSpecialTerms(contract?.specialTerms).map(t => t.text).join(' ');
-  const text = `${terms} ${contract?.description || ''}`.toLowerCase();
-  const hasVeo = /\bveo\b/.test(text);
-  const hasCam = /\bcamera\b/.test(text);
-  if (hasVeo) return 'VEO *';
-  // Any other camera mention defaults to Fixed — a plain camera install is a
-  // fixed camera unless it's explicitly a VEO. (Still asterisked: it's from
-  // text, not a priced service.)
-  if (hasCam) return 'Fixed *';
-  return '—';
+  return parts.length ? parts.join(' + ') : '—';
 }
 
 // Short, scannable bullet summary of the agreement for the admin Contract
