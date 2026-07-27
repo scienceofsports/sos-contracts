@@ -262,6 +262,25 @@ function netReceived(payment) {
   return received;
 }
 
+// A receivable only exists once a contract is EXECUTED. Draft and sent-but-
+// unsigned contracts carry a payment schedule, but no client owes anything under
+// them — nothing has been agreed. Cancelled contracts stop generating claims too.
+// Every money-owed figure (Receivables page, dashboard Outstanding / Overdue /
+// Due now / aging) filters through this, so the board never chases unsigned money.
+const RECEIVABLE_CONTRACT_STATUSES = ['signed', 'active'];
+function isReceivableContract(contract) {
+  return RECEIVABLE_CONTRACT_STATUSES.includes(contract?.status);
+}
+
+// Every unpaid payment row across the signed contracts, each carrying its parent
+// contract so callers can resolve client, title and contract number.
+function receivableRows(contracts) {
+  return (contracts || [])
+    .filter(isReceivableContract)
+    .flatMap(c => c.payments.filter(p => effectiveStatus(p) !== 'paid')
+      .map(p => ({ ...p, contractId: c.id, contract: c })));
+}
+
 // A large, prominent hero metric for the top-of-dashboard glance row. Bigger
 // than MetricCard, with an accent strip and an optional click-through.
 function HeroCard({ label, value, sub, accent, onClick }) {
@@ -383,18 +402,22 @@ function Dashboard({ navigate }) {
   // Collected YTD is NET of VAT, to match Annual Revenue and the Revenue Report
   // (every "income" figure on the board is net; money-owed figures stay gross).
   const collectedYTD = allPayments.filter(p => p.status === 'paid' && new Date(p.paidAt).getFullYear() === now.getFullYear()).reduce((s,p) => s + netReceived(p), 0);
+  // Money-owed figures below count SIGNED contracts only, matching the
+  // Receivables page they link to. Collected YTD above stays on allPayments —
+  // cash received is cash received, whatever the contract's status is today.
+  const receivablePayments = receivableRows(contracts);
   // Overdue is COMPUTED live from due dates (a pending payment past due = overdue).
-  const openPayments = allPayments.filter(p => { const st = effectiveStatus(p); return st === 'pending' || st === 'overdue' || st === 'disputed'; });
+  const openPayments = receivablePayments.filter(p => { const st = effectiveStatus(p); return st === 'pending' || st === 'overdue' || st === 'disputed'; });
   // FULL outstanding = every unpaid scheduled payment, incl. future instalments of
   // multi-year deals. This is the contracted receivable, NOT money owed today.
   const outstanding = openPayments.reduce((s,p) => s + Number(p.totalAmount||0), 0);
-  const overdue = allPayments.filter(p => effectiveStatus(p) === 'overdue').reduce((s,p) => s + Number(p.totalAmount||0), 0);
+  const overdue = receivablePayments.filter(p => effectiveStatus(p) === 'overdue').reduce((s,p) => s + Number(p.totalAmount||0), 0);
   // DUE NOW = the board-relevant figure: money already overdue + due within 30
   // days. Excludes far-future scheduled instalments so the headline isn't
   // dominated by a 3-year deal's whole payment plan.
   const dueNow = openPayments.filter(p => daysBetween(now, p.dueDate) <= 30).reduce((s,p) => s + Number(p.totalAmount||0), 0);
   // Aged overdue buckets (the board/collections view of the money that's late).
-  const overduePays = allPayments.filter(p => effectiveStatus(p) === 'overdue');
+  const overduePays = receivablePayments.filter(p => effectiveStatus(p) === 'overdue');
   const overdueBuckets = { d30: 0, d60: 0, d90: 0 };
   overduePays.forEach(p => { const d = daysOverdue(p); const amt = Number(p.totalAmount||0); if (d > 90) overdueBuckets.d90 += amt; else if (d > 60) overdueBuckets.d60 += amt; else overdueBuckets.d30 += amt; });
   const renewalCount = contracts.filter(c => c.status === 'active' && c.endDate && daysBetween(now, c.endDate) >= 0 && daysBetween(now, c.endDate) <= 60).length;
@@ -412,7 +435,8 @@ function Dashboard({ navigate }) {
   const months = [0,1,2].map(i => { const d = new Date(now.getFullYear(), now.getMonth()+i, 1); return d; });
   const cashFlow = months.map(m => {
     const label = m.toLocaleString('en-US', { month:'short', year:'2-digit' });
-    const expected = allPayments.filter(p => { const d = new Date(p.dueDate); return d.getMonth()===m.getMonth() && d.getFullYear()===m.getFullYear(); }).reduce((s,p)=>s+Number(p.totalAmount||0),0);
+    // Expected = signed money only; an unsigned proposal isn't forecastable cash.
+    const expected = receivablePayments.filter(p => { const d = new Date(p.dueDate); return d.getMonth()===m.getMonth() && d.getFullYear()===m.getFullYear(); }).reduce((s,p)=>s+Number(p.totalAmount||0),0);
     const received = allPayments.filter(p => p.status==='paid' && p.paidAt && (() => { const d = new Date(p.paidAt); return d.getMonth()===m.getMonth() && d.getFullYear()===m.getFullYear(); })()).reduce((s,p)=>s+Number(p.paidAmount||0),0);
     return { label, expected, received };
   });
@@ -524,7 +548,8 @@ function Dashboard({ navigate }) {
     // describe the LEAD contract (their current operational deal).
     const allPays = clientContracts.flatMap(c => c.payments || []);
     const collected = allPays.filter(p => p.status === 'paid').reduce((s, p) => s + Number(p.paidAmount || 0), 0);
-    const outstanding = allPays.filter(p => p.status !== 'paid').reduce((s, p) => s + Number(p.totalAmount || 0), 0);
+    // Owed only under executed contracts — see isReceivableContract.
+    const outstanding = receivableRows(clientContracts).reduce((s, p) => s + Number(p.totalAmount || 0), 0);
     // Latest end date across the client's contracts — when the relationship runs to.
     const endDate = clientContracts.reduce((latest, c) => c.endDate && (!latest || new Date(c.endDate) > new Date(latest)) ? c.endDate : latest, null);
     return {
@@ -3419,7 +3444,9 @@ function PaymentsReceivables({ navigate }) {
 
   if (!contracts) return <div className="p-6"><Skeleton className="h-96 w-full" /></div>;
   const clientMap = Object.fromEntries(clients.map(c => [c.id, c]));
-  const rows = contracts.flatMap(c => c.payments.filter(p=>p.status!=='paid').map(p => ({ ...p, contractId: c.id, contract: c })));
+  // Signed/active contracts ONLY — an unsigned contract's payment schedule is a
+  // proposal, not a debt. See isReceivableContract.
+  const rows = receivableRows(contracts);
   rows.sort((a,b) => new Date(a.dueDate) - new Date(b.dueDate));
   // Summary totals for the chase list.
   const totalOutstanding = rows.reduce((s,p)=>s+Number(p.totalAmount||0), 0);
@@ -4010,7 +4037,8 @@ function BoardExport() {
   const lifetimeValue = active.reduce((s,c)=>s+Number(c.value||0),0);
   const allPayments = contracts.flatMap(c=>c.payments);
   const ytd = allPayments.filter(p=>p.status==='paid' && new Date(p.paidAt).getFullYear()===now.getFullYear()).reduce((s,p)=>s+Number(p.paidAmount||0),0);
-  const outstanding = allPayments.filter(p=>p.status!=='paid').reduce((s,p)=>s+Number(p.totalAmount||0),0);
+  // Outstanding on the board = signed contracts only, matching Receivables.
+  const outstanding = receivableRows(contracts).reduce((s,p)=>s+Number(p.totalAmount||0),0);
   const renewalPipeline = contracts.filter(c=>c.status==='active' && c.endDate && daysBetween(now,c.endDate)>=0 && daysBetween(now,c.endDate)<=60).length;
 
   const download = () => {
