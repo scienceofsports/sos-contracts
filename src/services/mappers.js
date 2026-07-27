@@ -88,6 +88,7 @@ export function clientFromRow(row) {
     address: row.address ?? null,
     country: row.country ?? null,
     vatNumber: row.vat_number ?? null,
+    noVatNumber: row.no_vat_number ?? false,
     registrationNumber: row.registration_number ?? null,
     currency: row.currency ?? null,
     logoBase64: row.logo_url ?? null,
@@ -107,6 +108,7 @@ export function clientToRow(obj) {
   if ('address' in obj) row.address = obj.address;
   if ('country' in obj) row.country = obj.country;
   if ('vatNumber' in obj) row.vat_number = obj.vatNumber;
+  if ('noVatNumber' in obj) row.no_vat_number = obj.noVatNumber;
   if ('registrationNumber' in obj) row.registration_number = obj.registrationNumber;
   if ('currency' in obj) row.currency = obj.currency;
   if ('logoBase64' in obj) row.logo_url = obj.logoBase64;

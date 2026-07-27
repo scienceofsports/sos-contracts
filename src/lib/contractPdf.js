@@ -22,7 +22,7 @@
    ========================================================================= */
 import { jsPDF } from 'jspdf';
 import { fmtDate, fmtMoney, daysBetween } from './format.js';
-import { computeServiceLineItems, platformSeatsSummary, SERVICE_GROUPS, analysisScopeText, seasonLabelFromDates, commercialModelText, parseSpecialTerms, serviceLevelsLines, vatSummary, paymentTimingWording, agreementDate, clientPartyClause, isPlayerFunded, playerFundedScopeRows } from './constants.js';
+import { computeServiceLineItems, platformSeatsSummary, SERVICE_GROUPS, analysisScopeText, seasonLabelFromDates, commercialModelText, parseSpecialTerms, serviceLevelsLines, vatSummary, paymentTimingWording, agreementDate, clientPartyClause, clientVatDisplay, isPlayerFunded, playerFundedScopeRows } from './constants.js';
 
 export function generateContractPdf({ contract, client, company }) {
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
@@ -420,10 +420,8 @@ export function generateContractPdf({ contract, client, company }) {
     : '[ country to be confirmed on signing ]';
   const clientReg = client?.registrationNumber || TBC;
   const clientAddr = client?.address || TBC;
-  // Associations/federations often carry no VAT — omit the VAT phrase entirely
-  // for them when blank; a company with a blank VAT still shows the TBC hint.
   const entityType = client?.entityType || 'company';
-  const clientVat = client?.vatNumber || (entityType === 'company' ? TBC : '');
+  const clientVat = clientVatDisplay(client, TBC);
   text(clientPartyClause({
     name: client?.companyName || '—',
     entityType,

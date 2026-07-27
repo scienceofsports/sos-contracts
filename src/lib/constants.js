@@ -140,6 +140,27 @@ export function clientEntityDescriptor(entityType) {
   }
 }
 
+// Resolve what the party clause should print for the Client's VAT number.
+// Three distinct cases, and only the middle one is a placeholder:
+//   * a known number      -> print it
+//   * confirmed to have NONE (no_vat_number, or a non-corporate entity with a
+//     blank field) -> '' so clientPartyClause OMITS the phrase entirely
+//   * simply not filled in yet (a company) -> the caller's TBC placeholder
+// `tbc` is passed in so each generator keeps its own placeholder styling.
+// NOTE: ported into both PDF generators; keep all three in sync.
+export function clientVatDisplay(client, tbc) {
+  const vat = client?.vatNumber || client?.vat_number;
+  if (vat) return vat;
+  // Explicitly flagged as having no VAT number — e.g. a non-profit company
+  // limited by guarantee. Never show a placeholder for a number that will
+  // never exist; an executed contract must not carry a permanent blank.
+  if (client?.noVatNumber ?? client?.no_vat_number) return '';
+  // Clubs/federations are registered associations and frequently have no VAT
+  // registration at all, so a blank means "none" rather than "pending".
+  const entityType = client?.entityType || client?.entity_type || 'company';
+  return entityType === 'company' ? tbc : '';
+}
+
 // Build the Client party sentence for the opening clause, shared by all three
 // document generators (App.jsx screen, contractPdf.js draft, contractPdf.ts
 // sent/signed). Callers pass already-resolved display strings so each generator

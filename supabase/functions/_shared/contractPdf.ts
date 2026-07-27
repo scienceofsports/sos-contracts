@@ -190,6 +190,18 @@ function vatSummary(contract: Any, fm: (a: Any) => string, client?: Any): { appl
   return { applies: false, net, vat: 0, gross: net, ratePct, sentence: noteText, amountLabel: 'Amount', note: noteText };
 }
 
+// Port of clientVatDisplay — what the party clause prints for the Client's VAT
+// number: the number itself, '' to omit the phrase entirely (confirmed to have
+// none), or the TBC placeholder (a company whose number is simply not filled in
+// yet). Keep in sync with src/lib/constants.js.
+function clientVatDisplay(client: Any, tbc: string): string {
+  const vat = pick(client, 'vatNumber', 'vat_number');
+  if (vat) return vat;
+  if (pick(client, 'noVatNumber', 'no_vat_number')) return '';
+  const entityType = pick(client, 'entityType', 'entity_type') || 'company';
+  return entityType === 'company' ? tbc : '';
+}
+
 // Port of agreementDate — THE date of the agreement, used for both the "made
 // on" line and the provider's countersignature so the two can never disagree.
 // Pinned to createdAt, not sentAt (which moves on every re-send). Keep in sync
@@ -755,11 +767,8 @@ export async function buildContractPdf(input: {
     : '[ country to be confirmed on signing ]';
   const clientReg = pick(cl, 'registrationNumber', 'registration_number') || TBC;
   const clientAddr = cl.address || TBC;
-  // Associations/federations often carry no VAT — omit the VAT phrase entirely
-  // for them when blank; a company with a blank VAT still shows the TBC hint.
   const clientEntityType = pick(cl, 'entityType', 'entity_type') || 'company';
-  const clientVatRaw = pick(cl, 'vatNumber', 'vat_number') || '';
-  const clientVat = clientVatRaw || (clientEntityType === 'company' ? TBC : '');
+  const clientVat = clientVatDisplay(cl, TBC);
   const clientVatPhrase = clientVat ? `, VAT number ${clientVat}` : '';
 
   // --- Title (split on the dash like the client PDF), centred navy bold. ----

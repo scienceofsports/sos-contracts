@@ -2786,9 +2786,10 @@ function ContractDocumentBody({ contract, client, company, showAdminWarnings = f
           {client.registrationNumber
             ? client.registrationNumber
             : <ClientFillHint>to be confirmed on signing</ClientFillHint>}
-          {/* Associations/federations frequently have no VAT — omit the phrase
-              rather than show a permanent blank. Companies still see the hint. */}
-          {(client.vatNumber || client.entityType === 'company' || !client.entityType) && (
+          {/* Omit the VAT phrase entirely when the client has no VAT number
+              (flagged, or a non-corporate entity); show the hint only when a
+              number is genuinely still expected. See clientVatDisplay. */}
+          {clientVatDisplay(client, 'TBC') !== '' && (
             <>
               , VAT number{' '}
               {client.vatNumber
@@ -3765,8 +3766,8 @@ function ClientFormModal({ client, readOnly, canDelete, onDeleted, onClose, onDo
   const [form, setForm] = useState(client ? {
     companyName: client.companyName || '', entityType: client.entityType || 'company', contactName: client.contactName || '', contactEmail: client.contactEmail || '',
     contactPhone: client.contactPhone || '', address: client.address || '', country: client.country || 'CY',
-    vatNumber: client.vatNumber || '', registrationNumber: client.registrationNumber || '', currency: client.currency || 'EUR',
-  } : { companyName:'', entityType:'company', contactName:'', contactEmail:'', contactPhone:'', address:'', country:'CY', vatNumber:'', registrationNumber:'', currency:'EUR' });
+    vatNumber: client.vatNumber || '', noVatNumber: !!client.noVatNumber, registrationNumber: client.registrationNumber || '', currency: client.currency || 'EUR',
+  } : { companyName:'', entityType:'company', contactName:'', contactEmail:'', contactPhone:'', address:'', country:'CY', vatNumber:'', noVatNumber:false, registrationNumber:'', currency:'EUR' });
   const [logoBase64, setLogoBase64] = useState(client && client.logoBase64 ? client.logoBase64 : null);
   // CC recipients (finance, a director…) — up to 3 email inputs; non-empty
   // ones are collected into ccEmails on save. Padded to 3 for stable inputs.
@@ -3817,7 +3818,9 @@ function ClientFormModal({ client, readOnly, canDelete, onDeleted, onClose, onDo
     const cleanedCc = ccTrimmed.filter(x => x && validateEmail(x));
     setBusy(true);
     try {
-      const payload = { ...form, vatNumber: form.vatNumber || null, registrationNumber: form.registrationNumber || null, logoBase64: logoBase64 || null, ccEmails: cleanedCc };
+      // "No VAT number" wins over any stale value left in the field, so the two
+      // can never contradict each other in the stored record.
+      const payload = { ...form, vatNumber: (form.noVatNumber ? null : form.vatNumber || null), noVatNumber: !!form.noVatNumber, registrationNumber: form.registrationNumber || null, logoBase64: logoBase64 || null, ccEmails: cleanedCc };
       if (isEdit) {
         await clientService.update(client.id, payload);
         toast.push('Client updated.', 'success');
@@ -3885,9 +3888,22 @@ function ClientFormModal({ client, readOnly, canDelete, onDeleted, onClose, onDo
         </Field>
       </div>
       <div className="grid grid-cols-2 gap-4">
-        <Field label="VAT Number (optional)"><input disabled={readOnly} value={form.vatNumber} onChange={e=>set('vatNumber',e.target.value)} className={inputCls(false)} /></Field>
+        <Field label="VAT Number (optional)"><input disabled={readOnly || form.noVatNumber} value={form.noVatNumber ? '' : form.vatNumber} onChange={e=>set('vatNumber',e.target.value)} className={inputCls(false)} placeholder={form.noVatNumber ? 'Not VAT-registered' : ''} /></Field>
         <Field label="Registration Number (optional)"><input disabled={readOnly} value={form.registrationNumber} onChange={e=>set('registrationNumber',e.target.value)} className={inputCls(false)} placeholder="e.g. HE123456" /></Field>
       </div>
+      {/* Distinguishes "has no VAT number" from "not filled in yet". Without
+          it a company with a blank VAT field prints a permanent
+          "[ to be confirmed on signing ]" for a number that will never exist
+          (e.g. a non-profit company limited by guarantee). */}
+      <label className="flex items-start gap-2 -mt-2 mb-1 cursor-pointer">
+        <input type="checkbox" disabled={readOnly} checked={!!form.noVatNumber}
+          onChange={e=>{ const on = e.target.checked; set('noVatNumber', on); if (on) set('vatNumber',''); }}
+          className="mt-0.5" />
+        <span className="text-xs text-slate-600">
+          This client has <strong>no VAT number</strong>
+          <span className="text-slate-400"> — omits the VAT phrase from the contract's party clause entirely, instead of showing "to be confirmed on signing".</span>
+        </span>
+      </label>
 
       <div className="mt-2 pt-3 border-t border-[var(--border)]">
         <div className="text-sm font-medium mb-1">CC recipients (optional)</div>
@@ -4425,6 +4441,7 @@ function normalizeSnapshot(snapshot) {
     address: pick(cl, 'address'),
     country: pick(cl, 'country'),
     vatNumber: pick(cl, 'vatNumber', 'vat_number'),
+    noVatNumber: pick(cl, 'noVatNumber', 'no_vat_number') || false,
     registrationNumber: pick(cl, 'registrationNumber', 'registration_number'),
     logoBase64: pick(cl, 'logoBase64', 'logo_url'),
   };
@@ -4675,8 +4692,11 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
     const e = {};
     // Client company details — all required.
     // Clubs/federations are often associations with no VAT registration, so VAT
-    // is only mandatory for companies. Everything else stays required.
-    const vatRequired = (client?.entityType || 'company') === 'company';
+    // is only mandatory for companies. Everything else stays required. A company
+    // explicitly flagged as having NO VAT number (e.g. a non-profit limited by
+    // guarantee) is exempt too — otherwise signing is blocked on a number that
+    // does not exist.
+    const vatRequired = (client?.entityType || 'company') === 'company' && !client?.noVatNumber;
     if (!cd.companyName || !cd.companyName.trim()) e.companyName = 'Company name is required.';
     if (!cd.address || !cd.address.trim()) e.address = 'Registered address is required.';
     if (!cd.country || !cd.country.trim()) e.country = 'Country of registration is required.';
@@ -5196,7 +5216,10 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
                     <input value={clientDetailsForm.country} onChange={e=>setClientDetailsForm(f=>({...f,country:e.target.value}))} className={inputCls(confirmErrors.country)} placeholder="e.g. Cyprus" />
                   </Field>
                   <div className="grid grid-cols-2 gap-3">
-                    <Field label={(client?.entityType || 'company') === 'company' ? 'VAT Number' : 'VAT Number (if applicable)'} required={(client?.entityType || 'company') === 'company'} error={confirmErrors.vatNumber} warning={confirmWarnings.vatNumber}>
+                    {/* A client confirmed to have NO VAT number must not be
+                        forced to supply one to sign — required only when a
+                        number is genuinely expected. */}
+                    <Field label={(client?.entityType || 'company') === 'company' && !client?.noVatNumber ? 'VAT Number' : 'VAT Number (if applicable)'} required={(client?.entityType || 'company') === 'company' && !client?.noVatNumber} error={confirmErrors.vatNumber} warning={confirmWarnings.vatNumber}>
                       <input value={clientDetailsForm.vatNumber} onChange={e=>setClientDetailsForm(f=>({...f,vatNumber:e.target.value}))} className={inputCls(confirmErrors.vatNumber)} placeholder="e.g. CY60030297Y" />
                     </Field>
                     <Field label="Registration Number" required error={confirmErrors.registrationNumber} warning={confirmWarnings.registrationNumber}>
