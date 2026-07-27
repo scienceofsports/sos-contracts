@@ -28,6 +28,7 @@ import {
   vatSummary,
   paymentTimingWording,
   agreementDate,
+  clientVatDisplay,
 } from './lib/constants.js';
 import {
   nowISO,
