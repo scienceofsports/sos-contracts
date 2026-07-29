@@ -325,7 +325,11 @@ function ReminderBanners({ contracts, clients, navigate }) {
   let renewalCount = 0;
 
   contracts.forEach(c => {
-    c.payments.forEach(p => {
+    // Money is only chaseable under an EXECUTED contract. A draft or a
+    // sent-but-unsigned deal has a payment schedule, but nobody owes anything
+    // under it — raising it as an overdue red flag sends you chasing a client
+    // who never signed. See isReceivableContract.
+    if (isReceivableContract(c)) c.payments.forEach(p => {
       if (p.status === 'pending' || p.status === 'overdue') {
         const days = daysBetween(now, p.dueDate);
         const amt = Number(p.totalAmount || 0);
