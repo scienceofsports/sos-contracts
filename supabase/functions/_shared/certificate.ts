@@ -12,6 +12,7 @@
 // boot path free of pdf-lib. `rgb` is only a plain colour factory, so we inline it
 // here (byte-identical to pdf-lib's rgb()) to keep the top-level colour constants.
 import { sha256Hex } from './evidence.ts';
+import { loadUnicodeFonts, drawSafeText } from './pdfFont.ts';
 
 // Mirrors pdf-lib's rgb(): returns { type: 'RGB', red, green, blue }. Stable across
 // pdf-lib 1.x. Lets the colour constants below evaluate without importing pdf-lib.
@@ -56,8 +57,9 @@ export async function buildCertificate(input: {
   const co = snapshot.company || {};
 
   const pdf = await PDFDocument.create();
-  const font = await pdf.embedFont(StandardFonts.Helvetica);
-  const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
+  // Unicode fonts: Greek club/signer names must render, not crash the
+  // certificate. See pdfFont.ts for the full rationale.
+  const { font, bold } = await loadUnicodeFonts(pdf, StandardFonts);
 
   let page = pdf.addPage([595, 842]); // A4 portrait
   const M = 50;
@@ -66,7 +68,7 @@ export async function buildCertificate(input: {
   const line = (text: string, opts: { size?: number; f?: Any; color?: Any; gap?: number; x?: number } = {}) => {
     const size = opts.size ?? 10;
     const f = opts.f ?? font;
-    page.drawText(text ?? '', { x: opts.x ?? M, y, size, font: f, color: opts.color ?? BLACK });
+    drawSafeText(page, text ?? '', { x: opts.x ?? M, y, size, font: f, color: opts.color ?? BLACK });
     y -= (opts.gap ?? size + 6);
   };
   const gap = (n: number) => { y -= n; };
@@ -75,8 +77,8 @@ export async function buildCertificate(input: {
 
   // Navy header band + brand wordmark + signature rainbow hairline
   page.drawRectangle({ x: 0, y: 800, width: 595, height: 42, color: NAVY });
-  page.drawText('CERTIFICATE OF COMPLETION', { x: M, y: 816, size: 14, font: bold, color: rgb(1, 1, 1) });
-  page.drawText('SCIENCE OF SPORTS', { x: 595 - M - 130, y: 816, size: 9, font: bold, color: CYAN });
+  drawSafeText(page, 'CERTIFICATE OF COMPLETION', { x: M, y: 816, size: 14, font: bold, color: rgb(1, 1, 1) });
+  drawSafeText(page, 'SCIENCE OF SPORTS', { x: 595 - M - 130, y: 816, size: 9, font: bold, color: CYAN });
   // Rainbow strip (four segments)
   const rseg = [rgb(0.133,0.780,0.902), rgb(0.145,0.388,0.922), rgb(0.545,0.361,0.965), rgb(0.925,0.282,0.6)];
   const rsw = 595 / rseg.length;

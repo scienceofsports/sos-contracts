@@ -20,6 +20,7 @@
 // boot path free of pdf-lib. `rgb` is only a plain colour factory, so we inline it
 // here (byte-identical to pdf-lib's rgb()) to keep the top-level colour constants.
 import { sha256Hex } from './evidence.ts';
+import { loadUnicodeFonts, drawSafeText } from './pdfFont.ts';
 
 // Mirrors pdf-lib's rgb(): returns { type: 'RGB', red, green, blue }. Stable across
 // pdf-lib 1.x. Lets the colour constants below evaluate without importing pdf-lib.
@@ -458,9 +459,9 @@ export async function buildContractPdf(input: {
   const co = snapshot?.company || {};
 
   const pdf = await PDFDocument.create();
-  const font = await pdf.embedFont(StandardFonts.Helvetica);
-  const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
-  const italic = await pdf.embedFont(StandardFonts.HelveticaOblique);
+  // Unicode fonts: Greek club/signer names and any Greek clause text must
+  // render rather than crash generation. See pdfFont.ts.
+  const { font, bold, italic } = await loadUnicodeFonts(pdf, StandardFonts);
 
   const W = 595, H = 842;               // A4 portrait
   const M = 50;
@@ -553,15 +554,15 @@ export async function buildContractPdf(input: {
       try {
         pg.drawImage(sosLogo, { x: cx, y: lockCenterY - sosFit.height / 2, width: sosFit.width, height: sosFit.height });
       } catch (_) {
-        pg.drawText('SCIENCE OF SPORTS', { x: cx, y: lockCenterY - 5, size: 13, font: bold, color: WHITE });
+        drawSafeText(pg, 'SCIENCE OF SPORTS', { x: cx, y: lockCenterY - 5, size: 13, font: bold, color: WHITE });
       }
     } else {
-      pg.drawText('SCIENCE OF SPORTS', { x: cx, y: lockCenterY - 5, size: 13, font: bold, color: WHITE });
+      drawSafeText(pg, 'SCIENCE OF SPORTS', { x: cx, y: lockCenterY - 5, size: 13, font: bold, color: WHITE });
     }
     cx += sosW + gap;
 
     // Cyan multiplication cross.
-    pg.drawText('x', { x: cx, y: lockCenterY - 5, size: 14, font, color: CYAN });
+    drawSafeText(pg, 'x', { x: cx, y: lockCenterY - 5, size: 14, font, color: CYAN });
     cx += crossW + gap;
 
     // Client logo / name.
@@ -569,16 +570,16 @@ export async function buildContractPdf(input: {
       try {
         pg.drawImage(clientLogo, { x: cx, y: lockCenterY - cliFit.height / 2, width: cliFit.width, height: cliFit.height });
       } catch (_) {
-        pg.drawText(clientName0.toUpperCase(), { x: cx, y: lockCenterY - 5, size: 12, font: bold, color: WHITE });
+        drawSafeText(pg, clientName0.toUpperCase(), { x: cx, y: lockCenterY - 5, size: 12, font: bold, color: WHITE });
       }
     } else {
-      pg.drawText(clientName0.toUpperCase(), { x: cx, y: lockCenterY - 5, size: 12, font: bold, color: WHITE });
+      drawSafeText(pg, clientName0.toUpperCase(), { x: cx, y: lockCenterY - 5, size: 12, font: bold, color: WHITE });
     }
 
     // Cyan contract number, centred below the lockup.
     if (contractNumber) {
       const tw = bold.widthOfTextAtSize(contractNumber, 9);
-      pg.drawText(contractNumber, { x: (W - tw) / 2, y: bandBottom + 12, size: 9, font: bold, color: CYAN });
+      drawSafeText(pg, contractNumber, { x: (W - tw) / 2, y: bandBottom + 12, size: 9, font: bold, color: CYAN });
     }
 
     // Rainbow hairline directly under the band.
@@ -588,10 +589,10 @@ export async function buildContractPdf(input: {
   // --- Slim running header for pages 2+. ------------------------------------
   const drawHeaderRest = (pg: Any) => {
     pg.drawRectangle({ x: 0, y: H - 30, width: W, height: 30, color: NAVY });
-    pg.drawText('SCIENCE OF SPORTS', { x: M, y: H - 20, size: 10, font: bold, color: WHITE });
+    drawSafeText(pg, 'SCIENCE OF SPORTS', { x: M, y: H - 20, size: 10, font: bold, color: WHITE });
     if (contractNumber) {
       const tw = font.widthOfTextAtSize(contractNumber, 8);
-      pg.drawText(contractNumber, { x: W - M - tw, y: H - 20, size: 8, font, color: CYAN });
+      drawSafeText(pg, contractNumber, { x: W - M - tw, y: H - 20, size: 8, font, color: CYAN });
     }
     drawRainbow(pg, H - 30, 3);
   };
@@ -601,15 +602,15 @@ export async function buildContractPdf(input: {
     pg.drawRectangle({ x: 0, y: 0, width: W, height: 38, color: NAVY });
     // Signature SCIOS rainbow hairline directly above the footer band (y 38→41).
     drawRainbow(pg, 41, 3);
-    pg.drawText(companyName0, { x: M, y: 24, size: 7.5, font: bold, color: WHITE });
+    drawSafeText(pg, companyName0, { x: M, y: 24, size: 7.5, font: bold, color: WHITE });
     const contactEmail = pick(co, 'contactEmail', 'contact_email') || 'info@scienceofsports.net';
     const reg = pick(co, 'registrationNumber', 'registration_number') || 'HE 449875';
     const vat = pick(co, 'vatNumber', 'vat_number');
     const line2 = `${contactEmail} · +357 22 396997 · Reg. No. ${reg}${vat ? ' · VAT ' + vat : ''}`;
-    pg.drawText(line2, { x: M, y: 13, size: 7, font, color: FOOTER_GREY });
+    drawSafeText(pg, line2, { x: M, y: 13, size: 7, font, color: FOOTER_GREY });
     const tag = 'Transforming matches into knowledge.';
     const tw = italic.widthOfTextAtSize(tag, 8.5);
-    pg.drawText(tag, { x: W - M - tw, y: 16, size: 8.5, font: italic, color: CYAN });
+    drawSafeText(pg, tag, { x: W - M - tw, y: 16, size: 8.5, font: italic, color: CYAN });
   };
 
   drawHeaderP1(page);
@@ -643,7 +644,7 @@ export async function buildContractPdf(input: {
     const flush = () => {
       ensure(size + 4);
       y += size;                       // advance to this line's baseline first
-      page.drawText(lineStr, { x, y: py(y), size, font: f, color });
+      drawSafeText(page, lineStr, { x, y: py(y), size, font: f, color });
       y += 4;
       lineStr = '';
     };
@@ -678,10 +679,10 @@ export async function buildContractPdf(input: {
     const textY = pillTop + PILL_H - 7;  // downward baseline for centred-ish text
     let tx = M + PILL_PADX;
     if (numStr) {
-      page.drawText(numStr, { x: tx, y: py(textY), size: PILL_TEXT, font: bold, color: CYAN });
+      drawSafeText(page, numStr, { x: tx, y: py(textY), size: PILL_TEXT, font: bold, color: CYAN });
       tx += numW + numGap;
     }
-    page.drawText(title, { x: tx, y: py(textY), size: PILL_TEXT, font: bold, color: WHITE });
+    drawSafeText(page, title, { x: tx, y: py(textY), size: PILL_TEXT, font: bold, color: WHITE });
     y = pillTop + PILL_H + 8;
   };
 
@@ -778,7 +779,7 @@ export async function buildContractPdf(input: {
       const tw = bold.widthOfTextAtSize(str, size);
       ensure(size + 6);
       y += size;
-      page.drawText(str, { x: (W - tw) / 2, y: py(y), size, font: bold, color: NAVY });
+      drawSafeText(page, str, { x: (W - tw) / 2, y: py(y), size, font: bold, color: NAVY });
       y += gap;
     };
     centered((parts[0] || '').toUpperCase(), 18, parts.length > 1 ? 4 : 8);
@@ -841,7 +842,7 @@ export async function buildContractPdf(input: {
     const chipH = 13;
     // baselineY is the downward baseline of the text line the chip sits on.
     page.drawRectangle({ x, y: py(baselineY + 3), width: w, height: chipH, color: CHIP_GREEN_BG });
-    page.drawText(label, { x: x + padX, y: py(baselineY - 1.5), size, font: bold, color: CHIP_GREEN_TX });
+    drawSafeText(page, label, { x: x + padX, y: py(baselineY - 1.5), size, font: bold, color: CHIP_GREEN_TX });
     return x + w;
   };
 
@@ -868,7 +869,7 @@ export async function buildContractPdf(input: {
     page.drawRectangle({ x, y: py(boxTop + boxH), width, height: boxH, color: CYAN_BOX_BG });
     page.drawRectangle({ x, y: py(boxTop + boxH), width: 2, height: boxH, color: CYAN });
     let ly = boxTop + 4 + size;                // first baseline
-    for (const ln of lines) { page.drawText(ln, { x: x + padX, y: py(ly), size, font: bold, color: NAVY }); ly += lineH; }
+    for (const ln of lines) { drawSafeText(page, ln, { x: x + padX, y: py(ly), size, font: bold, color: NAVY }); ly += lineH; }
     y = boxTop + boxH + 2;
   };
 
@@ -885,7 +886,7 @@ export async function buildContractPdf(input: {
       y += 10;
       const ghBaseline = y;
       page.drawRectangle({ x: M, y: py(ghBaseline + 2), width: 3, height: 10, color: CYAN });
-      page.drawText(group.toUpperCase(), { x: M + 8, y: py(ghBaseline), size: 9, font: bold, color: NAVY });
+      drawSafeText(page, group.toUpperCase(), { x: M + 8, y: py(ghBaseline), size: 9, font: bold, color: NAVY });
       y += 4;
       groupItems.forEach((i) => {
         const qtyNote = i.unit === 'per_match' ? ` (${i.qty} matches)` : i.unit === 'per_unit' ? ` (${i.qty})` : '';
@@ -897,10 +898,10 @@ export async function buildContractPdf(input: {
         y += 10;                         // baseline for the label line
         const labelBaseline = y;
         let lx = itemX;
-        page.drawText(i.label, { x: lx, y: py(labelBaseline), size: 9.5, font: bold, color: NAVY });
+        drawSafeText(page, i.label, { x: lx, y: py(labelBaseline), size: 9.5, font: bold, color: NAVY });
         lx += bold.widthOfTextAtSize(i.label, 9.5);
         if (qtyNote) {
-          page.drawText(qtyNote, { x: lx, y: py(labelBaseline), size: 9.5, font, color: GREY });
+          drawSafeText(page, qtyNote, { x: lx, y: py(labelBaseline), size: 9.5, font, color: GREY });
           lx += font.widthOfTextAtSize(qtyNote, 9.5);
         }
         if (chipLabel) { lx += 6; chip(chipLabel, lx, labelBaseline); }
@@ -984,9 +985,9 @@ export async function buildContractPdf(input: {
     y += 4;
     const headTop = y;
     page.drawRectangle({ x: M, y: py(headTop + headH), width: maxW, height: headH, color: NAVY });
-    page.drawText('SERVICE', { x: M + cellPadX, y: py(headTop + 13), size: 8.5, font: bold, color: WHITE });
+    drawSafeText(page, 'SERVICE', { x: M + cellPadX, y: py(headTop + 13), size: 8.5, font: bold, color: WHITE });
     const qtyHeadW = bold.widthOfTextAtSize('AMOUNT', 8.5);
-    page.drawText('AMOUNT', { x: W - M - cellPadX - qtyHeadW, y: py(headTop + 13), size: 8.5, font: bold, color: WHITE });
+    drawSafeText(page, 'AMOUNT', { x: W - M - cellPadX - qtyHeadW, y: py(headTop + 13), size: 8.5, font: bold, color: WHITE });
     y = headTop + headH;
 
     // Body rows.
@@ -1004,7 +1005,7 @@ export async function buildContractPdf(input: {
       const rowTop = y;
 
       let ly = rowTop + 12;
-      for (const ln of labelLines) { page.drawText(ln, { x: M + cellPadX, y: py(ly), size: 9.5, font, color: BLACK }); ly += 12; }
+      for (const ln of labelLines) { drawSafeText(page, ln, { x: M + cellPadX, y: py(ly), size: 9.5, font, color: BLACK }); ly += 12; }
       // Seats subline — highlighted callout: cyan-tinted box, cyan left accent,
       // navy text so this contractually important line stands out.
       if (subLines.length) {
@@ -1015,7 +1016,7 @@ export async function buildContractPdf(input: {
         page.drawRectangle({ x: boxX, y: py(boxTop + boxH), width: boxW, height: boxH, color: CYAN_BOX_BG });
         page.drawRectangle({ x: boxX, y: py(boxTop + boxH), width: 2, height: boxH, color: CYAN });
         let sy = boxTop + 9;
-        for (const ln of subLines) { page.drawText(ln, { x: boxX + 6, y: py(sy), size: 8.5, font: bold, color: NAVY }); sy += 11; }
+        for (const ln of subLines) { drawSafeText(page, ln, { x: boxX + 6, y: py(sy), size: 8.5, font: bold, color: NAVY }); sy += 11; }
         ly = boxTop + boxH;
       }
       // Amount right-aligned. Included lines show the list price struck through
@@ -1028,26 +1029,26 @@ export async function buildContractPdf(input: {
         if (Number(i.listPrice) > 0) {
           const vStr = fmtMoney(i.listPrice, currency);
           const pw = font.widthOfTextAtSize(vStr, 9.5);
-          page.drawText(vStr, { x: rightX - pw, y: py(amtBaseline), size: 9.5, font, color: BLACK });
+          drawSafeText(page, vStr, { x: rightX - pw, y: py(amtBaseline), size: 9.5, font, color: BLACK });
         } else {
           const w = bold.widthOfTextAtSize('Included', 9.5);
-          page.drawText('Included', { x: rightX - w, y: py(amtBaseline), size: 9.5, font: bold, color: rgb(0.063, 0.588, 0.412) });
+          drawSafeText(page, 'Included', { x: rightX - w, y: py(amtBaseline), size: 9.5, font: bold, color: rgb(0.063, 0.588, 0.412) });
         }
       } else if (i.included && i.listPrice > 0) {
         // Waived a real value: struck-through list price + "Incl."
         const inclW = bold.widthOfTextAtSize('Incl.', 9.5);
-        page.drawText('Incl.', { x: rightX - inclW, y: py(amtBaseline), size: 9.5, font: bold, color: rgb(0.063, 0.588, 0.412) });
+        drawSafeText(page, 'Incl.', { x: rightX - inclW, y: py(amtBaseline), size: 9.5, font: bold, color: rgb(0.063, 0.588, 0.412) });
         const pw = font.widthOfTextAtSize(priceStr, 9.5);
         const priceRight = rightX - inclW - 6;
-        page.drawText(priceStr, { x: priceRight - pw, y: py(amtBaseline), size: 9.5, font, color: rgb(0.588, 0.627, 0.667) });
+        drawSafeText(page, priceStr, { x: priceRight - pw, y: py(amtBaseline), size: 9.5, font, color: rgb(0.588, 0.627, 0.667) });
         page.drawLine({ start: { x: priceRight - pw, y: py(amtBaseline - 3) }, end: { x: priceRight, y: py(amtBaseline - 3) }, thickness: 0.6, color: rgb(0.588, 0.627, 0.667) });
       } else if (i.included) {
         // No value to strike — just "Included".
         const w = bold.widthOfTextAtSize('Included', 9.5);
-        page.drawText('Included', { x: rightX - w, y: py(amtBaseline), size: 9.5, font: bold, color: rgb(0.063, 0.588, 0.412) });
+        drawSafeText(page, 'Included', { x: rightX - w, y: py(amtBaseline), size: 9.5, font: bold, color: rgb(0.063, 0.588, 0.412) });
       } else {
         const pw = font.widthOfTextAtSize(priceStr, 9.5);
-        page.drawText(priceStr, { x: rightX - pw, y: py(amtBaseline), size: 9.5, font, color: BLACK });
+        drawSafeText(page, priceStr, { x: rightX - pw, y: py(amtBaseline), size: 9.5, font, color: BLACK });
       }
 
       y = rowTop + rowH;
@@ -1058,10 +1059,10 @@ export async function buildContractPdf(input: {
     if (pfPlayerLine) {
       ensure(rowH);
       const baseline = y + 12;
-      page.drawText(pfPlayerLine.label, { x: M + cellPadX, y: py(baseline), size: 9.5, font, color: BLACK });
+      drawSafeText(page, pfPlayerLine.label, { x: M + cellPadX, y: py(baseline), size: 9.5, font, color: BLACK });
       const aStr = fmtMoney(pfPlayerLine.amount, currency);
       const aw = font.widthOfTextAtSize(aStr, 9.5);
-      page.drawText(aStr, { x: W - M - cellPadX - aw, y: py(baseline), size: 9.5, font, color: BLACK });
+      drawSafeText(page, aStr, { x: W - M - cellPadX - aw, y: py(baseline), size: 9.5, font, color: BLACK });
       y += rowH;
       page.drawLine({ start: { x: M, y: py(y) }, end: { x: W - M, y: py(y) }, thickness: 0.5, color: rgb(0.862, 0.878, 0.902) });
     }
@@ -1072,23 +1073,23 @@ export async function buildContractPdf(input: {
     page.drawLine({ start: { x: M, y: py(y) }, end: { x: W - M, y: py(y) }, thickness: 1, color: NAVY });
     y += 15;
     const netLabel = scopeVs.applies ? 'Total Contract Value (excl. VAT)' : 'Total Contract Value';
-    page.drawText(netLabel, { x: M + cellPadX, y: py(y), size: 10.5, font: bold, color: NAVY });
+    drawSafeText(page, netLabel, { x: M + cellPadX, y: py(y), size: 10.5, font: bold, color: NAVY });
     const totalStr = fmtMoney(scopeVs.net, currency);
     const totalW2 = bold.widthOfTextAtSize(totalStr, 10.5);
-    page.drawText(totalStr, { x: W - M - cellPadX - totalW2, y: py(y), size: 10.5, font: bold, color: NAVY });
+    drawSafeText(page, totalStr, { x: W - M - cellPadX - totalW2, y: py(y), size: 10.5, font: bold, color: NAVY });
     y += 12;
     if (scopeVs.applies) {
       const grey = rgb(0.353, 0.392, 0.431);
-      page.drawText(`VAT (${scopeVs.ratePct}%)`, { x: M + cellPadX, y: py(y), size: 9.5, font, color: grey });
+      drawSafeText(page, `VAT (${scopeVs.ratePct}%)`, { x: M + cellPadX, y: py(y), size: 9.5, font, color: grey });
       const vatStr = fmtMoney(scopeVs.vat, currency);
       const vatW = font.widthOfTextAtSize(vatStr, 9.5);
-      page.drawText(vatStr, { x: W - M - cellPadX - vatW, y: py(y), size: 9.5, font, color: grey });
+      drawSafeText(page, vatStr, { x: W - M - cellPadX - vatW, y: py(y), size: 9.5, font, color: grey });
       y += 13;
       page.drawLine({ start: { x: M, y: py(y - 9) }, end: { x: W - M, y: py(y - 9) }, thickness: 0.6, color: NAVY });
-      page.drawText('Total incl. VAT', { x: M + cellPadX, y: py(y), size: 10.5, font: bold, color: NAVY });
+      drawSafeText(page, 'Total incl. VAT', { x: M + cellPadX, y: py(y), size: 10.5, font: bold, color: NAVY });
       const grossStr = fmtMoney(scopeVs.gross, currency);
       const grossW = bold.widthOfTextAtSize(grossStr, 10.5);
-      page.drawText(grossStr, { x: W - M - cellPadX - grossW, y: py(y), size: 10.5, font: bold, color: NAVY });
+      drawSafeText(page, grossStr, { x: W - M - cellPadX - grossW, y: py(y), size: 10.5, font: bold, color: NAVY });
       y += 12;
     }
   }
@@ -1103,7 +1104,7 @@ export async function buildContractPdf(input: {
       y += 10;
       const oaBaseline = y;
       page.drawRectangle({ x: M, y: py(oaBaseline + 2), width: 3, height: 10, color: CYAN });
-      page.drawText('OPPONENT ACCESS', { x: M + 8, y: py(oaBaseline), size: 9, font: bold, color: NAVY });
+      drawSafeText(page, 'OPPONENT ACCESS', { x: M + 8, y: py(oaBaseline), size: 9, font: bold, color: NAVY });
       y += 4;
       text(analysisScope.opponent, { size: 10, gap: 10 });
     }
@@ -1123,10 +1124,10 @@ export async function buildContractPdf(input: {
       const dateX = M + maxW * 0.5;
       const amtHead = (vs.amountLabel || 'Amount').toUpperCase();
       ensure(16); y += 12;
-      page.drawText('PAYMENT', { x: M + 6, y: py(y), size: 8, font: bold, color: NAVY });
-      page.drawText('DUE DATE', { x: dateX, y: py(y), size: 8, font: bold, color: NAVY });
+      drawSafeText(page, 'PAYMENT', { x: M + 6, y: py(y), size: 8, font: bold, color: NAVY });
+      drawSafeText(page, 'DUE DATE', { x: dateX, y: py(y), size: 8, font: bold, color: NAVY });
       const ahW = bold.widthOfTextAtSize(amtHead, 8);
-      page.drawText(amtHead, { x: amtX - ahW, y: py(y), size: 8, font: bold, color: NAVY });
+      drawSafeText(page, amtHead, { x: amtX - ahW, y: py(y), size: 8, font: bold, color: NAVY });
       y += 3;
       page.drawLine({ start: { x: M, y: py(y) }, end: { x: W - M, y: py(y) }, thickness: 0.5, color: NAVY });
       for (let i = 0; i < payments.length; i++) {
@@ -1135,11 +1136,11 @@ export async function buildContractPdf(input: {
         const due = pick(p, 'dueDate', 'due_date');
         const amt = pick(p, 'totalAmount', 'total_amount');
         const amt2 = amt != null ? amt : pick(p, 'amount');
-        page.drawText(`Instalment ${i + 1}`, { x: M + 6, y: py(y), size: 9.5, font, color: BLACK });
-        page.drawText(due ? fmtDate(due) : '—', { x: dateX, y: py(y), size: 9.5, font, color: BLACK });
+        drawSafeText(page, `Instalment ${i + 1}`, { x: M + 6, y: py(y), size: 9.5, font, color: BLACK });
+        drawSafeText(page, due ? fmtDate(due) : '—', { x: dateX, y: py(y), size: 9.5, font, color: BLACK });
         const amtStr = fmtMoney(amt2, currency);
         const aW = bold.widthOfTextAtSize(amtStr, 9.5);
-        page.drawText(amtStr, { x: amtX - aW, y: py(y), size: 9.5, font: bold, color: BLACK });
+        drawSafeText(page, amtStr, { x: amtX - aW, y: py(y), size: 9.5, font: bold, color: BLACK });
         y += 3;
         page.drawLine({ start: { x: M, y: py(y) }, end: { x: W - M, y: py(y) }, thickness: 0.4, color: rgb(0.862, 0.878, 0.902) });
       }
@@ -1345,13 +1346,13 @@ export async function buildContractPdf(input: {
     let yy = blockTop;
     // Column header (downward baseline), navy uppercase.
     yy += 9;
-    page.drawText(heads[idx].toUpperCase().slice(0, 60), { x, y: py(yy), size: 8.5, font: bold, color: NAVY });
+    drawSafeText(page, heads[idx].toUpperCase().slice(0, 60), { x, y: py(yy), size: 8.5, font: bold, color: NAVY });
     yy += 12;
 
     // Draw the caption on the CLIENT column; reserve the same space on the other
     // so both signature lines stay level.
     if (idx === 1 && repLines.length) {
-      repLines.forEach((ln) => { page.drawText(ln, { x, y: py(yy), size: 7, font, color: GREY }); yy += 8; });
+      repLines.forEach((ln) => { drawSafeText(page, ln, { x, y: py(yy), size: 7, font, color: GREY }); yy += 8; });
       yy += 4;
     } else {
       yy += capReserve;
@@ -1366,7 +1367,7 @@ export async function buildContractPdf(input: {
       const maxW = colW - 4;
       let size = 20;
       while (size > 9 && italic.widthOfTextAtSize(str, size) > maxW) size -= 1;
-      page.drawText(str, { x: x + 2, y: py(sigLineY - 6), size, font: italic, color: BLACK });
+      drawSafeText(page, str, { x: x + 2, y: py(sigLineY - 6), size, font: italic, color: BLACK });
     };
     if (col.sig) {
       try {
@@ -1382,13 +1383,13 @@ export async function buildContractPdf(input: {
     }
     // Signature line + label.
     page.drawLine({ start: { x, y: py(sigLineY) }, end: { x: x + colW, y: py(sigLineY) }, thickness: 0.75, color: rgb(0.588, 0.627, 0.667) });
-    page.drawText('SIGNATURE', { x, y: py(sigLineY + 10), size: 7, font, color: rgb(0.549, 0.58, 0.612) });
+    drawSafeText(page, 'SIGNATURE', { x, y: py(sigLineY + 10), size: 7, font, color: rgb(0.549, 0.58, 0.612) });
     yy = sigLineY + 26;
 
     const field = (label: string, val: string) => {
-      if (val) page.drawText(String(val), { x: x + 2, y: py(yy - 3), size: 9, font, color: BLACK });
+      if (val) drawSafeText(page, String(val), { x: x + 2, y: py(yy - 3), size: 9, font, color: BLACK });
       page.drawLine({ start: { x, y: py(yy + 2) }, end: { x: x + colW, y: py(yy + 2) }, thickness: 0.5, color: rgb(0.588, 0.627, 0.667) });
-      page.drawText(label.toUpperCase(), { x, y: py(yy + 12), size: 7, font, color: rgb(0.549, 0.58, 0.612) });
+      drawSafeText(page, label.toUpperCase(), { x, y: py(yy + 12), size: 7, font, color: rgb(0.549, 0.58, 0.612) });
       yy += 28;
     };
     field('Name', col.name);
