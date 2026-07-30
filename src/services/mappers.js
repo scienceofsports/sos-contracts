@@ -123,7 +123,16 @@ export function contractFromRow(row, payments = [], events = []) {
   if (!row) return null;
   // Derive signer/consent/audit fields from the tamper-evident signature_events
   // ledger (the authoritative source), so the admin UI reflects real signings.
-  const signedEvent = (events || []).find((e) => e.event_type === 'signed') || null;
+  // 'imported' counts as a signature too: it is how a WET-INK signature enters
+  // the ledger (client printed the contract, signed by hand, returned a scan).
+  // Such an event carries the signer's identity and the date they signed, but
+  // no signer_ip / consents / signature image — the Signature Status panel
+  // already renders that case as "Recorded manually (paper/offline signature)".
+  // Matching only 'signed' left an offline-executed contract showing "Not yet
+  // sent" despite being active with a countersigned scan attached.
+  const signedEvent = (events || []).find(
+    (e) => e.event_type === 'signed' || e.event_type === 'imported',
+  ) || null;
   // LAST 'sent' event, not the first: events arrive in ascending time order, and
   // a contract can be re-sent many times (expired link, wrong address, revised
   // terms). `sentAt` drives the signing-link expiry in effectiveContractStatus,
