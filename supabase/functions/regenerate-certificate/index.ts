@@ -27,6 +27,8 @@
 import { handleOptions, json } from '../_shared/cors.ts';
 import { getAdminClient } from '../_shared/supabaseAdmin.ts';
 import { buildCertificate } from '../_shared/certificate.ts';
+import { buildContractPdf } from '../_shared/contractPdf.ts';
+import { sendEmail, signedNotificationEmail, signerConfirmationEmail } from '../_shared/email.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 // deno-lint-ignore no-explicit-any
@@ -182,6 +184,132 @@ Deno.serve(async (req) => {
       .update({ certificate_status: 'generated' })
       .eq('id', contract.id);
 
+    // ---- 9. The EXECUTED contract PDF ---------------------------------------
+    // record-signature builds this in the same try-block as the certificate, so
+    // when certificate generation threw, this never ran either: the client has
+    // no counter-signed contract and get-signed-contract has nothing to serve.
+    // Rebuild it from the same frozen snapshot and store it at the same
+    // deterministic path record-signature would have used.
+    const b64 = (u8: Uint8Array) =>
+      btoa(Array.from(u8).map((b) => String.fromCharCode(b)).join(''));
+
+    const attachments: { filename: string; content: string }[] = [
+      { filename: `Certificate - ${contract.contract_number}.pdf`, content: b64(pdfBytes) },
+    ];
+    let signedContractBytes = 0;
+    try {
+      const { bytes: contractPdfBytes } = await buildContractPdf({
+        snapshot: snap,
+        signer: {
+          name: signedEvent.signer_name ?? '',
+          title: signedEvent.signer_title ?? '',
+          company: signedEvent.signer_company ?? '',
+          email: signedEvent.signer_email ?? request.signer_email,
+          signedAt,
+          onBehalf: !!signedEvent.signer_on_behalf,
+          representativeCompany: nz(signedEvent.representative_company),
+          representativeRegistration: nz(signedEvent.representative_registration),
+          authorityBasis: nz(signedEvent.signer_authority_basis),
+        },
+        signatureImageBytes: sigBytes,
+      });
+      const signedContractPath = `${contract.id}/${request.id}-signed-contract.pdf`;
+      await admin.storage.from('contract-attachments').upload(
+        signedContractPath, contractPdfBytes, { contentType: 'application/pdf', upsert: true },
+      );
+      signedContractBytes = contractPdfBytes.length;
+      attachments.push({
+        filename: `Signed Contract - ${contract.contract_number}.pdf`,
+        content: b64(contractPdfBytes),
+      });
+    } catch (contractPdfErr) {
+      console.error('signed contract PDF generation failed:', contractPdfErr);
+    }
+
+    // ---- 10. Deliver, exactly as a normal signing would --------------------
+    // Skippable: pass sendEmails:false to rebuild the documents silently (e.g.
+    // if the parties were already served copies by hand).
+    const sendEmails = body.sendEmails !== false;
+    const delivered: string[] = [];
+    const failed: string[] = [];
+    const contractTitle = snap?.contract?.title ?? contract.title ?? 'Contract';
+
+    if (sendEmails) {
+      const signerEmail = signedEvent.signer_email ?? request.signer_email;
+
+      // (a) The signer.
+      try {
+        await sendEmail({
+          to: signerEmail,
+          subject: `Your signed contract: ${contractTitle}`,
+          html: signerConfirmationEmail({
+            signerName: signedEvent.signer_name ?? '',
+            companyName: snap?.company?.name ?? 'Science of Sports',
+            contractTitle,
+            signedAt,
+          }),
+          attachments,
+        });
+        delivered.push(signerEmail);
+      } catch (e) {
+        console.error('signer email failed:', e);
+        failed.push(signerEmail);
+      }
+
+      // (b) Staff — company contact, else the admin who created the contract.
+      try {
+        const { data: company } = await admin.from('company').select('contact_email').limit(1).maybeSingle();
+        let notifyTo = company?.contact_email ?? null;
+        if (!notifyTo && contract.created_by) {
+          const { data: adminUser } = await admin
+            .from('app_users').select('email').eq('id', contract.created_by).maybeSingle();
+          notifyTo = adminUser?.email ?? null;
+        }
+        if (notifyTo) {
+          await sendEmail({
+            to: notifyTo,
+            subject: `Contract signed: ${contractTitle}`,
+            html: signedNotificationEmail({
+              contractTitle,
+              signerName: signedEvent.signer_name ?? '',
+              signerCompany: signedEvent.signer_company ?? '',
+              signedAt,
+            }),
+            attachments,
+          });
+          delivered.push(notifyTo);
+        }
+      } catch (e) {
+        console.error('staff email failed:', e);
+        failed.push('staff');
+      }
+
+      // (c) Client CC recipients from the frozen snapshot (finance, a director…).
+      const ccEmails: string[] = Array.isArray(snap?.client?.cc_emails)
+        ? snap.client.cc_emails
+        : (Array.isArray(snap?.client?.ccEmails) ? snap.client.ccEmails : []);
+      for (const cc of ccEmails) {
+        if (!cc || typeof cc !== 'string' || cc === signerEmail) continue;
+        try {
+          await sendEmail({
+            to: cc,
+            subject: `Signed contract: ${contractTitle}`,
+            html: signerConfirmationEmail({
+              signerName: signedEvent.signer_name ?? '',
+              companyName: snap?.company?.name ?? 'Science of Sports',
+              contractTitle,
+              signedAt,
+            }),
+            attachments,
+          });
+          delivered.push(cc);
+        } catch (e) {
+          console.error(`CC email to ${cc} failed:`, e);
+          failed.push(cc);
+        }
+      }
+    }
+
     return json({
       ok: true,
       contractNumber: contract.contract_number,
@@ -189,9 +317,14 @@ Deno.serve(async (req) => {
       signedAt,
       integrityOk,
       signatureImageEmbedded: !!sigBytes,
-      pdfBytes: pdfBytes.length,
-      pdfSha256: pdfSha,
-      path: `certificates/${certPath}`,
+      certificateBytes: pdfBytes.length,
+      certificateSha256: pdfSha,
+      certificatePath: `certificates/${certPath}`,
+      signedContractBytes,
+      signedContractRebuilt: signedContractBytes > 0,
+      emailsSent: sendEmails,
+      delivered,
+      failed,
     });
   } catch (e) {
     console.error('regenerate-certificate failed:', e);

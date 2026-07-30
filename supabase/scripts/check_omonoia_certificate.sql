@@ -1,18 +1,20 @@
 -- ============================================================================
--- Diagnose SOS-C-2026-005 (Omonoia Aradippou) — signed, but the Certificate of
--- Completion failed to render ("WinAnsi cannot encode H (0x0397)").
+-- Verify the regenerated certificate for SOS-C-2026-005 (Omonoia Aradippou),
+-- and explain the integrityOk=false result.
 --
 -- READ-ONLY. Nothing here writes.
 --
--- Single result grid: the Supabase SQL Editor only shows the LAST statement's
--- output, so every check is folded into one union'd answer sheet rather than
--- four separate selects.
+-- Context: record-signature computes
+--     integrityOk = (document_hash_after == document_hash_before)
+-- and deliberately does NOT block signing on a mismatch. A mismatch is
+-- EXPECTED and benign when the signer fills in previously-blank party details
+-- at signing (legal name / VAT / registration / country) — that edits the
+-- document, so its hash legitimately changes. The mismatch is recorded as
+-- evidence rather than hidden.
 --
--- Column locations verified against the migrations:
---   * certificate_status  -> contracts        (0016_signing_hardening)
---   * executed_snapshot   -> signing_requests (0023_executed_snapshot)
---   * document_hash_after -> signature_events (0001; NOT on signing_requests)
---   * signing time        -> signature_events.server_timestamp of 'signed'
+-- This query shows whether that is what happened here: if the executed
+-- snapshot's client block carries details the sent snapshot lacked, the
+-- mismatch is explained and harmless.
 -- ============================================================================
 
 with c as (
@@ -20,76 +22,90 @@ with c as (
 ),
 sr as (
   select * from public.signing_requests
-  where contract_id = (select id from c)
-  order by created_at desc
-  limit 1
+  where contract_id = (select id from c) and executed_snapshot is not null
+  order by created_at desc limit 1
+),
+ev as (
+  select * from public.signature_events
+  where contract_id = (select id from c) and event_type = 'signed'
+  order by created_at desc limit 1
 )
 select * from (
-  -- 1. Contract state + the failure flag record-signature sets.
-  select 1 as n,
-         'contract status' as check,
-         (select status from c) as value,
-         'certificate_status=' || coalesce((select certificate_status from c), '(null)')
-           || '  value=' || coalesce((select value::text from c), '?')
-           || ' ' || coalesce((select currency from c), '') as detail
+  -- 1. Did a certificate land?
+  select 1 as n, 'certificate now exists' as check,
+         (select count(*)::text from public.certificates where contract_id = (select id from c)) as value,
+         coalesce((select to_char(generated_at,'DD/MM/YYYY HH24:MI') || ' · ' || left(pdf_sha256,16)
+                   from public.certificates where contract_id = (select id from c)
+                   order by generated_at desc limit 1), '(none)') as detail
 
-  -- 2. THE DECISIVE ONE: did the frozen executed document survive?
-  --    It is written BEFORE certificate generation, so it should be present.
   union all
-  select 2,
-         'executed_snapshot present',
-         case when (select executed_snapshot from sr) is not null
-              then 'YES' else 'NO' end,
-         'executed=' || coalesce((select length(executed_snapshot::text) from sr)::text, '0')
-           || ' bytes · sent-snapshot='
-           || coalesce((select length(document_snapshot::text) from sr)::text, '0') || ' bytes'
+  select 2, 'contract certificate_status',
+         coalesce((select certificate_status from c), '(null)'),
+         'was "failed" before regeneration'
 
-  -- 3. Is the binding signature event actually in the ledger?
+  -- 2. The hash comparison behind integrityOk.
   union all
-  select 3,
-         'signed event in ledger',
-         case when exists (
-           select 1 from public.signature_events
-           where contract_id = (select id from c) and event_type = 'signed'
-         ) then 'YES' else 'NO' end,
-         coalesce((
-           select 'by ' || coalesce(signer_name, '?')
-                  || ' <' || coalesce(signer_email, '?') || '>'
-                  || ' at ' || to_char(server_timestamp, 'DD/MM/YYYY HH24:MI')
-                  || ' · ip=' || case when signer_ip is not null then 'yes' else 'no' end
-                  || ' · consents='
-                  || coalesce(consent_electronic::text, '-')
-                  || '/' || coalesce(consent_authorized::text, '-')
-                  || '/' || coalesce(consent_read::text, '-')
-           from public.signature_events
-           where contract_id = (select id from c) and event_type = 'signed'
-           order by created_at desc limit 1
-         ), 'no signed event found')
+  select 3, 'hash before (at Send)',
+         left((select document_hash_before from sr), 24),
+         'frozen when the contract was sent'
+  union all
+  select 4, 'hash after (at Sign)',
+         left(coalesce((select document_hash_after from ev), '(null)'), 24),
+         'recomputed over the document actually signed'
+  union all
+  select 5, 'integrity match',
+         case when (select document_hash_after from ev) = (select document_hash_before from sr)
+              then 'MATCH' else 'DIFFER (expected if party details were completed at signing)' end,
+         'record-signature records the mismatch as evidence; it never blocks signing'
 
-  -- 4. Does a certificate row exist? (expected: none — that is the bug)
+  -- 3. THE EXPLANATION: did the signer complete party details at signing?
+  --    If these differ between sent and executed snapshots, the hash change is
+  --    fully accounted for and the document is intact.
   union all
-  select 4,
-         'certificate rows',
-         (select count(*)::text from public.certificates
-          where contract_id = (select id from c)),
-         coalesce((
-           select 'latest ' || to_char(generated_at, 'DD/MM/YYYY HH24:MI')
-                  || ' · ' || coalesce(pdf_url, '(no path)')
-           from public.certificates
-           where contract_id = (select id from c)
-           order by generated_at desc limit 1
-         ), 'none — certificate never generated')
+  select 6, 'client legal name — sent',
+         coalesce((select document_snapshot->'client'->>'companyName' from sr), '(blank)'),
+         'from the SENT snapshot'
+  union all
+  select 7, 'client legal name — executed',
+         coalesce((select executed_snapshot->'client'->>'companyName' from sr), '(blank)'),
+         'from the EXECUTED snapshot'
+  union all
+  select 8, 'registration no. — sent',
+         coalesce((select document_snapshot->'client'->>'registrationNumber' from sr),
+                  (select document_snapshot->'client'->>'registration_number' from sr), '(blank)'),
+         'blank at send => signer supplied it'
+  union all
+  select 9, 'registration no. — executed',
+         coalesce((select executed_snapshot->'client'->>'registrationNumber' from sr),
+                  (select executed_snapshot->'client'->>'registration_number' from sr), '(blank)'),
+         'value the client confirmed when signing'
+  union all
+  select 10, 'VAT no. — sent',
+         coalesce((select document_snapshot->'client'->>'vatNumber' from sr),
+                  (select document_snapshot->'client'->>'vat_number' from sr), '(blank)'), ''
+  union all
+  select 11, 'VAT no. — executed',
+         coalesce((select executed_snapshot->'client'->>'vatNumber' from sr),
+                  (select executed_snapshot->'client'->>'vat_number' from sr), '(blank)'), ''
+  union all
+  select 12, 'country — sent',
+         coalesce((select document_snapshot->'client'->>'country' from sr), '(blank)'), ''
+  union all
+  select 13, 'country — executed',
+         coalesce((select executed_snapshot->'client'->>'country' from sr), '(blank)'), ''
 
-  -- 5. Full ledger chain length, for context.
+  -- 4. The contract money terms must be IDENTICAL in both. If these differ,
+  --    that is a genuine concern rather than a benign party-details edit.
   union all
-  select 5,
-         'ledger events total',
-         (select count(*)::text from public.signature_events
-          where contract_id = (select id from c)),
-         coalesce((
-           select string_agg(event_type, ' → ' order by created_at)
-           from public.signature_events
-           where contract_id = (select id from c)
-         ), '(none)')
+  select 14, 'contract value — sent vs executed',
+         coalesce((select document_snapshot->'contract'->>'value' from sr),'?') || ' vs ' ||
+         coalesce((select executed_snapshot->'contract'->>'value' from sr),'?'),
+         'these MUST match — a difference here would be serious'
+  union all
+  select 15, 'contract title — sent vs executed',
+         case when (select document_snapshot->'contract'->>'title' from sr)
+                 = (select executed_snapshot->'contract'->>'title' from sr)
+              then 'IDENTICAL' else 'DIFFERENT — investigate' end,
+         coalesce((select executed_snapshot->'contract'->>'title' from sr), '')
 ) rows
 order by n;
