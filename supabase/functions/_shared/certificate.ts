@@ -48,6 +48,12 @@ export async function buildCertificate(input: {
   integrityOk: boolean;
   signatureImageBytes: Uint8Array | null;
   contractNumber: string;
+  /**
+   * Set ONLY when rebuilding a certificate whose original render failed. Prints
+   * a disclosure paragraph so the later generation date is never implicit.
+   * Omitted on the normal signing path, which is the overwhelming majority.
+   */
+  regeneratedNote?: string | null;
 }): Promise<{ bytes: Uint8Array; sha256: string }> {
   // Lazy-load pdf-lib on first use (see top-of-file note). `rgb` is inlined above.
   const { PDFDocument, StandardFonts } = await import('https://esm.sh/pdf-lib@1.17.1');
@@ -174,6 +180,24 @@ export async function buildCertificate(input: {
     else lineStr = lineStr ? lineStr + ' ' + w : w;
   }
   if (lineStr) line(lineStr, { size: 8, color: GREY, gap: 11 });
+
+  // Regeneration disclosure. When a certificate PDF is rebuilt after the fact
+  // (the original render failed), say so on the document itself. The signature
+  // event, its timestamp and the hashes above are the originals, read from the
+  // frozen executed snapshot — only the PDF is new. Stating that plainly is
+  // stronger evidence than a silently re-dated document.
+  if (input.regeneratedNote) {
+    gap(6);
+    ensure(40);
+    line('CERTIFICATE REGENERATION', { size: 9, f: bold, color: CYAN });
+    const note = input.regeneratedNote;
+    let nStr = '';
+    for (const w of note.split(' ')) {
+      if ((nStr + ' ' + w).length > 95) { line(nStr, { size: 8, color: GREY, gap: 11 }); nStr = w; }
+      else nStr = nStr ? nStr + ' ' + w : w;
+    }
+    if (nStr) line(nStr, { size: 8, color: GREY, gap: 11 });
+  }
 
   const bytes = await pdf.save();
   const hex = await sha256Hex(Array.from(bytes).map((b) => String.fromCharCode(b)).join(''));
