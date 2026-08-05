@@ -24,25 +24,104 @@
 type Any = any;
 
 // Noto Sans covers Latin + Greek + Cyrillic and is SIL OFL licensed (free to
-// embed in documents). Pinned to a commit-stable raw URL. Fetched at generation
-// time and cached per isolate — see loadUnicodeFonts.
+// embed in documents). Pinned to a commit-stable raw URL.
+//
+// WHY THE FONTS ARE MIRRORED INTO STORAGE
+// Signing SOS-C-2026-012 (Anorthosis) took 3.5 MINUTES between the signature
+// landing and the certificate row appearing — almost all of it spent pulling
+// ~1.7MB of TTF from GitHub on a cold isolate. The invocation was then killed
+// before it reached the email block, so the signer and staff got nothing AND
+// none of the failure handlers ran (a killed isolate does not run `catch`).
+//
+// The per-isolate byte cache below never helped: signings are minutes apart, so
+// every one is effectively a cold start and pays the full download.
+//
+// So the fonts are mirrored into the private `assets` bucket on first use and
+// read from there afterwards — same region as the function, no public-internet
+// dependency in the signing path. GitHub becomes a one-time seed, not a
+// per-signature runtime dependency. The chain degrades safely at every step:
+//   Storage -> GitHub -> WinAnsi StandardFonts (Greek renders as '?')
+// A slow certificate is recoverable; a killed invocation is an evidence
+// incident.
 const FONT_URLS = {
   regular: 'https://raw.githubusercontent.com/googlefonts/noto-fonts/main/hinted/ttf/NotoSans/NotoSans-Regular.ttf',
   bold: 'https://raw.githubusercontent.com/googlefonts/noto-fonts/main/hinted/ttf/NotoSans/NotoSans-Bold.ttf',
   italic: 'https://raw.githubusercontent.com/googlefonts/noto-fonts/main/hinted/ttf/NotoSans/NotoSans-Italic.ttf',
 };
 
-// Cache the downloaded font bytes for the life of the isolate. Edge Functions
-// stay warm between invocations, so repeat signings don't re-download ~1.7MB.
+// Object names inside the private `assets` bucket, keyed the same as FONT_URLS.
+const FONT_BUCKET = 'assets';
+const FONT_OBJECTS: Record<keyof typeof FONT_URLS, string> = {
+  regular: 'fonts/NotoSans-Regular.ttf',
+  bold: 'fonts/NotoSans-Bold.ttf',
+  italic: 'fonts/NotoSans-Italic.ttf',
+};
+
+// Cache the font bytes for the life of the isolate. This is a bonus when an
+// isolate happens to stay warm — it is NOT the mechanism we rely on.
 const fontBytesCache = new Map<string, Uint8Array>();
 
-async function fetchFont(url: string): Promise<Uint8Array> {
+// A Supabase client for reading/writing the font mirror. Set by the callers via
+// setFontStorageClient() so this module stays free of admin-client imports.
+let fontStorage: Any = null;
+
+/**
+ * Give the font loader a Supabase client so it can use the Storage mirror.
+ * Without one, loading falls back to fetching from GitHub as before.
+ */
+export function setFontStorageClient(client: Any): void {
+  fontStorage = client;
+}
+
+// Pull a font from the Storage mirror. Returns null if unavailable for any
+// reason (no client, bucket missing, object not seeded yet) so the caller can
+// fall back rather than fail.
+async function fontFromStorage(key: keyof typeof FONT_URLS): Promise<Uint8Array | null> {
+  if (!fontStorage) return null;
+  try {
+    const { data, error } = await fontStorage.storage.from(FONT_BUCKET).download(FONT_OBJECTS[key]);
+    if (error || !data) return null;
+    const bytes = new Uint8Array(await data.arrayBuffer());
+    // A truncated/empty object is worse than none — treat it as a miss.
+    return bytes.length > 1000 ? bytes : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+// Seed the mirror so the NEXT signing reads from Storage. Best-effort and
+// deliberately not awaited by the caller's critical path.
+async function mirrorToStorage(key: keyof typeof FONT_URLS, bytes: Uint8Array): Promise<void> {
+  if (!fontStorage) return;
+  try {
+    await fontStorage.storage.from(FONT_BUCKET).upload(FONT_OBJECTS[key], bytes, {
+      contentType: 'font/ttf',
+      upsert: true,
+    });
+  } catch (_) { /* the mirror is an optimisation, never a hard requirement */ }
+}
+
+/**
+ * Font bytes for one weight, tried in order: isolate cache -> Storage mirror ->
+ * GitHub (and seed the mirror on the way through). Throws only if every source
+ * fails, which loadUnicodeFonts catches and degrades to WinAnsi.
+ */
+async function fetchFont(key: keyof typeof FONT_URLS): Promise<Uint8Array> {
+  const url = FONT_URLS[key];
   const cached = fontBytesCache.get(url);
   if (cached) return cached;
+
+  const mirrored = await fontFromStorage(key);
+  if (mirrored) {
+    fontBytesCache.set(url, mirrored);
+    return mirrored;
+  }
+
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Font fetch failed (${res.status}) for ${url}`);
   const bytes = new Uint8Array(await res.arrayBuffer());
   fontBytesCache.set(url, bytes);
+  await mirrorToStorage(key, bytes);
   return bytes;
 }
 
@@ -110,9 +189,9 @@ export async function loadUnicodeFonts(
     const fontkitMod: Any = await import('https://esm.sh/@pdf-lib/fontkit@1.1.1');
     pdf.registerFontkit(fontkitMod?.default ?? fontkitMod);
     const [rBytes, bBytes, iBytes] = await Promise.all([
-      fetchFont(FONT_URLS.regular),
-      fetchFont(FONT_URLS.bold),
-      fetchFont(FONT_URLS.italic),
+      fetchFont('regular'),
+      fetchFont('bold'),
+      fetchFont('italic'),
     ]);
     // subset: true keeps only the glyphs actually used — a few KB, not 1.7MB.
     const font = await pdf.embedFont(rBytes, { subset: true });

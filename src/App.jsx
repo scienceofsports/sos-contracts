@@ -5206,7 +5206,7 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
             registrationNumber: (clientDetailsForm.registrationNumber || '').trim() || null,
           } : null,
         });
-        setSignedResult({ signedAt: res.signedAt });
+        setSignedResult({ signedAt: res.signedAt, emailSent: res.signerEmailDelivered !== false });
         setScreen(5);
         return;
       }
@@ -5585,7 +5585,15 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
                 {isServer ? (
                   /* SERVER MODE: signature recorded server-side; email confirmation is automatic. */
                   <React.Fragment>
-                    <p className="text-sm text-slate-600 mb-4">Thank you — this contract is now signed. A confirmation email with your <strong>Certificate of Completion (PDF)</strong> has been sent to you. You can also download a copy of the agreement now:</p>
+                    {/* Only promise an email the server actually sent. When delivery
+                        failed (or the signer's copy never went out), say so plainly and
+                        push them to download now — while they are still on this page —
+                        rather than waiting for mail that is not coming. */}
+                    {signedResult.emailSent === false ? (
+                      <p className="text-sm text-slate-600 mb-4">Thank you — this contract is now signed and your signature is safely recorded. We could not email your copy just now, so please <strong>download both documents below</strong> for your records. Our team has been notified and will follow up.</p>
+                    ) : (
+                      <p className="text-sm text-slate-600 mb-4">Thank you — this contract is now signed. A confirmation email with your <strong>Certificate of Completion (PDF)</strong> has been sent to you. You can also download a copy of the agreement now:</p>
+                    )}
                     <div className="flex flex-col sm:flex-row gap-3 justify-center mb-6">
                       <button type="button" onClick={downloadSignedContract} className="px-4 py-2 rounded-lg text-sm font-medium sos-btn-cyan inline-flex items-center justify-center gap-1">⬇ Download signed contract (PDF)</button>
                       <button type="button" onClick={downloadCertificate} className="px-4 py-2 border border-[var(--border)] rounded-lg text-sm hover:bg-slate-50 inline-flex items-center justify-center gap-1">⬇ Download certificate</button>

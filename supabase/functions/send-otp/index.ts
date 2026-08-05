@@ -61,7 +61,29 @@ Deno.serve(async (req) => {
     const code = (buf[0] % 1_000_000).toString().padStart(6, '0');
     const otp_code_hash = await sha256Hex(code);
 
-    // 4. Persist the hash, reset attempts, stamp sent time.
+    // 4. Contract title lives in the frozen snapshot.
+    const contractTitle = request.document_snapshot?.contract?.title ?? 'your contract';
+
+    // 5. EMAIL FIRST, then persist.
+    //
+    // This order used to be reversed, and the consequence was severe: the update
+    // overwrote otp_code_hash and burned one of only 6 permitted sends BEFORE
+    // the email was attempted. If Resend hiccuped, the signer's PREVIOUS working
+    // code had already been destroyed, their send budget was one lower, and the
+    // 30-second floor blocked an immediate retry. Repeat that a few times and a
+    // legitimate signer is permanently locked out of their own contract and has
+    // to ask staff for a new link.
+    //
+    // Sending first means a post-send crash costs at most one unused code —
+    // harmless, and the failure now lands in the direction that does not strand
+    // the signer.
+    await sendEmail({
+      to: request.signer_email,
+      subject: `Your signing verification code`,
+      html: otpEmail({ code, contractTitle }),
+    });
+
+    // 6. The code is out; now make it valid.
     const { error: updateErr } = await admin
       .from('signing_requests')
       .update({
@@ -73,16 +95,6 @@ Deno.serve(async (req) => {
       })
       .eq('id', request.id);
     if (updateErr) throw new Error(updateErr.message);
-
-    // 5. Contract title lives in the frozen snapshot.
-    const contractTitle = request.document_snapshot?.contract?.title ?? 'your contract';
-
-    // 6. Email the code.
-    await sendEmail({
-      to: request.signer_email,
-      subject: `Your signing verification code`,
-      html: otpEmail({ code, contractTitle }),
-    });
 
     // 7. Audit (no PII beyond the signer email).
     await appendEvent(admin, {

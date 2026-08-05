@@ -10,11 +10,12 @@
 // ============================================================================
 import { handleOptions, json } from '../_shared/cors.ts';
 import { getAdminClient, getClientIp } from '../_shared/supabaseAdmin.ts';
-import { hashDocument } from '../_shared/evidence.ts';
+import { hashDocument, bytesToBase64 } from '../_shared/evidence.ts';
 import { sendEmail, signedNotificationEmail, signerConfirmationEmail } from '../_shared/email.ts';
 import { appendEvent } from '../_shared/audit.ts';
 import { buildCertificate } from '../_shared/certificate.ts';
 import { buildContractPdf } from '../_shared/contractPdf.ts';
+import { setFontStorageClient } from '../_shared/pdfFont.ts';
 
 // Resolve the best staff email to alert: company contact, else the admin who
 // created the contract. Returns null if neither is available.
@@ -75,6 +76,9 @@ Deno.serve(async (req) => {
     const nz0 = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
 
     const admin = getAdminClient();
+    // Let the PDF generators read Noto Sans from the in-region Storage mirror
+    // instead of pulling ~1.7MB from GitHub mid-signature. See pdfFont.ts.
+    setFontStorageClient(admin);
 
     // 1. Load + validate the request; OTP must be verified.
     const { data: request, error: loadErr } = await admin
@@ -139,10 +143,14 @@ Deno.serve(async (req) => {
     const b64 = signatureImageBase64.split(',')[1];
     if (!b64) throw new Error('Invalid signature image.');
     const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-    const objectPath = `${request.contract_id}/${request.id}.png`;
+    // An uploaded photo of a wet-ink signature is usually a JPEG. Storing it as
+    // image/png made the object lie about its own format; downstream readers
+    // that trust the content type then failed to render the signature.
+    const isJpegSig = bytes.length > 3 && bytes[0] === 0xFF && bytes[1] === 0xD8 && bytes[2] === 0xFF;
+    const objectPath = `${request.contract_id}/${request.id}.${isJpegSig ? 'jpg' : 'png'}`;
     const { error: uploadErr } = await admin.storage
       .from('signatures')
-      .upload(objectPath, bytes, { contentType: 'image/png', upsert: true });
+      .upload(objectPath, bytes, { contentType: isJpegSig ? 'image/jpeg' : 'image/png', upsert: true });
     if (uploadErr) throw new Error(`Signature upload failed: ${uploadErr.message}`);
     // Store the storage PATH (bucket-prefixed), not a public URL.
     const signature_image_url = `signatures/${objectPath}`;
@@ -233,6 +241,25 @@ Deno.serve(async (req) => {
       throw recordErr;
     }
 
+    // 8b. PRE-FLIGHT MARKER — the only thing that can detect a killed isolate.
+    //
+    // Everything after this point (2 PDF renders, uploads, up to N emails) is
+    // slow, and if the invocation is killed for wall-clock or memory, NO catch
+    // or finally runs: the failure flag below, the staff alert, the breadcrumbs
+    // — none of them execute. That is exactly how SOS-C-2026-012 came to be
+    // signed, certified and delivered to nobody, with `certificate_status` left
+    // NULL and not a single error recorded anywhere.
+    //
+    // NULL cannot express "started but never finished". 'pending' can. Writing
+    // it BEFORE the risky work means a kill leaves a positive, queryable marker
+    // behind — state, not control flow — which a sweeper (or a human running one
+    // query) can find. It is cleared to 'generated' only on the success path.
+    try {
+      await admin.from('contracts')
+        .update({ certificate_status: 'pending' })
+        .eq('id', request.contract_id);
+    } catch (_) { /* the marker is best-effort; never block the signature on it */ }
+
     // 9. Persist the client's confirmed company details onto the CLIENT RECORD
     //    (so the admin view + future contracts benefit). The confirmed values
     //    are already applied to `snap` (before the hash) and are covered by
@@ -289,6 +316,12 @@ Deno.serve(async (req) => {
         .eq('id', request.id);
     } catch (e) { console.error('executed_snapshot persist failed (non-fatal):', e); }
 
+    // Delivery outcome, hoisted so the RESPONSE can tell the signer the truth.
+    // The success screen used to claim "a confirmation email has been sent to
+    // you" unconditionally — even when nothing was sent. That is why the
+    // Anorthosis failure stayed hidden: the signer was told his documents were
+    // on the way, so he had no reason to chase them.
+    let signerEmailDelivered = false;
     const contractTitle = snap?.contract?.title ?? 'Contract';
     const contractNumber = snap?.contract?.contractNumber ?? snap?.contract?.contract_number ?? '';
     try {
@@ -319,7 +352,13 @@ Deno.serve(async (req) => {
 
       // Store the certificate PDF privately + record it.
       const certPath = `${request.contract_id}/${request.id}.pdf`;
-      await admin.storage.from('certificates').upload(certPath, pdfBytes, { contentType: 'application/pdf', upsert: true });
+      // supabase-js RETURNS errors rather than throwing them. Ignoring this
+      // result meant a failed upload still inserted a certificates row pointing
+      // at an object that does not exist — the client then downloads a 404 and
+      // concludes the platform is broken, with nothing flagged anywhere.
+      const { error: certUploadErr } = await admin.storage
+        .from('certificates').upload(certPath, pdfBytes, { contentType: 'application/pdf', upsert: true });
+      if (certUploadErr) throw new Error(`Certificate upload failed: ${certUploadErr.message}`);
       await admin.from('certificates').insert({
         contract_id: request.contract_id,
         signing_request_id: request.id,
@@ -328,7 +367,7 @@ Deno.serve(async (req) => {
       });
 
       // Base64 the PDF for email attachments.
-      const pdfB64 = btoa(Array.from(pdfBytes).map((b) => String.fromCharCode(b)).join(''));
+      const pdfB64 = bytesToBase64(pdfBytes);
       const attachments = [{ filename: `Certificate - ${contractNumber || contractTitle}.pdf`, content: pdfB64 }];
 
       // Also build the fully-executed (dual-signed) contract PDF, store it at a
@@ -351,11 +390,41 @@ Deno.serve(async (req) => {
         await admin.storage.from('contract-attachments').upload(
           signedContractPath, contractPdfBytes, { contentType: 'application/pdf', upsert: true },
         );
-        const contractB64 = btoa(Array.from(contractPdfBytes).map((b) => String.fromCharCode(b)).join(''));
+        const contractB64 = bytesToBase64(contractPdfBytes);
         attachments.push({ filename: `Signed Contract - ${contractNumber || contractTitle}.pdf`, content: contractB64 });
       } catch (contractPdfErr) {
+        // The counter-signed contract is half the deliverable. Failing it while
+        // the certificate succeeds used to be a console line and nothing more:
+        // the signing "succeeded", the client got one document instead of two,
+        // and get-signed-contract had nothing to serve. Make it visible.
         console.error('signed contract PDF generation failed:', contractPdfErr);
+        try {
+          await appendContractEventSafe(admin, request.contract_id,
+            `Signed contract PDF generation FAILED — the certificate was produced but the counter-signed agreement was not. Needs regeneration. ${(contractPdfErr as Error).message}`);
+        } catch (_) { /* non-fatal */ }
+        try {
+          await admin.from('contracts')
+            .update({ certificate_status: 'partial' })
+            .eq('id', request.contract_id);
+        } catch (_) { /* non-fatal */ }
       }
+
+      // BREADCRUMB. Everything above (certificate + signed contract, ~2 PDFs)
+      // is the slow part of this invocation. If the isolate is killed for time
+      // while rendering, NO catch block runs — which is exactly how SOS-C-2026-012
+      // completed its signature, stored its certificate, and still sent nobody
+      // anything with no error recorded anywhere. Writing a marker here means a
+      // future kill leaves a visible "got this far" trail instead of silence.
+      await appendContractEventSafe(admin, request.contract_id,
+        'Certificate + signed contract generated; sending copies to signer, staff and CC list.')
+        .catch(() => { /* a missing breadcrumb must never break delivery */ });
+
+      // Delivery outcomes, so a failed send leaves a DURABLE trace. Previously
+      // each failure went only to console.error — invisible unless someone read
+      // the function logs, which is how a signed contract could reach a client
+      // with no copy of anything and no signal to staff.
+      const delivered: string[] = [];
+      const failed: { to: string; error: string }[] = [];
 
       // (a) Confirmation to the SIGNER.
       try {
@@ -367,7 +436,12 @@ Deno.serve(async (req) => {
           }),
           attachments,
         });
-      } catch (e) { console.error('signer confirmation email failed:', e); }
+        delivered.push(request.signer_email);
+        signerEmailDelivered = true;
+      } catch (e) {
+        console.error('signer confirmation email failed:', e);
+        failed.push({ to: request.signer_email, error: (e as Error).message });
+      }
 
       // (b) Notification to STAFF (company contact, else creating admin).
       try {
@@ -385,8 +459,12 @@ Deno.serve(async (req) => {
             html: signedNotificationEmail({ contractTitle, signerName, signerCompany: signerCompany ?? '', signedAt }),
             attachments,
           });
+          delivered.push(notifyTo);
         }
-      } catch (e) { console.error('staff notification email failed:', e); }
+      } catch (e) {
+        console.error('staff notification email failed:', e);
+        failed.push({ to: 'staff', error: (e as Error).message });
+      }
 
       // (c) CC recipients on the client (finance, a director…): send them the same
       //     signed certificate. Read from the frozen snapshot (snake or camel).
@@ -404,7 +482,49 @@ Deno.serve(async (req) => {
             }),
             attachments,
           });
-        } catch (e) { console.error(`CC certificate email to ${cc} failed:`, e); }
+          delivered.push(cc);
+        } catch (e) {
+          console.error(`CC certificate email to ${cc} failed:`, e);
+          failed.push({ to: cc, error: (e as Error).message });
+        }
+      }
+
+      // Clear the pre-flight marker: generation AND delivery both got here, so
+      // this contract is not a candidate for the stuck-'pending' sweep.
+      try {
+        await admin.from('contracts')
+          .update({ certificate_status: failed.length === 0 ? 'generated' : 'delivery_failed' })
+          .eq('id', request.contract_id);
+      } catch (_) { /* non-fatal */ }
+
+      // Record what actually reached whom. This is an operational log, not the
+      // evidence ledger — but it is the difference between "we know the client
+      // has their contract" and "we assume they do".
+      try {
+        const summary = failed.length === 0
+          ? `Signed contract + Certificate of Completion delivered to: ${delivered.join(', ')}.`
+          : `DELIVERY INCOMPLETE — sent to: ${delivered.join(', ') || 'nobody'}. FAILED: ${
+              failed.map((f) => `${f.to} (${f.error})`).join('; ')
+            }. The signature and certificate are safe; the copies must be re-sent.`;
+        await appendContractEventSafe(admin, request.contract_id, summary);
+      } catch (_) { /* non-fatal */ }
+
+      // A client who signed but received nothing is a commercial problem, not
+      // just a technical one — surface it the same way a certificate failure is.
+      if (failed.length > 0) {
+        try {
+          const alertTo = await resolveStaffEmail(admin, request.contract_id);
+          if (alertTo) {
+            await sendEmail({
+              to: alertTo,
+              subject: `⚠ ACTION NEEDED — signed contract not delivered: ${contractNumber || contractTitle}`,
+              html: `<p><strong>${contractTitle}</strong> was signed successfully and its Certificate of Completion was generated, but one or more copies could not be emailed.</p>
+                     <p><strong>Delivered to:</strong> ${delivered.join(', ') || 'nobody'}<br/>
+                        <strong>Failed:</strong> ${failed.map((f) => `${f.to} — ${f.error}`).join('<br/>')}</p>
+                     <p>The signature evidence is safely recorded. Please re-send the signed contract and certificate from SOS Contracts.</p>`,
+            });
+          }
+        } catch (_) { /* alerting is best-effort */ }
       }
     } catch (certErr) {
       console.error('certificate generation failed:', certErr);
@@ -479,7 +599,10 @@ Deno.serve(async (req) => {
     }
 
     // 11. Done.
-    return json({ ok: true, integrityOk, signedAt });
+    // `signerEmailDelivered` lets the success screen promise an email ONLY when
+    // one actually went out, and otherwise steer the signer to the download
+    // buttons while they are still on the page.
+    return json({ ok: true, integrityOk, signedAt, signerEmailDelivered });
   } catch (e) {
     return json({ error: (e as Error).message }, 400);
   }

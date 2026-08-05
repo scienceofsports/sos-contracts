@@ -29,6 +29,8 @@ import { getAdminClient } from '../_shared/supabaseAdmin.ts';
 import { buildCertificate } from '../_shared/certificate.ts';
 import { buildContractPdf } from '../_shared/contractPdf.ts';
 import { sendEmail, signedNotificationEmail, signerConfirmationEmail } from '../_shared/email.ts';
+import { setFontStorageClient } from '../_shared/pdfFont.ts';
+import { bytesToBase64 } from '../_shared/evidence.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 // deno-lint-ignore no-explicit-any
@@ -51,6 +53,7 @@ Deno.serve(async (req) => {
     if (userErr || !userData?.user) throw new Error('Not authorised.');
 
     const admin = getAdminClient();
+    setFontStorageClient(admin);
     const { data: profile } = await admin
       .from('app_users').select('role').eq('id', userData.user.id).maybeSingle();
     if (!profile || profile.role !== 'admin') {
@@ -190,8 +193,7 @@ Deno.serve(async (req) => {
     // no counter-signed contract and get-signed-contract has nothing to serve.
     // Rebuild it from the same frozen snapshot and store it at the same
     // deterministic path record-signature would have used.
-    const b64 = (u8: Uint8Array) =>
-      btoa(Array.from(u8).map((b) => String.fromCharCode(b)).join(''));
+    const b64 = (u8: Uint8Array) => bytesToBase64(u8);
 
     const attachments: { filename: string; content: string }[] = [
       { filename: `Certificate - ${contract.contract_number}.pdf`, content: b64(pdfBytes) },

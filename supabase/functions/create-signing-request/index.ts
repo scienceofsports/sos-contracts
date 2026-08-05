@@ -137,12 +137,26 @@ Deno.serve(async (req) => {
       });
     } catch (emailErr) {
       console.error('signRequest email failed:', emailErr);
+      // The contract is already marked 'sent' and the ledger already carries a
+      // 'sent' event — but the client never received the link. Record that
+      // plainly so the audit trail does not assert a delivery that did not
+      // happen, and so staff can see it without reading function logs.
+      try {
+        await admin.from('contract_events').insert({
+          contract_id: contractId,
+          event_type: 'system',
+          actor_type: 'system',
+          message: `Signing link email to ${client.contact_email} FAILED — the client has NOT received the contract. Re-send from SOS Contracts. ${(emailErr as Error).message}`,
+        });
+      } catch (_) { /* non-fatal */ }
+      // `ok: true` here made the admin UI show a success toast for a contract
+      // the client never got. Report the failure as a failure.
       return json({
-        ok: true,
+        ok: false,
         token,
         signUrl,
         emailSent: false,
-        emailError: (emailErr as Error).message,
+        error: `The contract was prepared but the email to ${client.contact_email} could not be sent: ${(emailErr as Error).message}. Please re-send.`,
       });
     }
 

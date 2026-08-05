@@ -19,7 +19,7 @@
 // button) for every signer. Deferring the import to first use keeps the module's
 // boot path free of pdf-lib. `rgb` is only a plain colour factory, so we inline it
 // here (byte-identical to pdf-lib's rgb()) to keep the top-level colour constants.
-import { sha256Hex } from './evidence.ts';
+import { sha256HexBytes } from './evidence.ts';
 import { loadUnicodeFonts, drawSafeText } from './pdfFont.ts';
 
 // Mirrors pdf-lib's rgb(): returns { type: 'RGB', red, green, blue }. Stable across
@@ -1414,6 +1414,7 @@ export async function buildContractPdf(input: {
   }
 
   const bytes = await pdf.save();
-  const hex = await sha256Hex(Array.from(bytes).map((b) => String.fromCharCode(b)).join(''));
+  // Hash the raw PDF bytes — see sha256HexBytes in evidence.ts.
+  const hex = await sha256HexBytes(bytes);
   return { bytes, sha256: hex };
 }

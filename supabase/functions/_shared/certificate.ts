@@ -11,7 +11,7 @@
 // button) for every signer. Deferring the import to first use keeps the module's
 // boot path free of pdf-lib. `rgb` is only a plain colour factory, so we inline it
 // here (byte-identical to pdf-lib's rgb()) to keep the top-level colour constants.
-import { sha256Hex } from './evidence.ts';
+import { sha256HexBytes } from './evidence.ts';
 import { loadUnicodeFonts, drawSafeText } from './pdfFont.ts';
 
 // Mirrors pdf-lib's rgb(): returns { type: 'RGB', red, green, blue }. Stable across
@@ -157,7 +157,16 @@ export async function buildCertificate(input: {
   line('CLIENT SIGNATURE', { size: 10, f: bold, color: CYAN });
   if (input.signatureImageBytes) {
     try {
-      const img = await pdf.embedPng(input.signatureImageBytes);
+      // A signer may UPLOAD a photo of a wet-ink signature (the paper-signature
+      // route), which is usually a JPEG. record-signature stores every image as
+      // .png regardless of its real format, so embedPng alone would throw here
+      // and print "[signature image could not be embedded]" on the certificate
+      // — while the signed contract, which does try both, showed it correctly.
+      // A certificate visibly missing the signature is an awkward thing to hand
+      // a counterparty, so sniff the magic bytes and use the right decoder.
+      const sig = input.signatureImageBytes;
+      const isJpeg = sig.length > 3 && sig[0] === 0xFF && sig[1] === 0xD8 && sig[2] === 0xFF;
+      const img = isJpeg ? await pdf.embedJpg(sig) : await pdf.embedPng(sig);
       const scaled = img.scaleToFit(220, 90);
       page.drawRectangle({ x: M, y: y - 96, width: 240, height: 96, borderColor: rgb(0.85, 0.88, 0.92), borderWidth: 0.5 });
       page.drawImage(img, { x: M + 10, y: y - 92, width: scaled.width, height: scaled.height });
@@ -200,6 +209,9 @@ export async function buildCertificate(input: {
   }
 
   const bytes = await pdf.save();
-  const hex = await sha256Hex(Array.from(bytes).map((b) => String.fromCharCode(b)).join(''));
+  // Hash the PDF bytes themselves, so this value is what `sha256sum` on the
+  // downloaded file returns. See sha256HexBytes for why the old string-based
+  // hash did not match the file it claimed to describe.
+  const hex = await sha256HexBytes(bytes);
   return { bytes, sha256: hex };
 }
