@@ -67,7 +67,12 @@ export async function appendEvent(
     consent_electronic: event.consent_electronic ?? null,
     consent_authorized: event.consent_authorized ?? null,
     consent_read: event.consent_read ?? null,
-    signer_on_behalf: event.signer_on_behalf ?? null,
+    // NOT NULL DEFAULT false in the DB (migration 0020). Coercing an absent
+    // value to null does NOT fall back to the default — an explicit null is
+    // sent and the not-null constraint rejects the insert, which killed every
+    // non-signing event (sent / viewed / otp_sent / otp_verified / declined)
+    // for any contract created after 0020 ran. Default to false instead.
+    signer_on_behalf: event.signer_on_behalf ?? false,
     representative_company: event.representative_company ?? null,
     representative_registration: event.representative_registration ?? null,
     signer_authority_basis: event.signer_authority_basis ?? null,
