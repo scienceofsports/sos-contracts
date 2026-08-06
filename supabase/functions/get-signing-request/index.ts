@@ -59,7 +59,23 @@ Deno.serve(async (req) => {
 
     // 4. Return the snapshot so the client renders the same document. The
     //    status we report reflects the just-applied 'viewed' transition.
-    const status = request.status === 'sent' ? 'viewed' : request.status;
+    //
+    //    A contract holds exactly one signature. If a FRESH link is issued for a
+    //    contract that is already signed, this request's own status is only
+    //    'sent' — so the page would happily show the whole signing form and only
+    //    fail at the very end, on a raw unique-constraint error, after the
+    //    signer had filled everything in. Report the contract-level truth so the
+    //    page can say so on arrival.
+    let status = request.status === 'sent' ? 'viewed' : request.status;
+    if (status !== 'signed') {
+      const { data: priorSignature } = await admin
+        .from('signature_events')
+        .select('id')
+        .eq('contract_id', request.contract_id)
+        .eq('event_type', 'signed')
+        .maybeSingle();
+      if (priorSignature) status = 'signed';
+    }
 
     return json({
       ok: true,

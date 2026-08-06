@@ -106,6 +106,24 @@ Deno.serve(async (req) => {
       throw new Error('Please verify your email code before signing.');
     }
 
+    // A contract carries exactly ONE signature, enforced by a partial unique
+    // index on signature_events (migration 0016). But that guard sits below the
+    // per-REQUEST checks above, so issuing a fresh link for an already-signed
+    // contract sails past them and only trips the index — surfacing a raw
+    // "duplicate key value violates unique constraint
+    // signature_events_one_signed_per_contract" to the signer, after they have
+    // filled in the whole form. Check the contract, not just this request, and
+    // say plainly what happened.
+    const { data: priorSignature } = await admin
+      .from('signature_events')
+      .select('id, server_timestamp, signer_name')
+      .eq('contract_id', request.contract_id)
+      .eq('event_type', 'signed')
+      .maybeSingle();
+    if (priorSignature) {
+      throw new Error('This contract has already been signed and cannot be signed again.');
+    }
+
     // 2. All three consents required.
     if (!consents || !consents.electronic || !consents.authorized || !consents.read) {
       throw new Error('All consents are required.');
