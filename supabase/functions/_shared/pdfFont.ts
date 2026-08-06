@@ -182,7 +182,13 @@ export function safeFont(font: Any): Any {
 export async function loadUnicodeFonts(
   pdf: Any,
   StandardFonts: Any,
+  // Embedding a weight means fontkit parses ~570KB of TTF and builds a glyph
+  // map for it. The certificate never draws in italic, so embedding one there
+  // was a full parse + subset of pure waste on a path that is racing the wall
+  // clock. Callers that don't need italic can now say so.
+  opts?: { italic?: boolean },
 ): Promise<{ font: Any; bold: Any; italic: Any; unicode: boolean }> {
+  const wantItalic = opts?.italic !== false;
   try {
     // esm.sh may expose fontkit as a default or namespace export depending on
     // how it interops the CJS package; accept either.
@@ -191,12 +197,14 @@ export async function loadUnicodeFonts(
     const [rBytes, bBytes, iBytes] = await Promise.all([
       fetchFont('regular'),
       fetchFont('bold'),
-      fetchFont('italic'),
+      wantItalic ? fetchFont('italic') : Promise.resolve(null),
     ]);
     // subset: true keeps only the glyphs actually used — a few KB, not 1.7MB.
     const font = await pdf.embedFont(rBytes, { subset: true });
     const bold = await pdf.embedFont(bBytes, { subset: true });
-    const italic = await pdf.embedFont(iBytes, { subset: true });
+    // Fall back to the regular face when italic was not requested, so callers
+    // that do reference `italic` still get a usable font object.
+    const italic = iBytes ? await pdf.embedFont(iBytes, { subset: true }) : font;
     return { font: safeFont(font), bold: safeFont(bold), italic: safeFont(italic), unicode: true };
   } catch (err) {
     console.error('[pdfFont] Unicode font embed failed, falling back to WinAnsi:', err);

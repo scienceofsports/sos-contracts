@@ -65,7 +65,8 @@ export async function buildCertificate(input: {
   const pdf = await PDFDocument.create();
   // Unicode fonts: Greek club/signer names must render, not crash the
   // certificate. See pdfFont.ts for the full rationale.
-  const { font, bold } = await loadUnicodeFonts(pdf, StandardFonts);
+  // The certificate draws only regular and bold — skip the italic embed.
+  const { font, bold } = await loadUnicodeFonts(pdf, StandardFonts, { italic: false });
 
   let page = pdf.addPage([595, 842]); // A4 portrait
   const M = 50;

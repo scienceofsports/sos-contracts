@@ -327,10 +327,12 @@ Deno.serve(async (req) => {
     try {
       // Re-download the signature PNG we just uploaded, to embed in the PDF.
       let sigBytes: Uint8Array | null = null;
-      try {
-        const { data: sigBlob } = await admin.storage.from('signatures').download(objectPath);
-        if (sigBlob) sigBytes = new Uint8Array(await sigBlob.arrayBuffer());
-      } catch (_) { sigBytes = bytes; /* fall back to the bytes we just uploaded */ }
+      // Use the bytes we already hold. Re-downloading the PNG we uploaded
+      // moments ago cost a full Storage round trip (up to 3MB for an uploaded
+      // photo signature) for bytes already in memory — and the old fallback
+      // proved they are equivalent. On a path that is fighting the wall clock,
+      // that round trip is pure loss.
+      sigBytes = bytes;
 
       const { bytes: pdfBytes, sha256: pdfSha } = await buildCertificate({
         snapshot: snap,
