@@ -3226,6 +3226,14 @@ function ContractDocument({ contractId, navigate }) {
   const [frozen, setFrozen] = useState(false);
   const [frozenStatus, setFrozenStatus] = useState(null);
   const [signedPdfUrl, setSignedPdfUrl] = useState(null);
+  // An EXECUTED contract with no frozen snapshot was signed on paper, outside
+  // the platform (event_type 'imported'): nothing was ever rendered, sent or
+  // hashed here, so there is no platform document for it. Live-rendering the
+  // template for such a contract produces a document that LOOKS like the
+  // agreement but is not — SOS boilerplate plus "[ to be confirmed on signing ]"
+  // placeholders — and the generic "template-generated draft" caption does not
+  // warn that the real agreement is a different document entirely.
+  const [paperExecuted, setPaperExecuted] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -3264,6 +3272,10 @@ function ContractDocument({ contractId, navigate }) {
         setCompany(await companyService.get());
       }
       setFrozen(usedFrozen);
+      // Executed, but nothing frozen => signed on paper. The template render
+      // below is NOT this contract's agreement, so say so rather than captioning
+      // it as a reviewable draft.
+      setPaperExecuted(!usedFrozen && !isDraft && !!c && (c.status === 'signed' || c.status === 'active'));
     })();
   }, [contractId]);
 
@@ -3281,7 +3293,30 @@ function ContractDocument({ contractId, navigate }) {
         </div>
       </div>
 
-      {!frozen && (
+      {/* Printed copy carries the warning too. The on-screen banners are all
+          no-print, so without this a printed/saved template would look like an
+          SOS agreement with nothing on the page saying it is not the contract —
+          exactly the document that must never circulate. */}
+      {!frozen && paperExecuted && (
+        <div className="print-only border-2 border-black px-4 py-3 text-sm mb-4">
+          <strong>NOT THE SIGNED AGREEMENT — REFERENCE SUMMARY ONLY.</strong> This contract was executed on
+          paper outside the platform. This page is a template rendering of the recorded terms and was never
+          sent, seen or signed by any party.
+          {contract.attachmentName ? ` The signed agreement is: ${contract.attachmentName}.` : ''}
+        </div>
+      )}
+      {!frozen && paperExecuted && (
+        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-800 mb-4 no-print">
+          <strong>This is NOT the signed agreement.</strong> This contract was executed on paper, outside the
+          platform, so there is no platform-generated document for it. What follows is a template rendering of
+          the recorded terms — it is a summary for reference only, it was never sent, seen or signed by anyone,
+          and any "[ to be confirmed on signing ]" placeholders below are artefacts of that template.
+          {contract.attachmentName
+            ? <> The signed agreement is the attached document, <strong>{contract.attachmentName}</strong> — open it from the Signed Document panel on the contract page.</>
+            : <> The signed agreement is the countersigned PDF, which has not been attached to this contract yet.</>}
+        </div>
+      )}
+      {!frozen && !paperExecuted && (
         <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm text-amber-700 mb-4 no-print">
           This is a template-generated draft. Review all clauses, values and dates carefully — and have it checked by a Cyprus lawyer — before sending it to a client for signature.
         </div>
