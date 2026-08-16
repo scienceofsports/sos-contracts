@@ -116,6 +116,10 @@ export function round2(n) { return Math.round(n * 100) / 100; }
 export function effectiveStatus(payment) {
   if (!payment) return 'pending';
   const s = payment.status || 'pending';
+  // A forecast row (migration 0025) can never be overdue: its date is a
+  // projection of when billing is expected, not a due date anyone agreed to.
+  // Nothing has been invoiced, so there is nothing for the client to be late on.
+  if (payment.isEstimate) return s === 'paid' ? 'paid' : 'pending';
   if (s === 'pending' && payment.dueDate && new Date(payment.dueDate) < new Date()) return 'overdue';
   return s;
 }

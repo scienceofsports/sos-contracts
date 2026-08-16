@@ -278,10 +278,26 @@ function isReceivableContract(contract) {
 
 // Every unpaid payment row across the signed contracts, each carrying its parent
 // contract so callers can resolve client, title and contract number.
+//
+// ESTIMATE rows are excluded (migration 0025). A forecast of expected billing —
+// e.g. the CFA filming deal, billed per match actually filmed — is not money
+// anyone owes: nothing has been invoiced and no such sum has been agreed.
+// Counting it would overstate Outstanding and Due-now, and each row would flip
+// to "overdue" on a date that means nothing. Every money-owed figure funnels
+// through here, so this one filter keeps the whole board honest.
 function receivableRows(contracts) {
   return (contracts || [])
     .filter(isReceivableContract)
-    .flatMap(c => c.payments.filter(p => effectiveStatus(p) !== 'paid')
+    .flatMap(c => c.payments.filter(p => effectiveStatus(p) !== 'paid' && !p.isEstimate)
+      .map(p => ({ ...p, contractId: c.id, contract: c })));
+}
+
+// The forecast counterpart: unpaid ESTIMATE rows on executed contracts. Feeds
+// forward-looking "expected billing" views only — never receivables.
+function estimatedBillingRows(contracts) {
+  return (contracts || [])
+    .filter(isReceivableContract)
+    .flatMap(c => c.payments.filter(p => p.isEstimate && p.status !== 'paid')
       .map(p => ({ ...p, contractId: c.id, contract: c })));
 }
 
@@ -429,6 +445,13 @@ function Dashboard({ navigate }) {
   const overdueBuckets = { d30: 0, d60: 0, d90: 0 };
   overduePays.forEach(p => { const d = daysOverdue(p); const amt = Number(p.totalAmount||0); if (d > 90) overdueBuckets.d90 += amt; else if (d > 60) overdueBuckets.d60 += amt; else overdueBuckets.d30 += amt; });
   const renewalCount = contracts.filter(c => c.status === 'active' && c.endDate && daysBetween(now, c.endDate) >= 0 && daysBetween(now, c.endDate) <= 60).length;
+  // Forecast billing over the next 12 months — expected invoices on per-usage
+  // deals (e.g. per-match filming). NOT a receivable and never added to the
+  // figures above; shown separately so the run-rate view is complete.
+  const estimateRowsAll = estimatedBillingRows(contracts);
+  const estimatedNext12 = estimateRowsAll
+    .filter(p => p.dueDate && daysBetween(now, p.dueDate) >= 0 && daysBetween(now, p.dueDate) <= 365)
+    .reduce((s,p) => s + Number(p.totalAmount||0), 0);
 
   const stages = ['draft','sent','signed','active','expired'];
   const funnel = stages.map(s => {
@@ -633,6 +656,15 @@ function Dashboard({ navigate }) {
           sub={totalActiveValue !== annualisedActiveValue ? `${fmtMoney(totalActiveValue,'EUR')} total across all years` : 'annualised across active contracts'}
           accent="var(--cyan-deep)"
         />
+        {estimatedNext12 > 0 && (
+          <HeroCard
+            label="Forecast billing (12 mo)"
+            value={fmtMoney(estimatedNext12,'EUR')}
+            sub="expected invoices on per-usage deals · not yet owed"
+            accent="#94A3B8"
+            onClick={()=>navigate('payments:receivables')}
+          />
+        )}
         <HeroCard
           label="Active Business"
           value={`${activeContracts.length} contract${activeContracts.length===1?'':'s'}`}
@@ -2512,10 +2544,18 @@ function ContractDetail({ contractId, navigate }) {
                         </span>
                       )}
                     </td>
-                    <td className="py-2.5 pr-4">{p.description}</td>
-                    <td className="py-2.5 pr-4">{fmtDate(p.dueDate)}</td>
-                    <td className="py-2.5 pr-4 font-data">{fmtMoney(p.totalAmount, p.currency)}</td>
-                    <td className="py-2.5 pr-4"><Badge status={p.status} /></td>
+                    <td className="py-2.5 pr-4">
+                      {p.description}
+                      {p.isEstimate && (
+                        <span className="ml-2 px-1.5 py-0.5 rounded text-[10px] uppercase tracking-wide bg-slate-100 text-slate-500 border border-slate-200"
+                              title="Forecast only — not invoiced, not owed, and excluded from receivables.">
+                          Estimate
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-2.5 pr-4">{fmtDate(p.dueDate)}{p.isEstimate && <span className="text-slate-400 text-[11px]"> (expected)</span>}</td>
+                    <td className={`py-2.5 pr-4 font-data ${p.isEstimate ? 'text-slate-500' : ''}`}>{fmtMoney(p.totalAmount, p.currency)}</td>
+                    <td className="py-2.5 pr-4"><Badge status={effectiveStatus(p)} /></td>
                     <td className="py-2.5 pr-4 no-print space-x-2">
                       {auth.isAdmin && p.status !== 'paid' && <button onClick={()=>setShowMarkPaidPayment(p)} className="text-emerald-600 hover:underline text-xs">Mark Paid</button>}
                     </td>
@@ -3502,6 +3542,9 @@ function PaymentsReceivables({ navigate }) {
   // proposal, not a debt. See isReceivableContract.
   const allRows = receivableRows(contracts);
   allRows.forEach(p => { p.horizon = receivableHorizon(p); });
+  // Forecast rows, kept entirely OUT of allRows and every total derived from it.
+  const estimateRows = estimatedBillingRows(contracts);
+  const estimateTotal = estimateRows.reduce((s, p) => s + Number(p.totalAmount || 0), 0);
 
   // The four horizon totals. `collectable` (overdue + due within 30 days) is the
   // real "can I bank this soon" figure; `backlog` is signed future-year money
@@ -3622,6 +3665,38 @@ function PaymentsReceivables({ navigate }) {
               </div>
             </div>
           </div>
+          {/* FORECAST — expected billing that is deliberately NOT a receivable.
+              Shown after the real figures and visually separated (dashed, muted,
+              its own heading) so it can never be read as money owed. */}
+          {estimateRows.length > 0 && (
+            <div className="mb-6">
+              <div className="text-[11px] text-slate-400 mb-2">
+                Expected billing — forecast only, not invoiced and not owed. Excluded from every figure above.
+              </div>
+              <div className="bg-slate-50 rounded-xl border border-dashed border-[var(--border)] p-4">
+                <div className="flex items-baseline justify-between mb-3">
+                  <div className="text-xs text-slate-500">Forecast billing (not a receivable)</div>
+                  <div className="font-display text-lg text-slate-500">{fmtMoney(estimateTotal, cur)}</div>
+                </div>
+                <div className="space-y-1.5">
+                  {estimateRows
+                    .slice()
+                    .sort((a,b) => new Date(a.dueDate || 0) - new Date(b.dueDate || 0))
+                    .map(p => (
+                      <div key={p.id} className="flex items-center justify-between text-xs text-slate-500">
+                        <span className="truncate pr-3">
+                          {clientMap[p.contract.clientId]?.companyName || '—'} · {p.description || 'Expected billing'}
+                        </span>
+                        <span className="flex items-center gap-2 shrink-0">
+                          <span className="text-slate-400">{p.dueDate ? fmtDate(p.dueDate) : '—'}</span>
+                          <span className="font-data">{fmtMoney(p.totalAmount, cur)}</span>
+                        </span>
+                      </div>
+                    ))}
+                </div>
+              </div>
+            </div>
+          )}
           {/* AR aging breakdown — due/overdue money only (see agingRows). */}
           <div className="text-[11px] text-slate-400 mb-2">Aging of money already due — excludes future-year instalments</div>
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-6">

@@ -316,6 +316,8 @@ export function paymentFromRow(row) {
     markedPaidBy: row.marked_paid_by ?? null,
     remindersSent: row.reminders_sent ?? [],
     notes: row.notes ?? '',
+    // Forecast row (planned billing), not a receivable — see migration 0025.
+    isEstimate: row.is_estimate ?? false,
     createdAt: row.created_at ?? null,
   };
 }
@@ -338,5 +340,6 @@ export function paymentToRow(obj) {
   if ('markedPaidBy' in obj) row.marked_paid_by = obj.markedPaidBy;
   if ('remindersSent' in obj) row.reminders_sent = obj.remindersSent;
   if ('notes' in obj) row.notes = obj.notes;
+  if ('isEstimate' in obj) row.is_estimate = !!obj.isEstimate;
   return row;
 }
