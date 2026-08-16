@@ -64,7 +64,30 @@ identical to the emailed PDF — NOT a live re-render. Drafts render live.
 **`normalizeSnapshot`** (App.jsx) translates the frozen `document_snapshot` (snake/camel)
 for the signing page and the admin frozen view. **`computeServiceLineItems` + `SERVICE_GROUPS`
 + `platformSeatsSummary`** (`src/lib/constants.js`, ported into both PDF generators) build the
-structured service catalog.
+structured service catalog. When adding a contract field, wire it through **all four**:
+`mappers.js` (both directions), `normalizeSnapshot`, and the two PDF generators — a field
+missed in `normalizeSnapshot` silently renders the wrong document after sending.
+
+## Two document kinds (migration 0026)
+
+SCIOS signs with five counterparty types. Two orthogonal fields model this:
+- **`clients.entity_type`** — who the PARTY is: `company | club | federation | agency |
+  sponsor`. Drives the party-clause descriptor and VAT expectation
+  (`VAT_REQUIRED_ENTITY_TYPES`: company/agency/sponsor are incorporated, so a blank VAT
+  means "not filled in yet"; clubs/federations often genuinely have none).
+- **`contracts.contract_kind`** — which DOCUMENT: `services` (default) or `sponsorship`.
+
+A **sponsorship** grants rights, not services: Purpose (names the Property) / Sponsorship
+Rights / Fee / Branding & Materials, with Scope of Services, Scope of Analysis, Commercial
+Terms and Service Levels suppressed. Rights are **bespoke, not tiered** — `sponsorship_rights`
+jsonb rows priced as one package fee. Modelled on the executed KFC × "Youth Zone" agreement.
+
+⚠️ **Three tail clauses are NOT kind-neutral** and branch via `ipParas`,
+`confidentialityParas`, `terminationEffectPara`. The services IP clause licenses the
+"Deliverables" (match footage, reports, clips) to the Client in perpetuity — on a sponsorship
+that would hand a sponsor a perpetual licence over SCIOS's footage. Never render the services
+tail on a non-services document. `hasMatchServices` also suppresses Service Levels for
+sponsorships AND agency subscriptions (neither covers matches).
 
 ## Money model (important — get the basis right)
 
@@ -83,8 +106,11 @@ structured service catalog.
 
 ## Migrations
 
-`supabase/migrations/0001`–`0019` all run. Notable recent: `0016` signing hardening, `0017`
-signed-contract edit lock, `0018` `vat_inclusive` column, `0019` `annual_value_override` column.
+`supabase/migrations/0001`–`0025` all run. Notable recent: `0016` signing hardening, `0017`
+signed-contract edit lock, `0018` `vat_inclusive` column, `0019` `annual_value_override` column,
+`0021` client `entity_type`, `0023` executed snapshot, `0025` payment estimates.
+**`0026` (client types + sponsorship) is written but NOT yet applied** — run it in the
+Supabase SQL Editor before drafting an agency or sponsorship contract.
 Apply new ones via the Supabase SQL Editor (DDL) or CLI.
 
 ## Secrets — never commit
