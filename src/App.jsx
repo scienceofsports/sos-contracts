@@ -1059,7 +1059,19 @@ const ADDON_GROUPS = ['Recording Services', 'Reporting Services', 'Coaching Supp
 
 // A/B/C quick-pick packages. Each sets the covered teams + per-team SLA + price.
 // Everything remains fully editable after a package is applied.
+// A package MAY also carry `seats`, `opponent` and `specialTerms` — used by the
+// 2nd Division package, whose whole point is that every club in the division
+// gets an identical contract. The academy packages omit them and keep the form's
+// existing defaults (see applyPackage). `specialTerms` is APPENDED to the special
+// terms list, not written to form.specialTerms (that field is the saved JSON).
 const ALL_TEAMS = ['U14','U15','U16','U17','U19',"Men's"];
+// 2nd Division (MEN) — CFCA-collaboration programme. Platform access for the
+// club's director + coaching staff only (no player seats); players may buy their
+// own individual-clip access directly from SOS. List price €3,000, less a €700
+// CFCA collaboration discount = €2,300 net.
+const DIV2_LIST_PRICE = 3000;
+const DIV2_DISCOUNT = 700;
+const DIV2_PLAYER_FEE = 150;
 const CONTRACT_PACKAGES = [
   { key:'premium',   label:'Premium',   icon:'🥇', price:15000,
     teamSla: Object.fromEntries(ALL_TEAMS.map(t => [t, 24])) },
@@ -1067,6 +1079,16 @@ const CONTRACT_PACKAGES = [
     teamSla: { U14:72, U15:72, U16:72, U17:24, U19:24, "Men's":24 } },
   { key:'essential', label:'Essential', icon:'🥉', price:10000,
     teamSla: Object.fromEntries(ALL_TEAMS.map(t => [t, 72])) },
+  { key:'div2',      label:'2nd Division', icon:'⚽', price:DIV2_LIST_PRICE - DIV2_DISCOUNT,
+    teamSla: { "Men's":72 },
+    // Directors + coaches only — 0 player seats is what makes platformSeatsSummary
+    // print "3 Directors, 5 Coaches" with no player line.
+    seats: { directorSeats:2, coachSeats:5, playerSeats:0 },
+    opponent: { oppMatchFootage:true, oppTeamAnalysis:true, oppPlayerAnalysis:true },
+    specialTerms: [
+      { relatesTo:'Fees & Payment', text:`The standard annual fee for the services set out in this Agreement is €${DIV2_LIST_PRICE.toLocaleString('en-GB')}. Through the Service Provider's collaboration with the Cyprus Football Coaches Association, a discount of €${DIV2_DISCOUNT} is applied, giving the fee of €${(DIV2_LIST_PRICE - DIV2_DISCOUNT).toLocaleString('en-GB')} (exclusive of VAT) set out in the Fees & Payment section. This discount applies to the 2026/2027 season and is not automatically carried forward to any subsequent season.` },
+      { relatesTo:'Scope of Services', text:`Platform access under this Agreement is granted to the Client's technical director and coaching staff only. Individual players may, at their own option, subscribe separately for access to their own individual match clips at €${DIV2_PLAYER_FEE} per player per year. Such subscriptions are agreed directly between the individual player and the Service Provider, are not part of the fees payable by the Client, and place no obligation on the Client. The Client is not required to procure or guarantee any minimum number of player subscriptions.` },
+    ] },
 ];
 function defaultServicesState() {
   // New contracts pre-fill the platform seats we use as standard (3 Directors,
@@ -1525,9 +1547,24 @@ function ContractForm({ navigate, editContractId }) {
   // platform-access flat rate, so it flows into the value). Fully editable after.
   const applyPackage = (pkg) => {
     const teams = Object.keys(pkg.teamSla);
-    const nextServices = { ...services, platform_access: { ...services.platform_access, selected: true, included: false, rate: pkg.price } };
+    // `seats` (optional) overrides the default platform seats — the 2nd Division
+    // package uses it to grant director/coach access with NO player seats.
+    const nextServices = { ...services, platform_access: { ...services.platform_access, selected: true, included: false, rate: pkg.price, ...(pkg.seats || {}) } };
     setServices(nextServices);
+    // Special terms live in their own state (serialized to form.specialTerms on
+    // save), so a package's pre-authored terms are applied here, not via setForm.
+    // Appended to whatever the user already wrote rather than replacing it.
+    if (pkg.specialTerms) {
+      setSpecialTermsList(list => {
+        const existing = (list || []).filter(t => t && t.text && t.text.trim());
+        const fresh = pkg.specialTerms.filter(pt => !existing.some(t => t.text.trim() === pt.text.trim()));
+        return [...existing, ...fresh.map(t => ({ ...t }))];
+      });
+    }
     setForm(f => ({ ...f, analysisTeams: teams, teamSla: { ...pkg.teamSla }, packageKey: pkg.key, packageEdited: false,
+      // Optional package extra: opponent-access toggles. Omitted by the academy
+      // packages, which leave the form's current values alone.
+      ...(pkg.opponent || {}),
       description: generateDescriptionFromServices(nextServices, { slaBands: buildSlaBands(teams, pkg.teamSla), slaHours: f.slaHours }) }));
   };
   // Build the slaBands storage [{teams,hours}] from the per-team map, grouping
