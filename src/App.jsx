@@ -415,7 +415,13 @@ function Dashboard({ navigate }) {
   const clientMap = Object.fromEntries(clients.map(c => [c.id, c]));
   const now = new Date();
 
-  const activeContracts = contracts.filter(c => c.status === 'active');
+  // EXECUTED = 'active' OR 'signed'. Both are legally in force; 'signed' is an
+  // executed deal whose start date has not arrived yet (or one imported after a
+  // paper signing). isReceivableContract already treats the two identically, so
+  // counting only 'active' here meant a signed-but-not-started contract was
+  // chased for money in Receivables while contributing nothing to Annual Revenue
+  // or the Active Business count — the board under-reporting a real agreement.
+  const activeContracts = contracts.filter(isReceivableContract);
   const activeClientCount = new Set(activeContracts.map(c => c.clientId)).size;
   const awaitingSignature = contracts.filter(c => effectiveContractStatus(c) === 'sent').length;
   const totalActiveValue = activeContracts.reduce((s,c) => s + Number(c.value||0), 0);
@@ -4273,8 +4279,10 @@ function BoardExport() {
   if (!contracts) return <div className="p-6"><Skeleton className="h-64 w-full" /></div>;
 
   const now = new Date();
-  const active = contracts.filter(c=>c.status==='active');
-  const mrr = contracts.filter(c=>c.status==='active' && c.paymentType==='monthly').reduce((s,c)=>s+Number(c.value||0),0);
+  // Executed = active OR signed — same rule as the dashboard and Receivables, so
+  // the board pack cannot report a different portfolio from the app.
+  const active = contracts.filter(isReceivableContract);
+  const mrr = active.filter(c=>c.paymentType==='monthly').reduce((s,c)=>s+Number(c.value||0),0);
   // ARR = annualised run-rate (each contract's value ÷ its term years); the
   // lifetime total is reported separately so multi-year deals don't inflate ARR.
   const arr = active.reduce((s,c)=>s+annualisedValue(c),0);
