@@ -17,7 +17,7 @@ const snapshot = {
     registrationNumber: 'ΗΕ 123456',
   },
   company: {
-    name: 'C.C. Science of Sports Ltd', address: 'Michalaki Karaoli, Nicosia, Cyprus',
+    name: 'C.C. Science of Sports Ltd', address: '2 Nikokreontos, Nice Dream, 6th Floor, Office 601, 1066 Nicosia, Cyprus',
     registrationNumber: 'HE 449875',
   },
 };
