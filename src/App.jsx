@@ -1730,6 +1730,24 @@ function ContractForm({ navigate, editContractId }) {
   // shows, the value auto-compute, and the special-terms clause list.
   const isSponsorshipForm = form.contractKind === 'sponsorship';
 
+  // Switching an existing draft to Sponsorship must RESET the funding model.
+  // A sponsor pays the whole fee: there are no player fees and no club
+  // commission. Left alone, a stale 'club_players'/'players_all' would make
+  // isPlayerFunded() true, and vatSplit would then carve the sponsorship fee
+  // into a VAT-free "player-funded portion" — under-charging VAT on a real
+  // invoice. Clearing clubFixedFee matters for the same reason.
+  useEffect(() => {
+    if (!isSponsorshipForm) return;
+    setForm(f => (
+      f.paymentModel === 'club_all' && f.billingBasis === 'services'
+        && !f.clubFixedFee && !f.playerMonthlyFee && !f.playerMonths && !f.minPlayers
+        ? f
+        : { ...f, paymentModel: 'club_all', billingBasis: 'services',
+            clubFixedFee: '', playerMonthlyFee: '', playerMonths: '',
+            minPlayers: '', expectedPlayers: '', kickbackPct: '' }
+    ));
+  }, [isSponsorshipForm]);
+
   // Commercial Model. Value sources per model (all AUTO-computed now):
   //  - Club-funded (services basis): value = services catalogue total.
   //  - Shared: value = (services + club fixed fee + player fees) less commission.
@@ -2131,17 +2149,31 @@ function ContractForm({ navigate, editContractId }) {
         )}
 
         {/* --- Commercial Model: how the deal is funded. --------------------- */}
-        <CollapsibleSection title="Commercial & Payment" open={openSections.money} onToggle={()=>toggleSection('money')} summary={`${(PAYMENT_MODEL_LABELS[form.paymentModel] || 'Club-funded').split(' — ')[0]} · ${fmtMoney(form.value || 0, form.currency)}`}>
-        <div className="font-heading text-sm mb-3 text-[var(--navy-deep)]">Funding</div>
-        <p className="text-xs text-slate-400 mb-3">How is this deal funded? The services above describe what the Client gets; this sets who pays. For Shared and Player-funded deals, the contract value is entered manually below (the player numbers aren't known in advance, so they're stated as terms, not computed).</p>
-        <div className="space-y-1.5 mb-3">
-          {[['club_all','Club-funded — the Client pays the full fee'],['club_players','Shared — a fixed amount is agreed with the Client; players fund the remainder'],['players_all','Player-funded — fees are collected directly from players']].map(([val,label]) => (
-            <label key={val} className="flex items-start gap-2.5 text-sm text-slate-700 cursor-pointer">
-              <input type="radio" name="paymentModel" checked={form.paymentModel===val} onChange={()=>setPaymentModel(val)} className="mt-0.5" />
-              <span>{label}</span>
-            </label>
-          ))}
-        </div>
+        <CollapsibleSection title="Commercial & Payment" open={openSections.money} onToggle={()=>toggleSection('money')} summary={`${isSponsorshipForm ? 'Sponsor-funded' : (PAYMENT_MODEL_LABELS[form.paymentModel] || 'Club-funded').split(' — ')[0]} · ${fmtMoney(form.value || 0, form.currency)}`}>
+        {/* A SPONSORSHIP has no funding model to choose: the sponsor pays the
+            whole fee for the rights granted. There are no players funding it and
+            no club commission, so showing the club/player chooser here is
+            meaningless (and "players fund the remainder" is plainly false on a
+            KFC-style deal). State the position instead of asking. */}
+        {isSponsorshipForm ? (
+          <>
+            <div className="font-heading text-sm mb-3 text-[var(--navy-deep)]">Sponsorship Fee</div>
+            <p className="text-xs text-slate-400 mb-3">The Client pays the full fee for the sponsorship rights granted above. Enter the agreed package fee below — sponsorship rights are priced as one package, not line by line.</p>
+          </>
+        ) : (
+          <>
+            <div className="font-heading text-sm mb-3 text-[var(--navy-deep)]">Funding</div>
+            <p className="text-xs text-slate-400 mb-3">How is this deal funded? The services above describe what the Client gets; this sets who pays. For Shared and Player-funded deals, the contract value is entered manually below (the player numbers aren't known in advance, so they're stated as terms, not computed).</p>
+            <div className="space-y-1.5 mb-3">
+              {[['club_all','Club-funded — the Client pays the full fee'],['club_players','Shared — a fixed fee from the Client, with player fees funding the rest'],['players_all','Player-funded — player fees fund the whole payment, paid by the Client']].map(([val,label]) => (
+                <label key={val} className="flex items-start gap-2.5 text-sm text-slate-700 cursor-pointer">
+                  <input type="radio" name="paymentModel" checked={form.paymentModel===val} onChange={()=>setPaymentModel(val)} className="mt-0.5" />
+                  <span>{label}</span>
+                </label>
+              ))}
+            </div>
+          </>
+        )}
         {form.paymentModel === 'club_players' && (
           <div className="rounded-lg border border-[var(--border)] p-4 mb-2 bg-slate-50/60">
             <p className="text-xs text-slate-500 mb-3">The <strong>guaranteed contract value is the club fixed fee</strong>. Players fund the rest at a per-player monthly rate, billed on <strong>actual enrolment</strong> and reconciled per season — no fixed number of players is assumed.</p>
@@ -2179,7 +2211,7 @@ function ContractForm({ navigate, editContractId }) {
             </select>
           </Field>
         </div>
-        <p className="text-xs text-slate-400 -mt-3 mb-4">{form.paymentModel === 'club_players' ? 'Computed automatically: services + club fixed fee + player fees (min players × fee × months), less the club commission (see breakdown above).' : form.paymentModel === 'players_all' ? 'Computed automatically: services + player fees (min players × fee × months), less the club commission (see breakdown above).' : 'Value is computed automatically from the services above.'}</p>
+        <p className="text-xs text-slate-400 -mt-3 mb-4">{isSponsorshipForm ? 'The agreed sponsorship package fee, entered manually — a sponsorship has no services catalogue to total.' : form.paymentModel === 'club_players' ? 'Computed automatically: services + club fixed fee + player fees (min players × fee × months), less the club commission (see breakdown above).' : form.paymentModel === 'players_all' ? 'Computed automatically: services + player fees (min players × fee × months), less the club commission (see breakdown above).' : 'Value is computed automatically from the services above.'}</p>
 
         {/* VAT-inclusive concession: when a client objects to VAT on top, agree an
             all-in figure and treat the value as VAT-inclusive. VAT is still
