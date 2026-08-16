@@ -94,7 +94,7 @@ const SERVICE_CATALOG: Array<{ key: string; label: string; group: string; unit: 
   { key: 'physical_data', label: 'Match Physical Performance Data', group: 'Recording Services', unit: 'per_match', defaultRate: 100,
     detail: 'Match physical data, player load tracking and performance benchmarks to protect players and reduce injury risk.' },
   { key: 'live_broadcasting', label: 'Live Match Broadcasting', group: 'Recording Services', unit: 'per_match', defaultRate: 100,
-    detail: 'Matches streamed live for parents, coaches and club management — increasing visibility for the academy.' },
+    detail: 'Matches streamed live for parents, coaches and club management — increasing visibility for the club.' },
   { key: 'match_recording', label: 'Match Recording (Robotic camera)', group: 'Recording Services', unit: 'per_match', defaultRate: 100,
     detail: 'Fixed/robotic camera recording for home and away matches — professional, high-quality coverage with no club equipment or staff needed.' },
   { key: 'own_team_analysis', label: 'Own Team Tactical Analysis', group: 'Analysis Services', unit: 'per_match', defaultRate: 120,
@@ -110,7 +110,7 @@ const SERVICE_CATALOG: Array<{ key: string; label: string; group: string; unit: 
   { key: 'adhoc_reports', label: 'Ad-Hoc Reports', group: 'Reporting Services', unit: 'included', defaultRate: 0,
     detail: 'On-demand reports tailored to specific needs, for fast support on key decisions whenever required.' },
   { key: 'coach_support', label: 'One-on-One Coach Support', group: 'Coaching Support', unit: 'included', defaultRate: 0,
-    detail: 'Platform guidance, analysis-driven solutions, educational support and custom plans tailored to the academy, delivered across the season.' },
+    detail: 'Platform guidance, analysis-driven solutions, educational support and custom plans tailored to the club, delivered across the season.' },
 ];
 
 const SERVICE_GROUPS = ['Core Services', 'Recording Services', 'Analysis Services', 'Reporting Services', 'Coaching Support'];

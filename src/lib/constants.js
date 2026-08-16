@@ -41,7 +41,7 @@ export const SERVICE_CATALOG = [
   { key:'physical_data', label:'Match Physical Performance Data', group:'Recording Services', unit:'per_match', defaultRate:100, defaultQty:0,
     detail:'Match physical data, player load tracking and performance benchmarks to protect players and reduce injury risk.' },
   { key:'live_broadcasting', label:'Live Match Broadcasting', group:'Recording Services', unit:'per_match', defaultRate:100, defaultQty:0,
-    detail:'Matches streamed live for parents, coaches and club management — increasing visibility for the academy.' },
+    detail:'Matches streamed live for parents, coaches and club management — increasing visibility for the club.' },
   { key:'match_recording', label:'Match Recording (Robotic camera)', group:'Recording Services', unit:'per_match', defaultRate:100, defaultQty:0,
     detail:'Fixed/robotic camera recording for home and away matches — professional, high-quality coverage with no club equipment or staff needed.' },
   { key:'own_team_analysis', label:'Own Team Tactical Analysis', group:'Analysis Services', unit:'per_match', defaultRate:120, defaultQty:0,
@@ -57,7 +57,7 @@ export const SERVICE_CATALOG = [
   { key:'adhoc_reports', label:'Ad-Hoc Reports', group:'Reporting Services', unit:'included', defaultRate:0, defaultQty:0,
     detail:'On-demand reports tailored to specific needs, for fast support on key decisions whenever required.' },
   { key:'coach_support', label:'One-on-One Coach Support', group:'Coaching Support', unit:'included', defaultRate:0, defaultQty:3,
-    detail:'Platform guidance, analysis-driven solutions, educational support and custom plans tailored to the academy, delivered across the season.' },
+    detail:'Platform guidance, analysis-driven solutions, educational support and custom plans tailored to the club, delivered across the season.' },
 ];
 
 export const SERVICE_UNIT_LABELS = {
