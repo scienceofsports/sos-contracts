@@ -1217,6 +1217,108 @@ function CommercialBreakdown({ form, servicesTotal = 0 }) {
   );
 }
 
+/* =========================================================================
+   SPONSORSHIP RIGHTS EDITOR
+   -------------------------------------------------------------------------
+   Bespoke rights builder: pick a right from the catalogue, set a quantity and
+   a frequency, and optionally override the wording. Rows render into the
+   contract's Sponsorship Rights clause via computeSponsorshipRights /
+   sponsorshipRightText — the live preview under each row is the EXACT sentence
+   the contract will print, so there is no gap between drafting and document.
+   ========================================================================= */
+function SponsorshipRightsEditor({ rows, onChange }) {
+  const list = Array.isArray(rows) ? rows : [];
+  const byKey = Object.fromEntries(SPONSORSHIP_RIGHT_TYPES.map(r => [r.key, r]));
+  const update = (i, patch) => onChange(list.map((r, idx) => idx === i ? { ...r, ...patch } : r));
+  const remove = (i) => onChange(list.filter((_, idx) => idx !== i));
+  const add = () => {
+    const def = SPONSORSHIP_RIGHT_TYPES[0];
+    onChange([...list, { type: def.key, qty: 1, per: def.defaultPer, detail: '' }]);
+  };
+  return (
+    <div>
+      {list.length === 0 && (
+        <p className="text-sm text-slate-400 mb-3">No rights added yet.</p>
+      )}
+      <div className="space-y-3">
+        {list.map((row, i) => {
+          const def = byKey[row?.type];
+          // Live preview of the exact contract sentence for this row.
+          const [preview] = computeSponsorshipRights([row]).map(sponsorshipRightText);
+          return (
+            <div key={i} className="rounded-lg border border-[var(--border)] p-3">
+              {/* Stacks on mobile, spreads at md — matches the form's grid idiom. */}
+              <div className="grid grid-cols-1 md:grid-cols-12 gap-2 items-end">
+                <div className="md:col-span-6">
+                  <label className="block text-xs text-slate-500 mb-1">Right</label>
+                  <select
+                    value={row?.type || ''}
+                    onChange={e => {
+                      const nd = byKey[e.target.value];
+                      update(i, { type: e.target.value, per: nd ? nd.defaultPer : row.per });
+                    }}
+                    className={inputCls(false)}
+                  >
+                    {SPONSORSHIP_RIGHT_GROUPS.map(g => (
+                      <optgroup key={g} label={g}>
+                        {SPONSORSHIP_RIGHT_TYPES.filter(r => r.group === g).map(r => (
+                          <option key={r.key} value={r.key}>{r.label}</option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-xs text-slate-500 mb-1">Qty</label>
+                  <input
+                    type="number" min="1" value={row?.qty ?? ''}
+                    onChange={e => update(i, { qty: e.target.value })}
+                    className={inputCls(false)}
+                    // An uncountable right (naming rights, logo-on-every-report)
+                    // is a standing entitlement — quantity is not meaningful.
+                    disabled={!!def?.uncountable}
+                  />
+                </div>
+                <div className="md:col-span-3">
+                  <label className="block text-xs text-slate-500 mb-1">Frequency</label>
+                  <select value={row?.per || ''} onChange={e => update(i, { per: e.target.value })} className={inputCls(false)}>
+                    {SPONSORSHIP_PER_OPTIONS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+                  </select>
+                </div>
+                <div className="md:col-span-1 flex md:block">
+                  <button
+                    type="button" onClick={() => remove(i)}
+                    className="w-full px-2 py-2 text-sm border border-red-200 text-red-600 rounded-lg hover:bg-red-50 transition"
+                    aria-label="Remove right"
+                  >×</button>
+                </div>
+              </div>
+              <div className="mt-2">
+                <label className="block text-xs text-slate-500 mb-1">Description (optional — overrides the standard wording)</label>
+                <input
+                  value={row?.detail || ''}
+                  onChange={e => update(i, { detail: e.target.value })}
+                  className={inputCls(false)}
+                  placeholder={def?.detail || ''}
+                />
+              </div>
+              {preview && (
+                <p className="text-xs mt-2 rounded px-2 py-1.5 border-l-2 break-words" style={{ background:'rgba(34,199,230,.10)', borderColor:'var(--cyan)', color:'var(--navy-deep)' }}>
+                  <span className="font-semibold">Contract wording:</span> {preview}
+                </p>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <button
+        type="button" onClick={add}
+        className="mt-3 px-3 py-1.5 text-sm border border-[var(--border)] rounded-lg hover:bg-slate-50 transition"
+      >+ Add right</button>
+    </div>
+  );
+}
+
 function ContractForm({ navigate, editContractId }) {
   const auth = useAuth();
   const toast = useToast();
@@ -1235,6 +1337,10 @@ function ContractForm({ navigate, editContractId }) {
     analysisTeams:[], oppMatchFootage:false, oppTeamAnalysis:false, oppPlayerAnalysis:false,
     billingBasis:'services', paymentModel:'club_all', playerMonthlyFee:'', playerMonths:'', kickbackPct:'', minPlayers:'', expectedPlayers:'', clubFixedFee:'', slaBands:[], teamSla:{},
     packageKey:'', packageEdited:false, vatInclusive:false,
+    // Contract kind + sponsorship fields (0026). Defaults to the services
+    // document, so a new contract behaves exactly as it does today.
+    contractKind:'services', sponsorshipProperty:'', sponsorshipPropertyDetail:'',
+    sponsorshipRights:[], sponsorshipActivation:'',
   });
   const [titleEdited, setTitleEdited] = useState(isEdit);
   // Which service groups are expanded in the form (collapsible sections).
@@ -1295,6 +1401,11 @@ function ContractForm({ navigate, editContractId }) {
         oppMatchFootage: !!existing.oppMatchFootage,
         oppTeamAnalysis: !!existing.oppTeamAnalysis,
         oppPlayerAnalysis: !!existing.oppPlayerAnalysis,
+        contractKind: existing.contractKind || 'services',
+        sponsorshipProperty: existing.sponsorshipProperty ?? '',
+        sponsorshipPropertyDetail: existing.sponsorshipPropertyDetail ?? '',
+        sponsorshipRights: Array.isArray(existing.sponsorshipRights) ? existing.sponsorshipRights : [],
+        sponsorshipActivation: existing.sponsorshipActivation ?? '',
         billingBasis: existing.billingBasis || 'services',
         paymentModel: existing.paymentModel || 'club_all',
         playerMonthlyFee: existing.playerMonthlyFee ?? '',
@@ -1615,6 +1726,10 @@ function ContractForm({ navigate, editContractId }) {
   const lineItems = computeServiceLineItems(services);
   const lineItemsTotal = lineItems.reduce((s,i)=>s+i.amount,0);
 
+  // Is this draft the sponsorship document? Drives which sections the form
+  // shows, the value auto-compute, and the special-terms clause list.
+  const isSponsorshipForm = form.contractKind === 'sponsorship';
+
   // Commercial Model. Value sources per model (all AUTO-computed now):
   //  - Club-funded (services basis): value = services catalogue total.
   //  - Shared: value = (services + club fixed fee + player fees) less commission.
@@ -1622,6 +1737,10 @@ function ContractForm({ navigate, editContractId }) {
   //    Player fees = min players × fee × months; the CLUB pays the whole value.
   const commercialProjection = form.billingBasis === 'player_funded' ? commercialValue(form, lineItemsTotal) : null;
   useEffect(() => {
+    // A sponsorship is priced as ONE package fee typed in by hand — it has no
+    // services catalogue to sum, so auto-computing from lineItemsTotal (0) would
+    // wipe the fee on every keystroke. Leave the value alone for sponsorships.
+    if (isSponsorshipForm) return;
     if (form.billingBasis === 'services') {
       const total = String(lineItemsTotal);
       setForm(f => (f.value === total ? f : { ...f, value: total }));
@@ -1629,12 +1748,20 @@ function ContractForm({ navigate, editContractId }) {
       const v = String(commercialProjection.value);
       setForm(f => (f.value === v ? f : { ...f, value: v }));
     }
-  }, [form.billingBasis, lineItemsTotal, commercialProjection?.value]);
+  }, [form.billingBasis, lineItemsTotal, commercialProjection?.value, isSponsorshipForm]);
 
   const validate = () => {
     const e = {};
     if (!form.title.trim()) e.title = 'Title is required.';
     if (!form.clientId) e.clientId = 'Select a client.';
+    // Sponsorship: the Property is named in the Purpose clause, and a deal with
+    // no rights has nothing to grant — both would print a placeholder.
+    if (isSponsorshipForm) {
+      if (!form.sponsorshipProperty.trim()) e.sponsorshipProperty = 'Name the property being sponsored.';
+      if (!(form.sponsorshipRights || []).some(r => r && r.type && Number(r.qty) > 0)) {
+        e.sponsorshipRights = 'Add at least one sponsorship right.';
+      }
+    }
     // Pure player-funded (players_all) has NO fixed up-front value — it is billed
     // entirely on actual enrolment. For that model we require a per-player fee
     // instead of a positive contract value. Every other model needs a value > 0
@@ -1945,19 +2072,63 @@ function ContractForm({ navigate, editContractId }) {
           <input value={form.title} onChange={e=>set('title',e.target.value)} className={inputCls(errors.title)} placeholder="e.g. Platform Access — Client Name" />
         </Field>
 
-        <CollapsibleSection title="Platform & Analysis" open={openSections.services} onToggle={()=>toggleSection('services')} summary={`${lineItems.filter(i=>PLATFORM_GROUPS.includes(i.group)).length} selected`}>
-        <p className="text-xs text-slate-500 mb-4">The core of the deal — platform access, the teams analysed and their delivery SLA, and match analysis. Mark a service "Included" to provide it at no charge (its value is still shown, struck through, but not added to the total).</p>
-        {PLATFORM_GROUPS.map(group => renderServiceGroup(group))}
-        </CollapsibleSection>
+        {/* Agreement kind — selects the whole clause set. Services is the
+            default and produces exactly the document the app has always made. */}
+        <Field label="Agreement Type">
+          <select value={form.contractKind} onChange={e=>set('contractKind', e.target.value)} className={inputCls(false)}>
+            <option value="services">Services Agreement — platform, analysis &amp; reporting</option>
+            <option value="sponsorship">Sponsorship Agreement — advertising &amp; branding rights</option>
+          </select>
+        </Field>
+        <p className="text-xs text-slate-500 -mt-2 mb-4">
+          {isSponsorshipForm
+            ? 'A sponsorship grants rights (ad spots, branding, event presence) rather than delivering services. Scope of Analysis, Service Levels and Commercial Terms are omitted from the document.'
+            : 'The standard SCIOS agreement — services, analysis scope and service levels.'}
+        </p>
 
-        <CollapsibleSection title="Add-on Services" open={openSections.addons} onToggle={()=>toggleSection('addons')} summary={`${lineItems.filter(i=>ADDON_GROUPS.includes(i.group)).length} selected`}>
-        <p className="text-xs text-slate-500 mb-4">Optional extras — recording, physical data, broadcasting and additional reports. Tick each one the client is taking and set its quantity and price.</p>
-        {ADDON_GROUPS.map(group => renderServiceGroup(group))}
-        <div className="flex justify-between pt-3 border-t border-[var(--border)] font-heading text-base">
-          <span>Total (chargeable)</span>
-          <span className="font-data">{fmtMoney(lineItemsTotal, form.currency)}</span>
-        </div>
-        </CollapsibleSection>
+        {isSponsorshipForm ? (
+          <>
+            <CollapsibleSection title="Sponsored Property" open={openSections.property !== false} onToggle={()=>toggleSection('property')} summary={form.sponsorshipProperty || 'Not set'}>
+            <p className="text-xs text-slate-500 mb-4">What the sponsor is backing — the show, event or platform. This is named directly in the contract's Purpose clause.</p>
+            <Field label="Property" required error={errors.sponsorshipProperty}>
+              <input value={form.sponsorshipProperty} onChange={e=>set('sponsorshipProperty', e.target.value)} className={inputCls(errors.sponsorshipProperty)} placeholder='e.g. Youth Zone, Annual Youth Awards 2026' />
+            </Field>
+            <Field label="Property Description">
+              <input value={form.sponsorshipPropertyDetail} onChange={e=>set('sponsorshipPropertyDetail', e.target.value)} className={inputCls(false)} placeholder='e.g. produced by Science of Sports and broadcast on Cablenet Sports channels' />
+            </Field>
+            <p className="text-xs text-slate-400 -mt-2 mb-4">Optional. Reads directly after the property name in the Purpose clause.</p>
+            <Field label="Activation Window">
+              <input value={form.sponsorshipActivation} onChange={e=>set('sponsorshipActivation', e.target.value)} className={inputCls(false)} placeholder='e.g. eight (8) episodes broadcast between March 2026 and February 2027' />
+            </Field>
+            <p className="text-xs text-slate-400 -mt-2">Optional. The delivery commitment inside the contract term — episodes, events or months.</p>
+            </CollapsibleSection>
+
+            <CollapsibleSection title="Sponsorship Rights" open={openSections.rights !== false} onToggle={()=>toggleSection('rights')} summary={`${(form.sponsorshipRights||[]).filter(r=>r&&r.type&&Number(r.qty)>0).length} right(s)`}>
+            <p className="text-xs text-slate-500 mb-4">What the sponsor receives. Priced as a single package fee (set under Commercial &amp; Payment) — individual rights are not separately priced.</p>
+            <SponsorshipRightsEditor
+              rows={form.sponsorshipRights || []}
+              onChange={rows => set('sponsorshipRights', rows)}
+            />
+            {errors.sponsorshipRights && <p className="text-xs text-red-600 mt-2">{errors.sponsorshipRights}</p>}
+            </CollapsibleSection>
+          </>
+        ) : (
+          <>
+            <CollapsibleSection title="Platform & Analysis" open={openSections.services} onToggle={()=>toggleSection('services')} summary={`${lineItems.filter(i=>PLATFORM_GROUPS.includes(i.group)).length} selected`}>
+            <p className="text-xs text-slate-500 mb-4">The core of the deal — platform access, the teams analysed and their delivery SLA, and match analysis. Mark a service "Included" to provide it at no charge (its value is still shown, struck through, but not added to the total).</p>
+            {PLATFORM_GROUPS.map(group => renderServiceGroup(group))}
+            </CollapsibleSection>
+
+            <CollapsibleSection title="Add-on Services" open={openSections.addons} onToggle={()=>toggleSection('addons')} summary={`${lineItems.filter(i=>ADDON_GROUPS.includes(i.group)).length} selected`}>
+            <p className="text-xs text-slate-500 mb-4">Optional extras — recording, physical data, broadcasting and additional reports. Tick each one the client is taking and set its quantity and price.</p>
+            {ADDON_GROUPS.map(group => renderServiceGroup(group))}
+            <div className="flex justify-between pt-3 border-t border-[var(--border)] font-heading text-base">
+              <span>Total (chargeable)</span>
+              <span className="font-data">{fmtMoney(lineItemsTotal, form.currency)}</span>
+            </div>
+            </CollapsibleSection>
+          </>
+        )}
 
         {/* --- Commercial Model: how the deal is funded. --------------------- */}
         <CollapsibleSection title="Commercial & Payment" open={openSections.money} onToggle={()=>toggleSection('money')} summary={`${(PAYMENT_MODEL_LABELS[form.paymentModel] || 'Club-funded').split(' — ')[0]} · ${fmtMoney(form.value || 0, form.currency)}`}>
@@ -2117,7 +2288,9 @@ function ContractForm({ navigate, editContractId }) {
                 <div className="flex items-center gap-2 mb-2">
                   <span className="text-xs text-slate-400 shrink-0">Relates to</span>
                   <select value={term.relatesTo || 'General'} onChange={e=>updateSpecialTerm(i, { relatesTo: e.target.value })} className="px-2 py-1 text-sm border border-[var(--border)] rounded-lg bg-white text-slate-600 flex-1">
-                    {SPECIAL_TERM_CLAUSES.map(c => <option key={c} value={c}>{c}</option>)}
+                    {/* Only offer clauses this document kind actually prints —
+                        a sponsorship has no "Scope of Analysis" to attach to. */}
+                    {specialTermClausesFor(form.contractKind).map(c => <option key={c} value={c}>{c}</option>)}
                   </select>
                   <button type="button" onClick={()=>removeSpecialTerm(i)} className="text-slate-400 hover:text-red-500 px-2 shrink-0" title="Remove term">✕</button>
                 </div>
@@ -4316,28 +4489,30 @@ function ClientFormModal({ client, readOnly, canDelete, onDeleted, onClose, onDo
           )}
         </div>
       </Field>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <Field label="Company / Entity Name" required error={errors.companyName}><input disabled={readOnly} value={form.companyName} onChange={e=>set('companyName',e.target.value)} className={inputCls(errors.companyName)} /></Field>
         <Field label="Entity Type">
           <select disabled={readOnly} value={form.entityType} onChange={e=>set('entityType',e.target.value)} className={inputCls(false)}>
             <option value="company">Company (Ltd)</option>
             <option value="club">Club / Association</option>
             <option value="federation">Federation / Governing Body</option>
+            <option value="agency">Agency</option>
+            <option value="sponsor">Sponsor / Brand</option>
           </select>
         </Field>
       </div>
-      <p className="text-xs text-slate-500 -mt-2 mb-3">Sets the legal wording in the contract's party clause — e.g. a club reads as "an association duly registered under…", not "a company". Clubs/federations without a VAT number will omit the VAT phrase.</p>
+      <p className="text-xs text-slate-500 -mt-2 mb-3">Sets the legal wording in the contract's party clause — e.g. a club reads as "an association duly registered under…", not "a company". Clubs/federations without a VAT number will omit the VAT phrase. Agencies and sponsors are treated as incorporated businesses (VAT expected).</p>
       <Field label="Contact Name" required error={errors.contactName}><input disabled={readOnly} value={form.contactName} onChange={e=>set('contactName',e.target.value)} className={inputCls(errors.contactName)} /></Field>
       <Field label="Contact Email" required error={errors.contactEmail}><input disabled={readOnly} value={form.contactEmail} onChange={e=>set('contactEmail',e.target.value)} className={inputCls(errors.contactEmail)} /></Field>
       <Field label="Contact Phone"><input disabled={readOnly} value={form.contactPhone} onChange={e=>set('contactPhone',e.target.value)} className={inputCls(false)} /></Field>
       <Field label="Address"><input disabled={readOnly} value={form.address} onChange={e=>set('address',e.target.value)} className={inputCls(false)} /></Field>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <Field label="Country (ISO code)"><input disabled={readOnly} value={form.country} onChange={e=>set('country',e.target.value.toUpperCase())} maxLength={2} className={inputCls(false)} /></Field>
         <Field label="Currency">
           <select disabled={readOnly} value={form.currency} onChange={e=>set('currency',e.target.value)} className={inputCls(false)}>{CURRENCIES.map(c=><option key={c} value={c}>{c}</option>)}</select>
         </Field>
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <Field label="VAT Number (optional)"><input disabled={readOnly || form.noVatNumber} value={form.noVatNumber ? '' : form.vatNumber} onChange={e=>set('vatNumber',e.target.value)} className={inputCls(false)} placeholder={form.noVatNumber ? 'Not VAT-registered' : ''} /></Field>
         <Field label="Registration Number (optional)"><input disabled={readOnly} value={form.registrationNumber} onChange={e=>set('registrationNumber',e.target.value)} className={inputCls(false)} placeholder="e.g. HE123456" /></Field>
       </div>
@@ -4870,6 +5045,15 @@ function normalizeSnapshot(snapshot) {
     clubFixedFee: pick(c, 'clubFixedFee', 'club_fixed_fee'),
     slaBands: pick(c, 'slaBands', 'sla_bands') || [],
     slaHours: pick(c, 'slaHours', 'sla_hours'),
+    // Contract kind + sponsorship fields — WITHOUT these a frozen sponsorship
+    // snapshot would re-render as a services document on the signing page and
+    // in the admin frozen view (wrong clause set, wrong Purpose). Legacy
+    // snapshots carry no contract_kind and correctly default to 'services'.
+    contractKind: pick(c, 'contractKind', 'contract_kind') || 'services',
+    sponsorshipProperty: pick(c, 'sponsorshipProperty', 'sponsorship_property'),
+    sponsorshipPropertyDetail: pick(c, 'sponsorshipPropertyDetail', 'sponsorship_property_detail'),
+    sponsorshipRights: pick(c, 'sponsorshipRights', 'sponsorship_rights') || [],
+    sponsorshipActivation: pick(c, 'sponsorshipActivation', 'sponsorship_activation'),
     documentHashBefore: pick(c, 'documentHashBefore', 'document_hash_before'),
     createdAt: pick(c, 'createdAt', 'created_at'),
     sentAt: pick(c, 'sentAt', 'sent_at'),
