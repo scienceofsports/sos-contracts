@@ -102,7 +102,11 @@ select * from (
   where status not in ('signed','active','cancelled')
 
   union all
-  -- 6 — overdue money, worst first
+  -- 6 — overdue money, worst first.
+  --     EXECUTED ONLY. A draft/sent contract carries a proposed schedule, but
+  --     nobody owes anything under an unsigned agreement, so its past-date rows
+  --     are not overdue money — the app excludes them (isReceivableContract) and
+  --     this must agree, or the audit reports debts that do not exist.
   select '6 OVERDUE', contract_number, coalesce(client,'(no client)'), status,
          to_char(coalesce(value,0), 'FM999G999G990D00'), pay_rows::text,
          to_char(overdue_gross, 'FM999G999G990D00'),
@@ -110,6 +114,7 @@ select * from (
          6, contract_number
   from base
   where overdue_gross > 0
+    and status in ('signed','active')
 
   union all
   -- 7 — totals

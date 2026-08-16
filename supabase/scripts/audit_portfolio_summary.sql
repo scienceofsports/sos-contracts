@@ -88,7 +88,9 @@ checks as (
          coalesce(string_agg(coalesce(client,'?') || ' ' ||
                   to_char(overdue_gross,'FM999G999G990D00'), ', '
                   order by overdue_gross desc), '— none —')
-  from base where overdue_gross > 0
+  -- Executed only: nobody owes money under an unsigned contract, so a draft's
+  -- past-date rows are not overdue. Matches isReceivableContract in the app.
+  from base where overdue_gross > 0 and status in ('signed','active')
 
   union all
   select 8, 'TOTAL OUTSTANDING (gross)', '',
