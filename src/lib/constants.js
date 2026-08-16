@@ -26,39 +26,96 @@ export const PAYMENT_TYPES = [
 export const CURRENCIES = ['EUR','AED','USD'];
 export const CURRENCY_SYMBOL = { EUR:'€', AED:'AED ', USD:'$' };
 
+/* CLIENT TYPES — who SCIOS signs services agreements with. These are the
+   audiences the service catalogue is segmented for (see `appliesTo` below).
+   'club' covers academies too: they buy the same catalogue, and the party
+   clause wording is driven by clients.entity_type, not by this list. */
+export const SERVICE_CLIENT_TYPES = ['federation', 'club', 'agency'];
+
 /* Service catalog — the services SCIOS offers to clubs/academies, per
    "Science of Sports Services 2026-2027" pricing sheet. unit determines how
    quantity is interpreted: 'flat' (fixed fee, qty locked to 1), 'per_match'
    (rate x number of matches), 'per_unit' (rate x count), 'included' (bundled,
-   no separate charge). */
+   no separate charge).
+
+   `appliesTo` lists the client types a service is offered to, so the drafting
+   UI shows only relevant lines. Every pre-existing service applies to
+   federations and clubs exactly as before — this tag NARROWS nothing that was
+   previously offered, it only keeps club/federation match services out of an
+   agency subscription (an agency has no teams and no matches of its own). */
 export const SERVICE_CATALOG = [
   { key:'platform_access', label:'Access to Football Platform', group:'Core Services', unit:'flat', defaultRate:11500, defaultQty:1,
+    appliesTo:['federation','club'],
     detail:'Video + data combined, match events & clips, player comparisons, team & player rankings — everything accessible in one place.' },
+  // AGENCY SUBSCRIPTION — the agency equivalent of platform_access. An agency
+  // has no teams, venues or fixtures of its own: it buys full read access to the
+  // platform to track and evidence the players it represents. Priced as a flat
+  // annual subscription rather than a season fee tied to match volume.
+  { key:'agency_subscription', label:'Agency Platform Subscription', group:'Core Services', unit:'flat', defaultRate:0, defaultQty:1,
+    appliesTo:['agency'],
+    detail:'Full access to the Science of Sports platform for the agency\'s staff — player profiles and performance data, match events and video clips, player comparisons, team and player rankings, and report downloads.' },
   { key:'camera_installation', label:'Installation of Fixed Camera', group:'Recording Services', unit:'per_unit', defaultRate:500, defaultQty:1,
+    appliesTo:['federation','club'],
     detail:'One-off installation of fixed/robotic camera(s) at the club\'s venue, priced per camera.' },
   { key:'veo_camera', label:'VEO Camera', group:'Recording Services', unit:'flat', defaultRate:0, defaultQty:1,
+    appliesTo:['federation','club'],
     detail:'Provision of a VEO automated (robotic) camera for the season, enabling the club to record its own home and away matches — no operator required.' },
   { key:'physical_data', label:'Match Physical Performance Data', group:'Recording Services', unit:'per_match', defaultRate:100, defaultQty:0,
+    appliesTo:['federation','club'],
     detail:'Match physical data, player load tracking and performance benchmarks to protect players and reduce injury risk.' },
   { key:'live_broadcasting', label:'Live Match Broadcasting', group:'Recording Services', unit:'per_match', defaultRate:100, defaultQty:0,
+    appliesTo:['federation','club'],
     detail:'Matches streamed live for parents, coaches and club management — increasing visibility for the club.' },
   { key:'match_recording', label:'Match Recording (Robotic camera)', group:'Recording Services', unit:'per_match', defaultRate:100, defaultQty:0,
+    appliesTo:['federation','club'],
     detail:'Fixed/robotic camera recording for home and away matches — professional, high-quality coverage with no club equipment or staff needed.' },
   { key:'own_team_analysis', label:'Own Team Tactical Analysis', group:'Analysis Services', unit:'per_match', defaultRate:120, defaultQty:0,
+    appliesTo:['federation','club'],
     detail:'Team structure analysis, phases of play, and key moments with video clips, prepared by professional performance analysts.' },
   { key:'opponent_analysis', label:'Opponent Tactical Analysis', group:'Analysis Services', unit:'per_match', defaultRate:120, defaultQty:0,
+    appliesTo:['federation','club'],
     detail:'Opponent playing style, key players, and strengths & weaknesses ahead of each fixture.' },
   { key:'match_reports', label:'Match Team & Player Reports', group:'Reporting Services', unit:'included', defaultRate:0, defaultQty:130,
+    appliesTo:['federation','club'],
     detail:'Possession, passes, xG, player performance metrics and visual dashboards.' },
   { key:'academy_reports', label:'Academy Performance Reports', group:'Reporting Services', unit:'per_unit', defaultRate:100, defaultQty:3,
+    appliesTo:['federation','club'],
     detail:'Quarterly and full-season academy performance overviews — team progress, tactical evolution, physical trends and recommendations (1st Quarter, 2nd Quarter, Full Season).' },
   { key:'player_reports', label:'Individual Player Reports', group:'Reporting Services', unit:'per_unit', defaultRate:100, defaultQty:10,
+    appliesTo:['federation','club','agency'],
     detail:'Detailed player analysis, strengths and improvement areas, with video-supported feedback.' },
   { key:'adhoc_reports', label:'Ad-Hoc Reports', group:'Reporting Services', unit:'included', defaultRate:0, defaultQty:0,
+    appliesTo:['federation','club','agency'],
     detail:'On-demand reports tailored to specific needs, for fast support on key decisions whenever required.' },
   { key:'coach_support', label:'One-on-One Coach Support', group:'Coaching Support', unit:'included', defaultRate:0, defaultQty:3,
+    appliesTo:['federation','club'],
     detail:'Platform guidance, analysis-driven solutions, educational support and custom plans tailored to the club, delivered across the season.' },
 ];
+
+// Services offered to a given client type, for the drafting UI's service picker.
+// A catalogue entry with no `appliesTo` is treated as available to EVERY type —
+// so an untagged service (e.g. one added later without the tag) is never
+// silently hidden. Falls back to the whole catalogue when no type is given,
+// which is what every existing caller does today.
+export function serviceCatalogFor(clientType) {
+  if (!clientType) return SERVICE_CATALOG;
+  return SERVICE_CATALOG.filter(s => !s.appliesTo || s.appliesTo.includes(clientType));
+}
+
+// Map a client's entity_type to the catalogue segment it buys from. Companies
+// default to the club catalogue (a private academy is often a Ltd), and
+// sponsors have no services catalogue at all — they sign the sponsorship
+// document instead, so they fall back to the club list only if ever asked.
+export function serviceClientTypeFor(entityType) {
+  switch (entityType) {
+    case 'federation': return 'federation';
+    case 'agency':     return 'agency';
+    case 'club':
+    case 'company':
+    case 'sponsor':
+    default:           return 'club';
+  }
+}
 
 export const SERVICE_UNIT_LABELS = {
   flat: 'Flat fee',
@@ -106,6 +163,30 @@ export function platformSeatsSummary(svc) {
   return parts.join(', ');
 }
 
+// Is this contract the sponsorship document rather than the services document?
+// Robust to snake_case (frozen snapshots) and to a missing field (legacy rows
+// pre-0026 are always 'services'). NOTE: ported into both PDF generators.
+export function isSponsorship(contract) {
+  return (contract?.contractKind ?? contract?.contract_kind ?? 'services') === 'sponsorship';
+}
+
+// Does this contract cover matches? Drives whether the Service Levels clause is
+// meaningful. A sponsorship covers none; an agency subscription covers none
+// either (an agency has no teams of its own), so a phantom "72-hour SLA on key
+// analytical outputs after each match" must not appear on those documents.
+// A services contract with any per-match service keeps today's behaviour exactly.
+// NOTE: ported into both PDF generators — keep in sync.
+export function hasMatchServices(contract) {
+  if (isSponsorship(contract)) return false;
+  const items = computeServiceLineItems(contract?.services);
+  if (items.some(i => i.unit === 'per_match')) return true;
+  // An explicit per-team SLA band is itself evidence of match coverage, even if
+  // the per-match services are recorded elsewhere (e.g. a bundled package).
+  const bands = Array.isArray(contract?.slaBands ?? contract?.sla_bands)
+    ? (contract.slaBands ?? contract.sla_bands) : [];
+  return bands.some(b => b && Array.isArray(b.teams) && b.teams.length && Number(b.hours));
+}
+
 // Build the two "Scope of Analysis" sentences from a contract's scope fields.
 // Returns { teams, coverage, opponent } strings (empty teams → caller may skip
 // the clause). `seasonLabel` is derived from the contract dates by the caller.
@@ -135,10 +216,25 @@ export function clientEntityDescriptor(entityType) {
   switch (entityType) {
     case 'club':       return 'an association duly registered under the laws of';
     case 'federation': return 'a governing body duly registered under the laws of';
+    // Player/football agencies are normally incorporated, but naming them as
+    // agencies reads accurately in the party clause and keeps them a distinct
+    // reportable segment. They keep company-style VAT handling (see
+    // clientVatDisplay / VAT_REQUIRED_ENTITY_TYPES).
+    case 'agency':     return 'an agency registered under the laws of';
+    // Sponsors are ordinary commercial companies (e.g. KFC Cyprus) — the party
+    // clause is the standard company wording. The type exists to drive the
+    // sponsorship document and segment reporting, not to change the descriptor.
+    case 'sponsor':
     case 'company':
     default:           return 'a company registered under the laws of';
   }
 }
+
+// Entity types that are incorporated businesses and therefore normally DO carry
+// a VAT number — so a blank VAT field means "not filled in yet" (show the TBC
+// placeholder) rather than "this entity has none". Clubs and federations are
+// registered associations that frequently have no VAT registration at all.
+export const VAT_REQUIRED_ENTITY_TYPES = ['company', 'agency', 'sponsor'];
 
 // Resolve what the party clause should print for the Client's VAT number.
 // Three distinct cases, and only the middle one is a placeholder:
@@ -157,8 +253,10 @@ export function clientVatDisplay(client, tbc) {
   if (client?.noVatNumber ?? client?.no_vat_number) return '';
   // Clubs/federations are registered associations and frequently have no VAT
   // registration at all, so a blank means "none" rather than "pending".
+  // Agencies and sponsors ARE incorporated businesses, so they behave like a
+  // company here — a blank is "not filled in yet", not "has none".
   const entityType = client?.entityType || client?.entity_type || 'company';
-  return entityType === 'company' ? tbc : '';
+  return VAT_REQUIRED_ENTITY_TYPES.includes(entityType) ? tbc : '';
 }
 
 // Build the Client party sentence for the opening clause, shared by all three
@@ -172,13 +270,162 @@ export function clientPartyClause({ name, entityType, country, registration, vat
   return `${name}, ${clientEntityDescriptor(entityType)} ${country} with registration number ${registration}${vatPhrase}, having its registered office at ${address} (the "Client").`;
 }
 
+/* =========================================================================
+   SPONSORSHIP
+   -------------------------------------------------------------------------
+   A sponsorship agreement grants RIGHTS (exposure, branding, presence) rather
+   than delivering services. It is modelled on the executed KFC × "Youth Zone"
+   agreement: rights are listed with a quantity and a frequency, and the whole
+   package is priced as ONE fee — individual rights are not separately priced.
+
+   Deliberately BESPOKE: no fixed Gold/Silver/Bronze tiers, because SCIOS has
+   priced sponsorship deal-by-deal and there is not yet enough repetition to
+   justify packages. Tiers can be added later without a schema change.
+   ========================================================================= */
+
+// The sponsorship inventory SCIOS can sell, grouped the way the sponsorship
+// deck presents it. `unitLabel` is the noun used when a quantity is shown, and
+// `defaultPer` seeds the frequency selector.
+export const SPONSORSHIP_RIGHT_TYPES = [
+  // --- Broadcast (the "Youth Zone" TV show with Cablenet) -------------------
+  { key:'tv_spot',        label:'Television Advertising Spot', group:'Broadcast', unitLabel:'spot',      defaultPer:'episode',
+    detail:'Television advertising spot broadcast within the programme.' },
+  { key:'power_popup',    label:'Power Pop-Up Placement',      group:'Broadcast', unitLabel:'placement', defaultPer:'episode',
+    detail:'Power pop-up advertising placement displayed during the programme.' },
+  { key:'animated_popup', label:'Animated Pop-Up Placement',   group:'Broadcast', unitLabel:'placement', defaultPer:'episode',
+    detail:'Animated pop-up advertising placement displayed during the programme.' },
+  { key:'show_billboard', label:'Opening / Closing Billboard', group:'Broadcast', unitLabel:'billboard', defaultPer:'episode',
+    detail:'Sponsor billboard shown in the programme\'s opening and closing sequence.' },
+  // --- Platform & reports (the SCIOS digital estate) ------------------------
+  { key:'platform_branding', label:'Platform Branding',        group:'Digital',   unitLabel:'placement', defaultPer:'season',
+    detail:'Sponsor branding displayed across the Science of Sports platform, seen by coaches, players, analysts and academies.' },
+  // `uncountable`: the right is a single standing entitlement, not a countable
+  // run of placements — "Sponsor logo on every performance report", not "one
+  // performance report branding placement per report". sponsorshipRightText
+  // renders these without the "N (n)" prefix.
+  { key:'reports_branding',  label:'Performance Report Branding', group:'Digital', unitLabel:'placement', defaultPer:'report',
+    uncountable:true, uncountableText:'Sponsor logo displayed on every performance report',
+    detail:'Sponsor logo displayed on the performance reports delivered to players, coaches and academies.' },
+  { key:'social_post',       label:'Social Media Feature',     group:'Digital',   unitLabel:'post',      defaultPer:'month',
+    detail:'Sponsor feature published across the Science of Sports social media channels.' },
+  // --- Events (Youth Awards, Coach Awards, Conference, Summit, camps) -------
+  { key:'event_naming',      label:'Event Naming Rights',      group:'Events',    unitLabel:'right',     defaultPer:'event',
+    uncountable:true, uncountableText:'Event naming rights',
+    detail:'Sponsor name associated with the event title and applied across event branding.' },
+  { key:'event_branding',    label:'Event Branding & Signage', group:'Events',    unitLabel:'placement', defaultPer:'event',
+    detail:'Sponsor branding displayed on stage, signage and printed materials at the event.' },
+  { key:'event_presence',    label:'Event Presence / Activation', group:'Events', unitLabel:'activation', defaultPer:'event',
+    detail:'On-site sponsor presence or brand activation at the event.' },
+  { key:'award_presentation',label:'Award Presentation',       group:'Events',    unitLabel:'award presentation', defaultPer:'event',
+    detail:'Sponsor representative presents an award on stage during the ceremony.' },
+];
+
+export const SPONSORSHIP_RIGHT_GROUPS = ['Broadcast', 'Digital', 'Events'];
+
+// Frequency options for a rights row. 'total' means the quantity is the whole
+// commitment rather than a per-occurrence rate (e.g. "10 posts in total").
+export const SPONSORSHIP_PER_OPTIONS = [
+  { value:'episode', label:'per episode' },
+  { value:'event',   label:'per event' },
+  { value:'match',   label:'per match' },
+  { value:'report',  label:'per report' },
+  { value:'month',   label:'per month' },
+  { value:'season',  label:'for the season' },
+  { value:'total',   label:'in total' },
+];
+
+// Resolve the stored sponsorship_rights rows against the catalogue, dropping
+// unknown keys and rows with no quantity. Mirrors computeServiceLineItems so the
+// rights table renders like the scope table.
+// NOTE: ported into both PDF generators — keep in sync.
+export function computeSponsorshipRights(rights) {
+  if (!Array.isArray(rights)) return [];
+  const byKey = Object.fromEntries(SPONSORSHIP_RIGHT_TYPES.map(r => [r.key, r]));
+  return rights
+    .map(r => {
+      const def = byKey[r?.type];
+      if (!def) return null;
+      const qty = Number(r.qty) || 0;
+      if (qty <= 0) return null;
+      return {
+        ...def,
+        qty,
+        per: r.per || def.defaultPer,
+        // Per-deal override of the catalogue wording; blank falls back to it.
+        detail: (r.detail && String(r.detail).trim()) || def.detail,
+      };
+    })
+    .filter(Boolean);
+}
+
+// One rights row as a contract sentence fragment — "Three (3) television
+// advertising spots per episode (maximum duration: 30 seconds each)". Numbers
+// are spelled out to match the drafting convention of the executed KFC
+// agreement. NOTE: ported into both PDF generators — keep in sync.
+const NUMBER_WORDS = ['zero','one','two','three','four','five','six','seven','eight','nine','ten',
+  'eleven','twelve','thirteen','fourteen','fifteen','sixteen','seventeen','eighteen','nineteen','twenty'];
+
+export function spellNumber(n) {
+  const i = Number(n);
+  if (!Number.isInteger(i) || i < 0 || i > 20) return String(n);
+  const w = NUMBER_WORDS[i];
+  return w.charAt(0).toUpperCase() + w.slice(1);
+}
+
+export function sponsorshipRightText(row) {
+  if (!row) return '';
+  const qty = Number(row.qty) || 0;
+  const perOptU = SPONSORSHIP_PER_OPTIONS.find(p => p.value === row.per);
+  // Uncountable rights are standing entitlements — render them as a statement,
+  // with the frequency appended only when it adds meaning (not "per report",
+  // which the wording already implies).
+  if (row.uncountable) {
+    const base = row.uncountableText || row.label;
+    const skipPer = !row.per || row.per === 'total' || row.per === 'report';
+    return `${base}${skipPer ? '' : ` ${perOptU?.label || ''}`}`.replace(/\s+/g, ' ').trim();
+  }
+  const label = String(row.label || '').toLowerCase();
+  const unit = String(row.unitLabel || '').toLowerCase();
+  // The catalogue label usually ALREADY ends in the unit noun ("Television
+  // Advertising Spot" + unit "spot"), so appending it blindly produced
+  // "…advertising spot spots". Pluralise the label's own tail in that case, and
+  // only append the unit noun when the label doesn't already end with it
+  // (e.g. "Platform Branding" + "placement" -> "platform branding placements").
+  const endsWithUnit = unit && (label === unit || label.endsWith(` ${unit}`));
+  let phrase;
+  if (endsWithUnit) {
+    phrase = qty === 1 ? label : `${label}s`;
+  } else {
+    phrase = unit ? `${label} ${qty === 1 ? unit : `${unit}s`}` : label;
+  }
+  const perOpt = SPONSORSHIP_PER_OPTIONS.find(p => p.value === row.per);
+  const perStr = perOpt ? ` ${perOpt.label}` : '';
+  return `${spellNumber(qty)} (${qty}) ${phrase}${perStr}`.replace(/\s+/g, ' ').trim();
+}
+
 // Clause names a special term can reference (stable — by name, not number).
+// Includes both document kinds' clauses: a services agreement never offers the
+// sponsorship clause names in its picker (and vice versa) — the drafting UI
+// filters by contract kind — but the list stays one stable superset so a stored
+// special term keeps resolving if a contract's kind is ever corrected.
 export const SPECIAL_TERM_CLAUSES = [
   'General', 'Purpose', 'Scope of Services', 'Scope of Analysis', 'Fees & Payment',
-  'Commercial Terms & Club Commission', 'Confidentiality & Data Protection',
+  'Commercial Terms & Club Commission', 'Sponsorship Rights', 'Branding & Materials',
+  'Confidentiality & Data Protection',
   'Intellectual Property Rights', 'Duration', 'Termination',
   'Limitation of Liability', 'Force Majeure', 'Governing Law & Jurisdiction',
 ];
+
+// Clause names offered in the special-terms picker for a given contract kind —
+// so a sponsorship contract doesn't offer "Scope of Analysis" and a services
+// contract doesn't offer "Sponsorship Rights".
+const SERVICES_ONLY_CLAUSES    = ['Scope of Services', 'Scope of Analysis', 'Commercial Terms & Club Commission'];
+const SPONSORSHIP_ONLY_CLAUSES = ['Sponsorship Rights', 'Branding & Materials'];
+
+export function specialTermClausesFor(contractKind) {
+  const drop = contractKind === 'sponsorship' ? SERVICES_ONLY_CLAUSES : SPONSORSHIP_ONLY_CLAUSES;
+  return SPECIAL_TERM_CLAUSES.filter(c => !drop.includes(c));
+}
 
 // Strip markdown emphasis (**bold**, *italic*, __, _) from authored text so it
 // never leaks literal asterisks/underscores into the rendered contract.

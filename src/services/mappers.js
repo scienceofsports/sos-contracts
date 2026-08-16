@@ -205,6 +205,14 @@ export function contractFromRow(row, payments = [], events = []) {
     vatInclusive: row.vat_inclusive ?? false,
     slaBands: row.sla_bands ?? [],
     slaHours: row.sla_hours ?? 24,
+    // ---- Contract kind + sponsorship fields (migration 0026). `contract_kind`
+    // selects the document/clause set; it defaults to 'services' so every
+    // pre-0026 row keeps rendering exactly the document it renders today.
+    contractKind: row.contract_kind ?? 'services',
+    sponsorshipProperty: row.sponsorship_property ?? null,
+    sponsorshipPropertyDetail: row.sponsorship_property_detail ?? null,
+    sponsorshipRights: row.sponsorship_rights ?? [],
+    sponsorshipActivation: row.sponsorship_activation ?? null,
     createdBy: row.created_by ?? null,
     createdAt: row.created_at ?? null,
     sentAt: sentEvent?.server_timestamp ?? null,
@@ -292,6 +300,14 @@ export function contractToRow(obj) {
   if ('vatInclusive' in obj) row.vat_inclusive = !!obj.vatInclusive;
   if ('slaBands' in obj) row.sla_bands = Array.isArray(obj.slaBands) ? obj.slaBands : [];
   if ('slaHours' in obj) row.sla_hours = obj.slaHours === '' || obj.slaHours == null ? 24 : obj.slaHours;
+  // Contract kind + sponsorship fields (0026). Empty string => null so a cleared
+  // field doesn't persist as ''. contract_kind falls back to 'services' (the
+  // column is NOT NULL) so a patch can never blank it into a constraint error.
+  if ('contractKind' in obj) row.contract_kind = obj.contractKind || 'services';
+  if ('sponsorshipProperty' in obj) row.sponsorship_property = nd(obj.sponsorshipProperty);
+  if ('sponsorshipPropertyDetail' in obj) row.sponsorship_property_detail = nd(obj.sponsorshipPropertyDetail);
+  if ('sponsorshipRights' in obj) row.sponsorship_rights = Array.isArray(obj.sponsorshipRights) ? obj.sponsorshipRights : [];
+  if ('sponsorshipActivation' in obj) row.sponsorship_activation = nd(obj.sponsorshipActivation);
   if ('createdBy' in obj) row.created_by = obj.createdBy;
   return row;
 }
