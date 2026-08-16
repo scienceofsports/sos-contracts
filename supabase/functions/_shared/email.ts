@@ -72,7 +72,7 @@ const WRAP = (inner: string) => `
     <!-- Navy footer band -->
     <div style="background:#0A1A3F;padding:18px 30px;color:#A9B6CC;font-size:12px;line-height:1.5;">
       <div style="color:#fff;font-weight:600;margin-bottom:2px;">C.C. Science of Sports Ltd</div>
-      2 Nikokreontos, Nice Dream, 6th Floor, Office 601, 1066 Nicosia, Cyprus<br/>
+      Michalaki Karaoli, Anemomylos Building, Floor 5, 1095 Nicosia, Cyprus<br/>
       info@scienceofsports.net · +357 22 396997 · HE 449875
       <div style="color:#22C7E6;font-style:italic;font-weight:600;margin-top:10px;">Transforming matches into knowledge.</div>
     </div>

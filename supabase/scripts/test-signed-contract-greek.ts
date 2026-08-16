@@ -16,7 +16,7 @@ const res = await buildContractPdf({
     },
     company: {
       name: 'C.C. Science of Sports Ltd', registrationNumber: 'HE 449875',
-      address: '2 Nikokreontos, Nice Dream, 6th Floor, Office 601, 1066 Nicosia, Cyprus',
+      address: 'Michalaki Karaoli, Anemomylos Building, Floor 5, 1095 Nicosia, Cyprus',
       contactEmail: 'info@scienceofsports.net',
     },
   },

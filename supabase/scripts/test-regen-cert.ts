@@ -9,7 +9,7 @@ const res = await buildCertificate({
   snapshot: {
     contract: { title: 'Ομόνοια Αραδίππου — Performance Analysis Agreement', value: 7000, currency: 'EUR', startDate: '2026-07-07', endDate: '2027-06-30' },
     client: { companyName: 'Ομόνοια Αραδίππου', contactName: 'ΑΝΤΩΝΗΣ ΠΑΤΣΑΛΟΣ', contactEmail: 'antonis_p13@yahoo.com', address: 'Αραδίππου, Λάρνακα, Κύπρος', registrationNumber: 'ΗΕ 123456' },
-    company: { name: 'C.C. Science of Sports Ltd', address: '2 Nikokreontos, Nice Dream, 6th Floor, Office 601, 1066 Nicosia', registrationNumber: 'HE 449875' },
+    company: { name: 'C.C. Science of Sports Ltd', address: 'Michalaki Karaoli, Nicosia', registrationNumber: 'HE 449875' },
   },
   signer: {
     name: 'ANTONIS PATSALOS', title: 'Πρόεδρος', company: 'Ομόνοια Αραδίππου',
