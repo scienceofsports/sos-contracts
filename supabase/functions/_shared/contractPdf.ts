@@ -221,6 +221,14 @@ const SPONSORSHIP_RIGHT_TYPES: Array<Any> = [
   { key:'best_xi', label:'Best XI', group:'Programmes & Awards',
     unitLabel:'edition', countLabel:'Best XI', properNoun:true, defaultPer:'month', defaultQty:1,
     detail:'Sponsor branding on the Best XI team-of-the-period selections published across the Science of Sports channels.' },
+  // "Powered by {Sponsor}" category sponsorship — the pattern used throughout the
+  // Annual Youth Awards proposal (Best XI, Best Goal, MVP, Fair Play, …), where a
+  // brand takes ONE category and it carries their name. Which category is a
+  // per-deal detail, so the row's free-text field names it.
+  { key:'award_category', label:'Award Category — "Powered by"', group:'Programmes & Awards',
+    unitLabel:'category', defaultPer:'event', defaultQty:1, uncountable:true,
+    uncountableText:'An award category presented as "Powered by [the Client]", with on-screen branding, a stage mention, digital posts and Kerkida.net coverage',
+    detail:'One award category carried in the Client\'s name — name the category in the field below (e.g. MVP of the Season, Best Goal, Fair Play).' },
   // --- Broadcast (the "Youth Zone" TV show with Cablenet) -------------------
   { key:'youth_zone_branding', label:'Youth Zone TV Show Branding', group:'Broadcast',
     unitLabel:'programme', defaultPer:'season', defaultQty:1, uncountable:true,

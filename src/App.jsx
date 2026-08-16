@@ -37,6 +37,8 @@ import {
   SPONSORSHIP_RIGHT_GROUPS,
   SPONSORSHIP_RIGHT_TYPES,
   SPONSORSHIP_PER_OPTIONS,
+  SPONSORSHIP_PACKAGES,
+  sponsorshipPackageRights,
   specialTermClausesFor,
   serviceCatalogFor,
   serviceClientTypeFor,
@@ -1242,9 +1244,31 @@ function SponsorshipRightsEditor({ rows, onChange }) {
     emit(next);
   };
   const update = (key, patch) => emit({ ...byType, [key]: { ...byType[key], ...patch } });
+  // Applying a package REPLACES the current selection — it is a starting point
+  // for the deal, not an additive stack. Everything stays editable afterwards.
+  const applyPackage = (key) => onChange(sponsorshipPackageRights(key));
 
   return (
     <div className="space-y-5">
+      <div className="rounded-lg border border-[var(--border)] p-3 bg-slate-50/60">
+        <div className="text-xs font-bold uppercase tracking-wide mb-1" style={{ color:'var(--navy-deep)' }}>Start from a package</div>
+        <p className="text-xs text-slate-500 mb-2.5">Ticks a standard set of rights — then add, remove or re-count anything. Pricing stays per deal.</p>
+        <div className="flex flex-wrap gap-2">
+          {SPONSORSHIP_PACKAGES.map(p => (
+            <button
+              key={p.key} type="button" onClick={() => applyPackage(p.key)}
+              title={p.detail}
+              className="px-3 py-1.5 text-xs border border-[var(--border)] rounded-lg hover:bg-white hover:border-[var(--cyan)] transition"
+            >{p.label}</button>
+          ))}
+          {list.length > 0 && (
+            <button
+              type="button" onClick={() => onChange([])}
+              className="px-3 py-1.5 text-xs border border-red-200 text-red-600 rounded-lg hover:bg-red-50 transition"
+            >Clear all</button>
+          )}
+        </div>
+      </div>
       {SPONSORSHIP_RIGHT_GROUPS.map(group => {
         const defs = SPONSORSHIP_RIGHT_TYPES.filter(r => r.group === group);
         if (!defs.length) return null;

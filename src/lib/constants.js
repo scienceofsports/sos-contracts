@@ -376,6 +376,14 @@ export const SPONSORSHIP_RIGHT_TYPES = [
   { key:'best_xi', label:'Best XI', group:'Programmes & Awards',
     unitLabel:'edition', countLabel:'Best XI', properNoun:true, defaultPer:'month', defaultQty:1,
     detail:'Sponsor branding on the Best XI team-of-the-period selections published across the Science of Sports channels.' },
+  // "Powered by {Sponsor}" category sponsorship — the pattern used throughout the
+  // Annual Youth Awards proposal (Best XI, Best Goal, MVP, Fair Play, …), where a
+  // brand takes ONE category and it carries their name. Which category is a
+  // per-deal detail, so the row's free-text field names it.
+  { key:'award_category', label:'Award Category — "Powered by"', group:'Programmes & Awards',
+    unitLabel:'category', defaultPer:'event', defaultQty:1, uncountable:true,
+    uncountableText:'An award category presented as "Powered by [the Client]", with on-screen branding, a stage mention, digital posts and Kerkida.net coverage',
+    detail:'One award category carried in the Client\'s name — name the category in the field below (e.g. MVP of the Season, Best Goal, Fair Play).' },
   // --- Broadcast (the "Youth Zone" TV show with Cablenet) -------------------
   { key:'youth_zone_branding', label:'Youth Zone TV Show Branding', group:'Broadcast',
     unitLabel:'programme', defaultPer:'season', defaultQty:1, uncountable:true,
@@ -418,6 +426,104 @@ export const SPONSORSHIP_RIGHT_TYPES = [
 ];
 
 export const SPONSORSHIP_RIGHT_GROUPS = ['Programmes & Awards', 'Broadcast', 'Events', 'Digital & Media', 'Partnership'];
+
+// SPONSORSHIP PACKAGES — one-click presets that tick a standard set of rights.
+//
+// These are STARTING POINTS, not fixed tiers: applying one ticks its rights and
+// the admin then adds, removes or re-counts anything before sending. Pricing
+// stays bespoke (no price is attached to a package) because SCIOS prices
+// sponsorship deal-by-deal — see the executed KFC agreement.
+//
+// The shapes come from how SCIOS actually sells: a full year-round partnership;
+// a single-property deal (the KFC × "Youth Zone" pattern); an event sponsorship;
+// and the "Powered by {Sponsor}" category pattern from the Annual Youth Awards
+// proposal, where a brand takes one award category and receives a consistent
+// bundle — on screen, stage mention, digital posts, Kerkida.net coverage.
+export const SPONSORSHIP_PACKAGES = [
+  {
+    key: 'full_partnership',
+    label: 'Full Partnership',
+    detail: 'Year-round presence across every property — programmes, broadcast, events, media and Official Partner status.',
+    rights: [
+      { type:'official_partner' },
+      { type:'coach_awards',        qty:1, per:'month' },
+      { type:'youth_awards' },
+      { type:'best_xi',             qty:1, per:'month' },
+      { type:'youth_zone_branding' },
+      { type:'conference_materials' },
+      { type:'social_post',         qty:2, per:'month' },
+      { type:'press_release',       qty:2, per:'total' },
+      { type:'kerkida_promotion' },
+      { type:'platform_branding' },
+      { type:'reports_branding' },
+    ],
+  },
+  {
+    key: 'broadcast_partner',
+    label: 'Broadcast Partner (Youth Zone)',
+    detail: 'The "Youth Zone" television package — show branding plus in-programme advertising. This is the shape of the KFC agreement.',
+    rights: [
+      { type:'youth_zone_branding' },
+      { type:'tv_spot',        qty:3, per:'episode', detail:'maximum duration: 30 seconds each' },
+      { type:'power_popup',    qty:2, per:'episode' },
+      { type:'animated_popup', qty:2, per:'episode' },
+    ],
+  },
+  {
+    key: 'event_partner',
+    label: 'Event Partner',
+    detail: 'A single event — the Annual Youth Awards or the Football Conference — with on-site presence and media follow-through.',
+    rights: [
+      { type:'youth_awards' },
+      { type:'event_presence', qty:1, per:'event' },
+      { type:'social_post',    qty:2, per:'total' },
+      { type:'press_release',  qty:1, per:'total' },
+      { type:'kerkida_promotion' },
+    ],
+  },
+  {
+    key: 'category_partner',
+    label: 'Award Category ("Powered by")',
+    detail: 'One award category carried as "Powered by {Sponsor}" — on screen, stage mention, digital posts and Kerkida.net coverage.',
+    rights: [
+      { type:'award_category', detail:'category to be confirmed' },
+      { type:'social_post',  qty:2, per:'total' },
+      { type:'kerkida_promotion' },
+    ],
+  },
+  {
+    key: 'digital_partner',
+    label: 'Digital Partner',
+    detail: 'Platform and reports branding with year-round social presence — no broadcast or event commitment.',
+    rights: [
+      { type:'platform_branding' },
+      { type:'reports_branding' },
+      { type:'social_post', qty:1, per:'month' },
+      { type:'best_xi',     qty:1, per:'month' },
+    ],
+  },
+];
+
+// Expand a package into rights rows, seeding each row's quantity/frequency from
+// the catalogue when the package doesn't state them. Unknown keys are dropped,
+// and rows come back in CATALOGUE order so the contract groups consistently.
+export function sponsorshipPackageRights(packageKey) {
+  const pkg = SPONSORSHIP_PACKAGES.find(p => p.key === packageKey);
+  if (!pkg) return [];
+  const byKey = Object.fromEntries(SPONSORSHIP_RIGHT_TYPES.map(r => [r.key, r]));
+  const chosen = {};
+  for (const r of pkg.rights) {
+    const def = byKey[r.type];
+    if (!def) continue;
+    chosen[r.type] = {
+      type: r.type,
+      qty: r.qty ?? def.defaultQty ?? 1,
+      per: r.per ?? def.defaultPer,
+      detail: r.detail ?? '',
+    };
+  }
+  return SPONSORSHIP_RIGHT_TYPES.filter(d => chosen[d.key]).map(d => chosen[d.key]);
+}
 
 // Frequency options for a rights row. 'total' means the quantity is the whole
 // commitment rather than a per-occurrence rate (e.g. "10 posts in total").
