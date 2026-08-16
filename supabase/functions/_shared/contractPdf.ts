@@ -210,33 +210,59 @@ function clientVatDisplay(client: Any, tbc: string): string {
    Levels and adds Sponsorship Rights + Branding & Materials. Keep in sync.
    --------------------------------------------------------------------------- */
 const SPONSORSHIP_RIGHT_TYPES: Array<Any> = [
-  { key:'tv_spot',        label:'Television Advertising Spot', group:'Broadcast', unitLabel:'spot',      defaultPer:'episode',
+  // --- Programmes & awards --------------------------------------------------
+  { key:'coach_awards', label:'Monthly Coach Awards', group:'Programmes & Awards',
+    unitLabel:'award', countLabel:'Monthly Coach Award', properNoun:true, defaultPer:'month', defaultQty:1,
+    detail:'Sponsor associated with the Monthly Coach Awards, run with the Cyprus Coaches Association across six national categories, including branding on the award announcements and winner features.' },
+  { key:'youth_awards', label:'Annual Youth Awards', group:'Programmes & Awards',
+    unitLabel:'event', defaultPer:'event', defaultQty:1, uncountable:true,
+    uncountableText:'Sponsor of the Annual Youth Awards',
+    detail:'Sponsor of the Annual Youth Awards honouring the standout players, coaches and goals of the season — branding across event staging, signage, printed materials and the award presentation.' },
+  { key:'best_xi', label:'Best XI', group:'Programmes & Awards',
+    unitLabel:'edition', countLabel:'Best XI', properNoun:true, defaultPer:'month', defaultQty:1,
+    detail:'Sponsor branding on the Best XI team-of-the-period selections published across the Science of Sports channels.' },
+  // --- Broadcast (the "Youth Zone" TV show with Cablenet) -------------------
+  { key:'youth_zone_branding', label:'Youth Zone TV Show Branding', group:'Broadcast',
+    unitLabel:'programme', defaultPer:'season', defaultQty:1, uncountable:true,
+    uncountableText:'Sponsor branding throughout the "Youth Zone" television programme',
+    detail:'Sponsor branding carried through "Youth Zone", the Cablenet Sports programme dedicated to youth football — including the opening and closing sequences.' },
+  { key:'tv_spot',        label:'Television Advertising Spot', group:'Broadcast', unitLabel:'spot',      defaultPer:'episode', defaultQty:3,
     detail:'Television advertising spot broadcast within the programme.' },
-  { key:'power_popup',    label:'Power Pop-Up Placement',      group:'Broadcast', unitLabel:'placement', defaultPer:'episode',
+  { key:'power_popup',    label:'Power Pop-Up Placement',      group:'Broadcast', unitLabel:'placement', defaultPer:'episode', defaultQty:2,
     detail:'Power pop-up advertising placement displayed during the programme.' },
-  { key:'animated_popup', label:'Animated Pop-Up Placement',   group:'Broadcast', unitLabel:'placement', defaultPer:'episode',
+  { key:'animated_popup', label:'Animated Pop-Up Placement',   group:'Broadcast', unitLabel:'placement', defaultPer:'episode', defaultQty:2,
     detail:'Animated pop-up advertising placement displayed during the programme.' },
-  { key:'show_billboard', label:'Opening / Closing Billboard', group:'Broadcast', unitLabel:'billboard', defaultPer:'episode',
-    detail:'Sponsor billboard shown in the programme\'s opening and closing sequence.' },
-  { key:'platform_branding', label:'Platform Branding',        group:'Digital',   unitLabel:'placement', defaultPer:'season',
-    detail:'Sponsor branding displayed across the Science of Sports platform, seen by coaches, players, analysts and academies.' },
-  { key:'reports_branding',  label:'Performance Report Branding', group:'Digital', unitLabel:'placement', defaultPer:'report',
-    uncountable:true, uncountableText:'Sponsor logo displayed on every performance report',
-    detail:'Sponsor logo displayed on the performance reports delivered to players, coaches and academies.' },
-  { key:'social_post',       label:'Social Media Feature',     group:'Digital',   unitLabel:'post',      defaultPer:'month',
-    detail:'Sponsor feature published across the Science of Sports social media channels.' },
-  { key:'event_naming',      label:'Event Naming Rights',      group:'Events',    unitLabel:'right',     defaultPer:'event',
-    uncountable:true, uncountableText:'Event naming rights',
-    detail:'Sponsor name associated with the event title and applied across event branding.' },
-  { key:'event_branding',    label:'Event Branding & Signage', group:'Events',    unitLabel:'placement', defaultPer:'event',
-    detail:'Sponsor branding displayed on stage, signage and printed materials at the event.' },
-  { key:'event_presence',    label:'Event Presence / Activation', group:'Events', unitLabel:'activation', defaultPer:'event',
+  // --- Events & conference --------------------------------------------------
+  { key:'conference_materials', label:'Conference Materials & Panels', group:'Events',
+    unitLabel:'conference', defaultPer:'event', defaultQty:1, uncountable:true,
+    uncountableText:'Sponsor branding across Football Conference materials, with panel participation',
+    detail:'Sponsor branding across the Football Conference printed and digital materials, with the opportunity to take part in the expert panels.' },
+  { key:'event_presence', label:'Event Presence / Activation', group:'Events', unitLabel:'activation', countLabel:'On-site brand activation', defaultPer:'event', defaultQty:1,
     detail:'On-site sponsor presence or brand activation at the event.' },
-  { key:'award_presentation',label:'Award Presentation',       group:'Events',    unitLabel:'award presentation', defaultPer:'event',
-    detail:'Sponsor representative presents an award on stage during the ceremony.' },
+  // --- Digital, media & platform -------------------------------------------
+  { key:'social_post',  label:'Social Media Posts', group:'Digital & Media', unitLabel:'post', countLabel:'Social Media Post', defaultPer:'month', defaultQty:1,
+    detail:'Sponsor posts published year-round across the Science of Sports social media channels (Instagram, TikTok and Facebook).' },
+  { key:'press_release', label:'Press Releases & Media Coverage', group:'Digital & Media',
+    unitLabel:'press release', countLabel:'Press Release', defaultPer:'total', defaultQty:2,
+    detail:'Press releases issued and media coverage secured announcing the partnership and its activations.' },
+  { key:'kerkida_promotion', label:'Digital Promotion via Kerkida.net', group:'Digital & Media',
+    unitLabel:'campaign', defaultPer:'total', defaultQty:1, uncountable:true,
+    uncountableText:'Digital promotion through Kerkida.net, Cyprus\'s leading sports news platform',
+    detail:'Sponsor promotion carried on Kerkida.net — banners, sponsorships and press releases reaching its sports audience across Cyprus.' },
+  { key:'platform_branding', label:'Platform Branding',        group:'Digital & Media',   unitLabel:'placement', defaultPer:'season', defaultQty:1,
+    uncountable:true, uncountableText:'Sponsor branding displayed across the Science of Sports platform',
+    detail:'Sponsor branding displayed across the Science of Sports platform, seen daily by coaches, players, analysts and academies.' },
+  { key:'reports_branding',  label:'Performance Report Branding', group:'Digital & Media', unitLabel:'placement', defaultPer:'report', defaultQty:1,
+    uncountable:true, uncountableText:'Sponsor logo displayed on every performance report',
+    detail:'Sponsor logo displayed on the performance reports delivered weekly to players, coaches and academies.' },
+  // --- Partnership status ---------------------------------------------------
+  { key:'official_partner', label:'Official Partner Recognition', group:'Partnership',
+    unitLabel:'recognition', defaultPer:'season', defaultQty:1, uncountable:true,
+    uncountableText:'Recognition as an Official Partner of Science of Sports',
+    detail:'The Client is recognised as an Official Partner of Science of Sports and may state that status in its own communications for the duration of this Agreement.' },
 ];
 
-const SPONSORSHIP_RIGHT_GROUPS = ['Broadcast', 'Digital', 'Events'];
+const SPONSORSHIP_RIGHT_GROUPS = ['Programmes & Awards', 'Broadcast', 'Events', 'Digital & Media', 'Partnership'];
 
 const SPONSORSHIP_PER_OPTIONS: Array<Any> = [
   { value:'episode', label:'per episode' },
@@ -285,24 +311,54 @@ export function computeSponsorshipRights(rights: Any): Array<Any> {
 export function sponsorshipRightText(row: Any): string {
   if (!row) return '';
   const qty = Number(row.qty) || 0;
-  const perOptU = SPONSORSHIP_PER_OPTIONS.find((p) => p.value === row.per);
+  const perOpt = SPONSORSHIP_PER_OPTIONS.find(p => p.value === row.per);
+  // UNCOUNTABLE — a standing entitlement ("Recognition as an Official Partner"),
+  // not a countable run. Rendered as a statement with no "N (n)" prefix. The
+  // frequency is appended only where it genuinely adds meaning: a season-long or
+  // per-month status reads well, but "per event"/"per report"/"in total" just
+  // repeats what the sentence already says.
   if (row.uncountable) {
     const base = row.uncountableText || row.label;
-    const skipPer = !row.per || row.per === 'total' || row.per === 'report';
-    return `${base}${skipPer ? '' : ` ${perOptU?.label || ''}`}`.replace(/\s+/g, ' ').trim();
+    const meaningfulPer = row.per === 'season' || row.per === 'month';
+    return `${base}${meaningfulPer ? ` ${perOpt?.label || ''}` : ''}`.replace(/\s+/g, ' ').trim();
   }
-  const label = String(row.label || '').toLowerCase();
+  // COUNTABLE — "Three (3) television advertising spots per episode".
+  // `countLabel` lets a named property give the noun that should be counted
+  // ("Best XI" counts EDITIONS, not "best xis"); otherwise the label itself is
+  // the noun. The unit is appended only when the label doesn't already end in
+  // it, so "Television Advertising Spot" + "spot" stays "…spots", not
+  // "…spot spots".
+  // Named properties keep their capitalisation — "Best XI" must not become
+  // "best xi". `properNoun` marks those; everything else lowercases so it reads
+  // as prose mid-sentence ("three (3) television advertising spots").
+  const rawLabel = String(row.countLabel || row.label || '');
+  const label = row.properNoun ? rawLabel : rawLabel.toLowerCase();
   const unit = String(row.unitLabel || '').toLowerCase();
-  const endsWithUnit = !!unit && (label === unit || label.endsWith(` ${unit}`));
+  // Compare case-INSENSITIVELY: a proper-noun label keeps its capitals, so a
+  // case-sensitive test would miss "Monthly Coach Award" ending in "award" and
+  // append the unit again ("Monthly Coach Award award").
+  const lc = label.toLowerCase();
+  const endsWithUnit = unit && (lc === unit || lc.endsWith(` ${unit}`));
   let phrase: string;
-  if (endsWithUnit) {
-    phrase = qty === 1 ? label : `${label}s`;
+  if (endsWithUnit || !unit) {
+    phrase = qty === 1 ? label : pluralise(label);
   } else {
-    phrase = unit ? `${label} ${qty === 1 ? unit : `${unit}s`}` : label;
+    phrase = `${label} ${qty === 1 ? unit : pluralise(unit)}`;
   }
-  const perOpt = SPONSORSHIP_PER_OPTIONS.find((p) => p.value === row.per);
   const perStr = perOpt ? ` ${perOpt.label}` : '';
   return `${spellNumber(qty)} (${qty}) ${phrase}${perStr}`.replace(/\s+/g, ' ').trim();
+}
+
+function pluralise(phrase: string): string {
+  const parts = String(phrase).split(' ');
+  const last = parts[parts.length - 1];
+  if (!last) return phrase;
+  let plural;
+  if (/(s|x|z|ch|sh)$/i.test(last)) plural = last;            // already plural / sibilant
+  else if (/[^aeiou]y$/i.test(last)) plural = last.slice(0, -1) + 'ies';
+  else plural = last + 's';
+  parts[parts.length - 1] = plural;
+  return parts.join(' ');
 }
 
 export function feesConsiderationPhrase(contract: Any): string {

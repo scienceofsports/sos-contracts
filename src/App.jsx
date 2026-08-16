@@ -1228,93 +1228,84 @@ function CommercialBreakdown({ form, servicesTotal = 0 }) {
    ========================================================================= */
 function SponsorshipRightsEditor({ rows, onChange }) {
   const list = Array.isArray(rows) ? rows : [];
-  const byKey = Object.fromEntries(SPONSORSHIP_RIGHT_TYPES.map(r => [r.key, r]));
-  const update = (i, patch) => onChange(list.map((r, idx) => idx === i ? { ...r, ...patch } : r));
-  const remove = (i) => onChange(list.filter((_, idx) => idx !== i));
-  const add = () => {
-    const def = SPONSORSHIP_RIGHT_TYPES[0];
-    onChange([...list, { type: def.key, qty: 1, per: def.defaultPer, detail: '' }]);
+  // Selected rows keyed by catalogue key, so ticking is idempotent and the
+  // catalogue's own order drives the contract (not the order they were added).
+  const byType = Object.fromEntries(list.filter(r => r && r.type).map(r => [r.type, r]));
+  const emit = (next) => {
+    // Re-emit in CATALOGUE order so the contract always groups consistently.
+    onChange(SPONSORSHIP_RIGHT_TYPES.filter(d => next[d.key]).map(d => next[d.key]));
   };
+  const toggle = (def) => {
+    const next = { ...byType };
+    if (next[def.key]) delete next[def.key];
+    else next[def.key] = { type: def.key, qty: def.defaultQty ?? 1, per: def.defaultPer, detail: '' };
+    emit(next);
+  };
+  const update = (key, patch) => emit({ ...byType, [key]: { ...byType[key], ...patch } });
+
   return (
-    <div>
-      {list.length === 0 && (
-        <p className="text-sm text-slate-400 mb-3">No rights added yet.</p>
-      )}
-      <div className="space-y-3">
-        {list.map((row, i) => {
-          const def = byKey[row?.type];
-          // Live preview of the exact contract sentence for this row.
-          const [preview] = computeSponsorshipRights([row]).map(sponsorshipRightText);
-          return (
-            <div key={i} className="rounded-lg border border-[var(--border)] p-3">
-              {/* Stacks on mobile, spreads at md — matches the form's grid idiom. */}
-              <div className="grid grid-cols-1 md:grid-cols-12 gap-2 items-end">
-                <div className="md:col-span-6">
-                  <label className="block text-xs text-slate-500 mb-1">Right</label>
-                  <select
-                    value={row?.type || ''}
-                    onChange={e => {
-                      const nd = byKey[e.target.value];
-                      update(i, { type: e.target.value, per: nd ? nd.defaultPer : row.per });
-                    }}
-                    className={inputCls(false)}
-                  >
-                    {SPONSORSHIP_RIGHT_GROUPS.map(g => (
-                      <optgroup key={g} label={g}>
-                        {SPONSORSHIP_RIGHT_TYPES.filter(r => r.group === g).map(r => (
-                          <option key={r.key} value={r.key}>{r.label}</option>
-                        ))}
-                      </optgroup>
-                    ))}
-                  </select>
-                </div>
-                <div className="md:col-span-2">
-                  <label className="block text-xs text-slate-500 mb-1">Qty</label>
-                  <input
-                    type="number" min="1" value={row?.qty ?? ''}
-                    onChange={e => update(i, { qty: e.target.value })}
-                    className={inputCls(false)}
-                    // An uncountable right (naming rights, logo-on-every-report)
-                    // is a standing entitlement — quantity is not meaningful.
-                    disabled={!!def?.uncountable}
-                  />
-                </div>
-                <div className="md:col-span-3">
-                  <label className="block text-xs text-slate-500 mb-1">Frequency</label>
-                  <select value={row?.per || ''} onChange={e => update(i, { per: e.target.value })} className={inputCls(false)}>
-                    {SPONSORSHIP_PER_OPTIONS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
-                  </select>
-                </div>
-                <div className="md:col-span-1 flex md:block">
-                  <button
-                    type="button" onClick={() => remove(i)}
-                    className="w-full px-2 py-2 text-sm border border-red-200 text-red-600 rounded-lg hover:bg-red-50 transition"
-                    aria-label="Remove right"
-                  >×</button>
-                </div>
-              </div>
-              <div className="mt-2">
-                <label className="block text-xs text-slate-500 mb-1">Description (optional — overrides the standard wording)</label>
-                <input
-                  value={row?.detail || ''}
-                  onChange={e => update(i, { detail: e.target.value })}
-                  className={inputCls(false)}
-                  placeholder={def?.detail || ''}
-                />
-              </div>
-              {preview && (
-                <p className="text-xs mt-2 rounded px-2 py-1.5 border-l-2 break-words" style={{ background:'rgba(34,199,230,.10)', borderColor:'var(--cyan)', color:'var(--navy-deep)' }}>
-                  <span className="font-semibold">Contract wording:</span> {preview}
-                </p>
-              )}
+    <div className="space-y-5">
+      {SPONSORSHIP_RIGHT_GROUPS.map(group => {
+        const defs = SPONSORSHIP_RIGHT_TYPES.filter(r => r.group === group);
+        if (!defs.length) return null;
+        return (
+          <div key={group}>
+            <div className="flex items-center gap-2 mb-2">
+              <span aria-hidden style={{ background:'var(--cyan)', width:3, height:14, borderRadius:2 }} />
+              <span className="text-xs font-bold uppercase tracking-wide" style={{ color:'var(--navy-deep)' }}>{group}</span>
             </div>
-          );
-        })}
-      </div>
-      <button
-        type="button" onClick={add}
-        className="mt-3 px-3 py-1.5 text-sm border border-[var(--border)] rounded-lg hover:bg-slate-50 transition"
-      >+ Add right</button>
+            <div className="space-y-2">
+              {defs.map(def => {
+                const row = byType[def.key];
+                const on = !!row;
+                const [preview] = on ? computeSponsorshipRights([row]).map(sponsorshipRightText) : [];
+                return (
+                  <div key={def.key} className={`rounded-lg border p-3 transition ${on ? 'border-[var(--cyan)] bg-cyan-50/30' : 'border-[var(--border)]'}`}>
+                    <label className="flex items-start gap-2.5 cursor-pointer">
+                      <input type="checkbox" checked={on} onChange={() => toggle(def)} className="mt-1" />
+                      <span className="min-w-0">
+                        <span className="text-sm font-medium block" style={{ color:'var(--navy-deep)' }}>{def.label}</span>
+                        <span className="text-xs text-slate-500 block mt-0.5">{def.detail}</span>
+                      </span>
+                    </label>
+                    {on && (
+                      <div className="mt-3 pl-7">
+                        {/* Quantity/frequency only matter for countable rights —
+                            an Official Partner recognition is a standing status. */}
+                        {!def.uncountable && (
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-2">
+                            <div>
+                              <label className="block text-xs text-slate-500 mb-1">How many</label>
+                              <input type="number" min="1" value={row.qty ?? ''} onChange={e => update(def.key, { qty: e.target.value })} className={inputCls(false)} />
+                            </div>
+                            <div>
+                              <label className="block text-xs text-slate-500 mb-1">How often</label>
+                              <select value={row.per || ''} onChange={e => update(def.key, { per: e.target.value })} className={inputCls(false)}>
+                                {SPONSORSHIP_PER_OPTIONS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+                              </select>
+                            </div>
+                          </div>
+                        )}
+                        <input
+                          value={row.detail || ''}
+                          onChange={e => update(def.key, { detail: e.target.value })}
+                          className={inputCls(false)}
+                          placeholder="Add specifics for this deal (optional) — e.g. maximum duration: 30 seconds each"
+                        />
+                        {preview && (
+                          <p className="text-xs mt-2 rounded px-2 py-1.5 border-l-2 break-words" style={{ background:'rgba(34,199,230,.10)', borderColor:'var(--cyan)', color:'var(--navy-deep)' }}>
+                            <span className="font-semibold">Contract wording:</span> {preview}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
