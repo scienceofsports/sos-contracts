@@ -200,7 +200,170 @@ function clientVatDisplay(client: Any, tbc: string): string {
   if (vat) return vat;
   if (pick(client, 'noVatNumber', 'no_vat_number')) return '';
   const entityType = pick(client, 'entityType', 'entity_type') || 'company';
-  return entityType === 'company' ? tbc : '';
+  return VAT_REQUIRED_ENTITY_TYPES.includes(entityType) ? tbc : '';
+}
+
+/* ---------------------------------------------------------------------------
+   SPONSORSHIP — ports of the sponsorship helpers in src/lib/constants.js.
+   A sponsorship agreement grants RIGHTS rather than delivering services, so it
+   suppresses Scope of Services / Scope of Analysis / Commercial Terms / Service
+   Levels and adds Sponsorship Rights + Branding & Materials. Keep in sync.
+   --------------------------------------------------------------------------- */
+const SPONSORSHIP_RIGHT_TYPES: Array<Any> = [
+  { key:'tv_spot',        label:'Television Advertising Spot', group:'Broadcast', unitLabel:'spot',      defaultPer:'episode',
+    detail:'Television advertising spot broadcast within the programme.' },
+  { key:'power_popup',    label:'Power Pop-Up Placement',      group:'Broadcast', unitLabel:'placement', defaultPer:'episode',
+    detail:'Power pop-up advertising placement displayed during the programme.' },
+  { key:'animated_popup', label:'Animated Pop-Up Placement',   group:'Broadcast', unitLabel:'placement', defaultPer:'episode',
+    detail:'Animated pop-up advertising placement displayed during the programme.' },
+  { key:'show_billboard', label:'Opening / Closing Billboard', group:'Broadcast', unitLabel:'billboard', defaultPer:'episode',
+    detail:'Sponsor billboard shown in the programme\'s opening and closing sequence.' },
+  { key:'platform_branding', label:'Platform Branding',        group:'Digital',   unitLabel:'placement', defaultPer:'season',
+    detail:'Sponsor branding displayed across the Science of Sports platform, seen by coaches, players, analysts and academies.' },
+  { key:'reports_branding',  label:'Performance Report Branding', group:'Digital', unitLabel:'placement', defaultPer:'report',
+    uncountable:true, uncountableText:'Sponsor logo displayed on every performance report',
+    detail:'Sponsor logo displayed on the performance reports delivered to players, coaches and academies.' },
+  { key:'social_post',       label:'Social Media Feature',     group:'Digital',   unitLabel:'post',      defaultPer:'month',
+    detail:'Sponsor feature published across the Science of Sports social media channels.' },
+  { key:'event_naming',      label:'Event Naming Rights',      group:'Events',    unitLabel:'right',     defaultPer:'event',
+    uncountable:true, uncountableText:'Event naming rights',
+    detail:'Sponsor name associated with the event title and applied across event branding.' },
+  { key:'event_branding',    label:'Event Branding & Signage', group:'Events',    unitLabel:'placement', defaultPer:'event',
+    detail:'Sponsor branding displayed on stage, signage and printed materials at the event.' },
+  { key:'event_presence',    label:'Event Presence / Activation', group:'Events', unitLabel:'activation', defaultPer:'event',
+    detail:'On-site sponsor presence or brand activation at the event.' },
+  { key:'award_presentation',label:'Award Presentation',       group:'Events',    unitLabel:'award presentation', defaultPer:'event',
+    detail:'Sponsor representative presents an award on stage during the ceremony.' },
+];
+
+const SPONSORSHIP_RIGHT_GROUPS = ['Broadcast', 'Digital', 'Events'];
+
+const SPONSORSHIP_PER_OPTIONS: Array<Any> = [
+  { value:'episode', label:'per episode' },
+  { value:'event',   label:'per event' },
+  { value:'match',   label:'per match' },
+  { value:'report',  label:'per report' },
+  { value:'month',   label:'per month' },
+  { value:'season',  label:'for the season' },
+  { value:'total',   label:'in total' },
+];
+
+const NUMBER_WORDS = ['zero','one','two','three','four','five','six','seven','eight','nine','ten',
+  'eleven','twelve','thirteen','fourteen','fifteen','sixteen','seventeen','eighteen','nineteen','twenty'];
+
+function spellNumber(n: Any): string {
+  const i = Number(n);
+  if (!Number.isInteger(i) || i < 0 || i > 20) return String(n);
+  const w = NUMBER_WORDS[i];
+  return w.charAt(0).toUpperCase() + w.slice(1);
+}
+
+export function isSponsorship(contract: Any): boolean {
+  return (pick(contract, 'contractKind', 'contract_kind') || 'services') === 'sponsorship';
+}
+
+export function computeSponsorshipRights(rights: Any): Array<Any> {
+  if (!Array.isArray(rights)) return [];
+  const byKey: Any = {};
+  for (const r of SPONSORSHIP_RIGHT_TYPES) byKey[r.key] = r;
+  const out: Array<Any> = [];
+  for (const r of rights) {
+    const def = byKey[r?.type];
+    if (!def) continue;
+    const qty = Number(r.qty) || 0;
+    if (qty <= 0) continue;
+    out.push({
+      ...def,
+      qty,
+      per: r.per || def.defaultPer,
+      detail: (r.detail && String(r.detail).trim()) || def.detail,
+    });
+  }
+  return out;
+}
+
+export function sponsorshipRightText(row: Any): string {
+  if (!row) return '';
+  const qty = Number(row.qty) || 0;
+  const perOptU = SPONSORSHIP_PER_OPTIONS.find((p) => p.value === row.per);
+  if (row.uncountable) {
+    const base = row.uncountableText || row.label;
+    const skipPer = !row.per || row.per === 'total' || row.per === 'report';
+    return `${base}${skipPer ? '' : ` ${perOptU?.label || ''}`}`.replace(/\s+/g, ' ').trim();
+  }
+  const label = String(row.label || '').toLowerCase();
+  const unit = String(row.unitLabel || '').toLowerCase();
+  const endsWithUnit = !!unit && (label === unit || label.endsWith(` ${unit}`));
+  let phrase: string;
+  if (endsWithUnit) {
+    phrase = qty === 1 ? label : `${label}s`;
+  } else {
+    phrase = unit ? `${label} ${qty === 1 ? unit : `${unit}s`}` : label;
+  }
+  const perOpt = SPONSORSHIP_PER_OPTIONS.find((p) => p.value === row.per);
+  const perStr = perOpt ? ` ${perOpt.label}` : '';
+  return `${spellNumber(qty)} (${qty}) ${phrase}${perStr}`.replace(/\s+/g, ' ').trim();
+}
+
+export function feesConsiderationPhrase(contract: Any): string {
+  return isSponsorship(contract)
+    ? 'In consideration of the sponsorship rights granted under this Agreement'
+    : 'In consideration of the services provided under this Agreement';
+}
+
+/* Ports of confidentialityParas / ipParas / terminationEffectPara.
+   Three "standard tail" clauses are written for a SERVICES deal and are wrong
+   on a sponsorship — materially so for IP, whose services wording would license
+   SCIOS's match footage to a sponsor in perpetuity. Keep in sync with
+   src/lib/constants.js. */
+export function confidentialityParas(contract: Any): { lead: string; paras: string[] } {
+  if (isSponsorship(contract)) {
+    return {
+      lead: 'Confidentiality.',
+      paras: [
+        "Each Party shall keep confidential the commercial terms of this Agreement and any non-public information disclosed to it by the other Party in connection with it, and shall not disclose such information to any third party without the other Party's prior written consent, save as required by law.",
+        'Each Party acts as an independent data controller in respect of any personal data it processes in connection with this Agreement, and shall comply with the GDPR, the applicable Cyprus data protection legislation (Law 125(I)/2018) and Regulation (EU) 2016/679. No personal data is transferred between the Parties under this Agreement other than the business contact details of their respective representatives.',
+      ],
+    };
+  }
+  return {
+    lead: 'Confidentiality & GDPR.',
+    paras: [
+      'The Service Provider shall process personal data strictly in accordance with the GDPR, the applicable Cyprus data protection legislation (Law 125(I)/2018), and Regulation (EU) 2016/679, and solely on documented instructions from the Client and exclusively for the purposes of this Agreement.',
+      'In respect of personal data processed under this Agreement, the Client acts as data controller and the Service Provider as data processor. The Service Provider shall process such data only as needed to provide the services, keep it secure, not transfer it outside the EEA without safeguards, assist the Client with data-subject requests, and delete or return the data on termination. Where the data concerns minors, the Client is responsible for obtaining any necessary parental or guardian consent.',
+      "All match analysis, reports, video clips, data outputs, and technical insights produced under this Agreement shall be treated as strictly confidential and used solely for the Client's internal purposes.",
+    ],
+  };
+}
+
+export function ipParas(contract: Any): string[] {
+  if (isSponsorship(contract)) {
+    return [
+      "Each Party retains all right, title and interest in its own name, logos, trade marks and brand assets. Neither Party acquires any right in the other's intellectual property save for the limited licences expressly granted in this Agreement, which terminate automatically on expiry or termination.",
+      'The Service Provider retains all right, title and interest in the Property and in all footage, recordings, reports, analytics outputs, clips, platform, software and other materials produced or used in connection with it. Nothing in this Agreement grants the Client any right to use, reproduce or exploit such materials beyond the sponsorship rights expressly set out above.',
+    ];
+  }
+  return [
+    'The match footage, video recordings, reports, analytics outputs, clips and other deliverables produced for the Client under this Agreement (the "Deliverables") are provided for the Client\'s use. The Service Provider grants the Client a perpetual, irrevocable, royalty-free licence to use, reproduce, store and archive the Deliverables for the Client\'s own internal football and operational purposes. The Service Provider shall not disclose or share the Client\'s Deliverables with any third party without the Client\'s prior written consent, save as required by law.',
+    'The Service Provider retains all right, title and interest in its platform, software, systems, methodologies, know-how, models and templates, and in any pre-existing or independently developed materials (the "Service Provider IP"), which are licensed to the Client only as necessary to receive the services. The Service Provider may retain internal copies of the Deliverables and may use anonymised and aggregated data derived from the services for benchmarking, research and the improvement and provision of its products and services, provided that no such use identifies the Client, its players or its teams without the Client\'s consent.',
+  ];
+}
+
+export function terminationEffectPara(contract: Any): string {
+  return isSponsorship(contract)
+    ? "Upon termination or expiration of this Agreement for any reason, the Client's sponsorship rights shall cease and the Service Provider shall remove the Client's brand assets from the Property within a reasonable period. Fees in respect of sponsorship rights already delivered shall remain payable, and the Service Provider shall refund any fees paid in advance for rights not delivered."
+    : 'Upon termination or expiration of this Agreement for any reason, the Service Provider shall promptly deliver to the Client all Deliverables produced under this Agreement.';
+}
+
+// Does this contract cover matches? Drives whether Service Levels is printed.
+// A sponsorship covers none; nor does an agency subscription (no teams), so a
+// phantom "72-hour SLA after each match" must not appear on those documents.
+export function hasMatchServices(contract: Any): boolean {
+  if (isSponsorship(contract)) return false;
+  const items = computeServiceLineItems(pick(contract, 'services'));
+  if (items.some((i: Any) => i.unit === 'per_match')) return true;
+  const bands = pick(contract, 'slaBands', 'sla_bands');
+  return Array.isArray(bands) && bands.some((b: Any) => b && Array.isArray(b.teams) && b.teams.length && Number(b.hours));
 }
 
 // Port of agreementDate — THE date of the agreement, used for both the "made
@@ -255,9 +418,17 @@ function clientEntityDescriptor(entityType?: string): string {
   switch (entityType) {
     case 'club':       return 'an association duly registered under the laws of';
     case 'federation': return 'a governing body duly registered under the laws of';
+    // Agencies are incorporated but read accurately as agencies; sponsors are
+    // ordinary companies and take the default company wording.
+    case 'agency':     return 'an agency registered under the laws of';
     default:           return 'a company registered under the laws of';
   }
 }
+
+// Entity types that are incorporated businesses and therefore normally carry a
+// VAT number — a blank means "not filled in yet" (show TBC), not "has none".
+// Keep in sync with VAT_REQUIRED_ENTITY_TYPES in src/lib/constants.js.
+const VAT_REQUIRED_ENTITY_TYPES = ['company', 'agency', 'sponsor'];
 
 // Port of analysisScopeText — build the two "Scope of Analysis" sentences.
 // Keep in sync with src/lib/constants.js. Accepts snake_case or camelCase.
@@ -814,15 +985,25 @@ export async function buildContractPdf(input: {
   }
 
   // --- Clause numbering (identical logic to the client PDF). ---------------
+  // SPONSORSHIP vs SERVICES — must stay identical to ContractDocumentBody and
+  // contractPdf.js so all three documents agree clause-for-clause.
+  const sponsorship = isSponsorship(c);
+  const sponsorRights = sponsorship ? computeSponsorshipRights(pick(c, 'sponsorshipRights', 'sponsorship_rights')) : [];
   let n = 1;
   const purposeNum = n++;
-  const scopeNum = lineItems.length > 0 ? n++ : null;
-  const analysisScope = analysisScopeText(c, seasonLabelFromDates(startDate, endDate));
+  const rightsNum = sponsorship ? n++ : null;
+  const scopeNum = !sponsorship && lineItems.length > 0 ? n++ : null;
+  const analysisScope = sponsorship
+    ? { teams: '', coverage: '', opponent: '' }
+    : analysisScopeText(c, seasonLabelFromDates(startDate, endDate));
   const analysisNum = analysisScope.teams ? n++ : null;
   const feesNum = n++;
-  const commercial = commercialModelText(c, (a: Any) => fmtMoney(a, currency));
+  const commercial = sponsorship
+    ? { intro: '', breakdown: '', commission: '' }
+    : commercialModelText(c, (a: Any) => fmtMoney(a, currency));
   const commercialNum = commercial.intro ? n++ : null;
-  const serviceLevelsNum = n++;
+  const brandingNum = sponsorship ? n++ : null;
+  const serviceLevelsNum = hasMatchServices(c) ? n++ : null;
   const confidentialityNum = n++;
   const ipNum = n++;
   const durationNum = n++;
@@ -875,7 +1056,13 @@ export async function buildContractPdf(input: {
 
   // --- Purpose — STRUCTURED by service group when services exist. ----------
   pillHeader(purposeNum, 'Purpose');
-  if (lineItems.length > 0) {
+  if (sponsorship) {
+    // Sponsorship: name the Property, mirroring the executed KFC agreement.
+    const propName = pick(c, 'sponsorshipProperty', 'sponsorship_property') || '[the sponsored property to be confirmed]';
+    const propDetailRaw = pick(c, 'sponsorshipPropertyDetail', 'sponsorship_property_detail');
+    const propDetail = propDetailRaw ? `, ${propDetailRaw}` : '';
+    text(`The purpose of this Agreement is to establish the sponsorship collaboration between the Parties in relation to ${propName}${propDetail} (the "Property"), under which the Service Provider shall grant the Client the sponsorship rights set out in this Agreement.`, { size: 10, gap: 10 });
+  } else if (lineItems.length > 0) {
     text('The purpose of this Agreement is to define the terms of cooperation between the Parties, under which the Service Provider shall provide the Client with the following services:', { size: 10, gap: 6 });
     SERVICE_GROUPS.forEach((group) => {
       const groupItems = lineItems.filter((i) => i.group === group);
@@ -918,6 +1105,43 @@ export async function buildContractPdf(input: {
     text('Key analytical outputs are delivered after each match in accordance with the Service Levels set out below.', { size: 10, gap: 10 });
   } else {
     text(c.description || 'The purpose of this Agreement is to define the terms of cooperation between the Parties for the provision of performance analysis and related services by the Service Provider to the Client.', { size: 10, gap: 10 });
+  }
+
+  // --- Sponsorship Rights (sponsorship only) -------------------------------
+  // Grouped exactly like the Purpose service groups (cyan bar + navy uppercase
+  // heading) so both document kinds share one visual language.
+  if (rightsNum) {
+    pillHeader(rightsNum, 'Sponsorship Rights');
+    if (sponsorRights.length > 0) {
+      text('In consideration of the fee set out below, the Service Provider shall provide the Client with the following sponsorship rights in relation to the Property:', { size: 10, gap: 6 });
+      SPONSORSHIP_RIGHT_GROUPS.forEach((group) => {
+        const groupRows = sponsorRights.filter((r: Any) => r.group === group);
+        if (!groupRows.length) return;
+        ensure(30);
+        y += 10;
+        const ghBaseline = y;
+        page.drawRectangle({ x: M, y: py(ghBaseline + 2), width: 3, height: 10, color: CYAN });
+        drawSafeText(page, group.toUpperCase(), { x: M + 8, y: py(ghBaseline), size: 9, font: bold, color: NAVY });
+        y += 4;
+        groupRows.forEach((r: Any) => {
+          const itemX = M + 12;
+          const itemW = maxW - 12;
+          ensure(16);
+          y += 10;
+          // The rights phrase can wrap — lay it out with the wrapping helper so
+          // a long right doesn't overflow the page width.
+          text(sponsorshipRightText(r), { size: 9.5, f: bold, color: NAVY, gap: 3, x: itemX, width: itemW });
+          if (r.detail) text(r.detail, { size: 9.5, color: SOFT_GREY, gap: 2, x: itemX, width: itemW });
+        });
+        y += 6;
+      });
+      const activation = pick(c, 'sponsorshipActivation', 'sponsorship_activation');
+      if (activation) {
+        text(`The sponsorship activation shall apply to ${activation}.`, { size: 10, gap: 10 });
+      }
+    } else {
+      text(c.description || '[sponsorship rights to be confirmed]', { size: 10, gap: 10 });
+    }
   }
 
   // --- Scope of Services — premium ruled TABLE (SERVICE | AMOUNT). ----------
@@ -1116,7 +1340,7 @@ export async function buildContractPdf(input: {
     pillHeader(feesNum, 'Fees & Payment');
     const vs = vatSummary(c, (a: Any) => fmtMoney(a, currency), cl);
     const pt = paymentTimingWording(c);
-    text(`In consideration of the services provided under this Agreement, the Client shall pay the Service Provider a total of ${fmtMoney(vs.net, currency)}${vs.applies ? ' (exclusive of VAT)' : ''}, payable ${paymentType}${pt.timingPhrase}`, { size: 10, gap: vs.sentence ? 3 : 6 });
+    text(`${feesConsiderationPhrase(c)}, the Client shall pay the Service Provider a total of ${fmtMoney(vs.net, currency)}${vs.applies ? ' (exclusive of VAT)' : ''}, payable ${paymentType}${pt.timingPhrase}`, { size: 10, gap: vs.sentence ? 3 : 6 });
     if (vs.sentence) text(vs.sentence, { size: 10, gap: 6 });
     // Instalment schedule table (only when more than one payment).
     if (payments.length > 1) {
@@ -1183,8 +1407,15 @@ export async function buildContractPdf(input: {
     clause(commercialNum, 'Commercial Terms & Club Commission', ...paras);
   }
 
+  // --- Branding & Materials (sponsorship only) -----------------------------
+  if (brandingNum) {
+    clause(brandingNum, 'Branding & Materials',
+      'The Client shall provide all required advertising materials and brand assets in a suitable format within the agreed production timelines. The Service Provider shall ensure the placement and visibility of the agreed sponsorship elements in accordance with this Agreement.',
+      "The Client grants the Service Provider a non-exclusive, royalty-free licence to use the Client's name, logo and brand assets solely for the purpose of delivering the sponsorship rights set out in this Agreement. Where the Client fails to supply materials within the agreed timelines, the Service Provider shall not be liable for any resulting loss of exposure, and the fee shall remain payable in full.");
+  }
+
   // --- Service Levels ------------------------------------------------------
-  {
+  if (serviceLevelsNum) {
     const slLines = serviceLevelsLines(c);
     const excl = " These timeframes exclude weekends, public holidays and any delay caused by the Client, third parties or events beyond the Service Provider's reasonable control.";
     const remedy = "Where the Service Provider fails to meet the applicable service level for a given match, it shall remedy the delay within a reasonable cure period. The Client's sole and exclusive remedy for a service-level failure shall be a proportionate service credit against the fees for the affected deliverables; a service-level failure shall not, of itself, entitle the Client to terminate this Agreement, save in the case of repeated and material failures not remedied following written notice.";
@@ -1192,16 +1423,14 @@ export async function buildContractPdf(input: {
   }
 
   // --- Confidentiality & Data Protection (lilac callout) -------------------
-  calloutClause(confidentialityNum, 'Confidentiality & Data Protection',
-    'Confidentiality & GDPR.',
-    'The Service Provider shall process personal data strictly in accordance with the GDPR, the applicable Cyprus data protection legislation (Law 125(I)/2018), and Regulation (EU) 2016/679, and solely on documented instructions from the Client and exclusively for the purposes of this Agreement.',
-    'In respect of personal data processed under this Agreement, the Client acts as data controller and the Service Provider as data processor. The Service Provider shall process such data only as needed to provide the services, keep it secure, not transfer it outside the EEA without safeguards, assist the Client with data-subject requests, and delete or return the data on termination. Where the data concerns minors, the Client is responsible for obtaining any necessary parental or guardian consent.',
-    "All match analysis, reports, video clips, data outputs, and technical insights produced under this Agreement shall be treated as strictly confidential and used solely for the Client's internal purposes.");
+  {
+    const cp = confidentialityParas(c);
+    calloutClause(confidentialityNum, 'Confidentiality & Data Protection', cp.lead, ...cp.paras);
+  }
 
   // --- Intellectual Property Rights ----------------------------------------
-  clause(ipNum, 'Intellectual Property Rights',
-    'The match footage, video recordings, reports, analytics outputs, clips and other deliverables produced for the Client under this Agreement (the "Deliverables") are provided for the Client\'s use. The Service Provider grants the Client a perpetual, irrevocable, royalty-free licence to use, reproduce, store and archive the Deliverables for the Client\'s own internal football and operational purposes. The Service Provider shall not disclose or share the Client\'s Deliverables with any third party without the Client\'s prior written consent, save as required by law.',
-    'The Service Provider retains all right, title and interest in its platform, software, systems, methodologies, know-how, models and templates, and in any pre-existing or independently developed materials (the "Service Provider IP"), which are licensed to the Client only as necessary to receive the services. The Service Provider may retain internal copies of the Deliverables and may use anonymised and aggregated data derived from the services for benchmarking, research and the improvement and provision of its products and services, provided that no such use identifies the Client, its players or its teams without the Client\'s consent.');
+  // Sponsorship must NOT license the Deliverables to the Client — see ipParas.
+  clause(ipNum, 'Intellectual Property Rights', ...ipParas(c));
 
   // --- Duration ------------------------------------------------------------
   clause(durationNum, 'Duration',
@@ -1210,7 +1439,7 @@ export async function buildContractPdf(input: {
   // --- Termination ---------------------------------------------------------
   clause(terminationNum, 'Termination',
     "Either Party may terminate this Agreement with three (3) months' written notice, or immediately in the event of a material breach not remedied within thirty (30) days.",
-    'Upon termination or expiration of this Agreement for any reason, the Service Provider shall promptly deliver to the Client all Deliverables produced under this Agreement.');
+    terminationEffectPara(c));
 
   // --- Limitation of Liability ---------------------------------------------
   clause(liabilityNum, 'Limitation of Liability',

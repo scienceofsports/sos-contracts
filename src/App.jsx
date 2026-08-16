@@ -29,6 +29,20 @@ import {
   paymentTimingWording,
   agreementDate,
   clientVatDisplay,
+  isSponsorship,
+  hasMatchServices,
+  computeSponsorshipRights,
+  sponsorshipRightText,
+  feesConsiderationPhrase,
+  SPONSORSHIP_RIGHT_GROUPS,
+  SPONSORSHIP_RIGHT_TYPES,
+  SPONSORSHIP_PER_OPTIONS,
+  specialTermClausesFor,
+  serviceCatalogFor,
+  serviceClientTypeFor,
+  confidentialityParas,
+  ipParas,
+  terminationEffectPara,
 } from './lib/constants.js';
 import {
   nowISO,
@@ -2963,14 +2977,34 @@ function ContractDocumentBody({ contract, client, company, showAdminWarnings = f
 
         {(() => {
           let n = 1;
+          // SPONSORSHIP vs SERVICES — the document kind selects the clause set.
+          // A sponsorship grants rights rather than delivering services, so the
+          // services-specific clauses are suppressed (the same null-num pattern
+          // that already skips Scope/Analysis/Commercial when they don't apply)
+          // and Sponsorship Rights + Branding & Materials take their place.
+          // Legacy rows have no contract_kind and are always 'services', so this
+          // is a no-op for every existing contract.
+          const sponsorship = isSponsorship(contract);
+          const sponsorRights = sponsorship ? computeSponsorshipRights(contract.sponsorshipRights) : [];
           const purposeNum = n++;
-          const scopeNum = lineItems.length > 0 ? n++ : null;
-          const analysisScope = analysisScopeText(contract, seasonLabelFromDates(contract.startDate, contract.endDate));
+          const rightsNum = sponsorship ? n++ : null;
+          const scopeNum = !sponsorship && lineItems.length > 0 ? n++ : null;
+          const analysisScope = sponsorship
+            ? { teams:'', coverage:'', opponent:'' }
+            : analysisScopeText(contract, seasonLabelFromDates(contract.startDate, contract.endDate));
           const analysisNum = analysisScope.teams ? n++ : null;
           const feesNum = n++;
-          const commercial = commercialModelText(contract, (a) => fmtMoney(a, contract.currency));
+          const commercial = sponsorship
+            ? { intro:'', breakdown:'', commission:'' }
+            : commercialModelText(contract, (a) => fmtMoney(a, contract.currency));
           const commercialNum = commercial.intro ? n++ : null;
-          const serviceLevelsNum = n++;
+          // Branding & Materials — the sponsor's reciprocal obligation to supply
+          // brand assets in broadcast-ready format (KFC agreement, clause 4).
+          const brandingNum = sponsorship ? n++ : null;
+          // Service Levels only where the deal actually covers matches. A
+          // sponsorship covers none, and neither does an agency subscription —
+          // printing "72-hour SLA after each match" on those would be untrue.
+          const serviceLevelsNum = hasMatchServices(contract) ? n++ : null;
           const confidentialityNum = n++;
           const ipNum = n++;
           const durationNum = n++;
@@ -2984,7 +3018,16 @@ function ContractDocumentBody({ contract, client, company, showAdminWarnings = f
           return (
             <React.Fragment>
               <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{purposeNum}.</span> Purpose</div>
-              {lineItems.length > 0 ? (
+              {sponsorship ? (
+                <p className="text-sm text-slate-700 mb-8">
+                  The purpose of this Agreement is to establish the sponsorship collaboration between the Parties in relation to{' '}
+                  {contract.sponsorshipProperty
+                    ? <strong style={{ color:'var(--navy-deep)' }}>{contract.sponsorshipProperty}</strong>
+                    : <ClientFillHint>the sponsored property to be confirmed</ClientFillHint>}
+                  {contract.sponsorshipPropertyDetail ? `, ${contract.sponsorshipPropertyDetail}` : ''}
+                  {' '}(the &quot;Property&quot;), under which the Service Provider shall grant the Client the sponsorship rights set out in this Agreement.
+                </p>
+              ) : lineItems.length > 0 ? (
                 <div className="mb-8">
                   <p className="text-sm text-slate-700 mb-4">The purpose of this Agreement is to define the terms of cooperation between the Parties, under which the Service Provider shall provide the Client with the following services:</p>
                   {SERVICE_GROUPS.map(group => {
@@ -3025,6 +3068,44 @@ function ContractDocumentBody({ contract, client, company, showAdminWarnings = f
                 </div>
               ) : (
                 <p className="text-sm text-slate-700 mb-8 whitespace-pre-line">{contract.description || 'The purpose of this Agreement is to define the terms of cooperation between the Parties for the provision of performance analysis and related services by the Service Provider to the Client.'}</p>
+              )}
+
+              {/* Sponsorship Rights — the rights granted, grouped like the Purpose
+                  service groups so the two documents share one visual language. */}
+              {rightsNum && (
+                <React.Fragment>
+                  <div className="sos-pill mb-4" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{rightsNum}.</span> Sponsorship Rights</div>
+                  {sponsorRights.length > 0 ? (
+                    <div className="mb-8">
+                      <p className="text-sm text-slate-700 mb-4">In consideration of the fee set out below, the Service Provider shall provide the Client with the following sponsorship rights in relation to the Property:</p>
+                      {SPONSORSHIP_RIGHT_GROUPS.map(group => {
+                        const groupRows = sponsorRights.filter(r => r.group === group);
+                        if (!groupRows.length) return null;
+                        return (
+                          <div key={group} className="mb-5 last:mb-0">
+                            <div className="flex items-center gap-2 mb-2.5">
+                              <span aria-hidden style={{ background:'var(--cyan)', width:3, height:14, borderRadius:2, WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }} />
+                              <span className="text-xs font-bold uppercase tracking-wide" style={{ color:'var(--navy-deep)' }}>{group}</span>
+                            </div>
+                            <div className="space-y-2">
+                              {groupRows.map((r, idx) => (
+                                <div key={`${r.key}-${idx}`} className="text-sm text-slate-700">
+                                  <span className="font-medium" style={{ color:'var(--navy-deep)' }}>{sponsorshipRightText(r)}</span>
+                                  {r.detail && <span className="text-slate-500"> — {r.detail}</span>}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {contract.sponsorshipActivation && (
+                        <p className="text-sm text-slate-700 mt-4">The sponsorship activation shall apply to {contract.sponsorshipActivation}.</p>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-slate-700 mb-8 whitespace-pre-line">{contract.description || <ClientFillHint>sponsorship rights to be confirmed</ClientFillHint>}</p>
+                  )}
+                </React.Fragment>
               )}
 
               {scopeNum && (() => {
@@ -3138,7 +3219,7 @@ function ContractDocumentBody({ contract, client, company, showAdminWarnings = f
               {(() => { const vs = vatSummary(contract, (a) => fmtMoney(a, contract.currency), client); const pt = paymentTimingWording(contract); return (
               <React.Fragment>
               <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{feesNum}.</span> Fees & Payment</div>
-              <p className="text-sm text-slate-700 mb-2">In consideration of the services provided under this Agreement, the Client shall pay the Service Provider a total of <strong>{fmtMoney(vs.net, contract.currency)}</strong>{vs.applies ? ' (exclusive of VAT)' : ''}, payable <strong>{contract.paymentType === 'one_time' ? 'in a single payment' : contract.paymentType === 'milestone' ? 'in instalments' : contract.paymentType.replace('_',' ')}</strong>{pt.timingPhrase}</p>
+              <p className="text-sm text-slate-700 mb-2">{feesConsiderationPhrase(contract)}, the Client shall pay the Service Provider a total of <strong>{fmtMoney(vs.net, contract.currency)}</strong>{vs.applies ? ' (exclusive of VAT)' : ''}, payable <strong>{contract.paymentType === 'one_time' ? 'in a single payment' : contract.paymentType === 'milestone' ? 'in instalments' : contract.paymentType.replace('_',' ')}</strong>{pt.timingPhrase}</p>
               {vs.sentence && <p className="text-sm text-slate-700 mb-2">{vs.sentence}</p>}
               {Array.isArray(contract.payments) && contract.payments.length > 1 && (
                 <table className="w-full text-sm mb-4 border-collapse">
@@ -3182,29 +3263,60 @@ function ContractDocumentBody({ contract, client, company, showAdminWarnings = f
                 </React.Fragment>
               )}
 
-              <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{serviceLevelsNum}.</span> Service Levels</div>
-              {serviceLevelsLines(contract).map((ln, i) => (
-                <p key={i} className="text-sm text-slate-700 mb-2">{ln} These timeframes exclude weekends, public holidays and any delay caused by the Client, third parties or events beyond the Service Provider's reasonable control.</p>
-              ))}
-              <p className="text-sm text-slate-700 mb-8">Where the Service Provider fails to meet the applicable service level for a given match, it shall remedy the delay within a reasonable cure period. The Client's sole and exclusive remedy for a service-level failure shall be a proportionate service credit against the fees for the affected deliverables; a service-level failure shall not, of itself, entitle the Client to terminate this Agreement, save in the case of repeated and material failures not remedied following written notice.</p>
+              {/* Branding & Materials — sponsor's reciprocal obligation. Placed
+                  after Fees, mirroring the executed KFC agreement's clause order. */}
+              {brandingNum && (
+                <React.Fragment>
+                  <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{brandingNum}.</span> Branding &amp; Materials</div>
+                  <p className="text-sm text-slate-700 mb-2">The Client shall provide all required advertising materials and brand assets in a suitable format within the agreed production timelines. The Service Provider shall ensure the placement and visibility of the agreed sponsorship elements in accordance with this Agreement.</p>
+                  <p className="text-sm text-slate-700 mb-8">The Client grants the Service Provider a non-exclusive, royalty-free licence to use the Client's name, logo and brand assets solely for the purpose of delivering the sponsorship rights set out in this Agreement. Where the Client fails to supply materials within the agreed timelines, the Service Provider shall not be liable for any resulting loss of exposure, and the fee shall remain payable in full.</p>
+                </React.Fragment>
+              )}
 
-              <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{confidentialityNum}.</span> Confidentiality & Data Protection</div>
+              {serviceLevelsNum && (
+                <React.Fragment>
+                  <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{serviceLevelsNum}.</span> Service Levels</div>
+                  {serviceLevelsLines(contract).map((ln, i) => (
+                    <p key={i} className="text-sm text-slate-700 mb-2">{ln} These timeframes exclude weekends, public holidays and any delay caused by the Client, third parties or events beyond the Service Provider's reasonable control.</p>
+                  ))}
+                  <p className="text-sm text-slate-700 mb-8">Where the Service Provider fails to meet the applicable service level for a given match, it shall remedy the delay within a reasonable cure period. The Client's sole and exclusive remedy for a service-level failure shall be a proportionate service credit against the fees for the affected deliverables; a service-level failure shall not, of itself, entitle the Client to terminate this Agreement, save in the case of repeated and material failures not remedied following written notice.</p>
+                </React.Fragment>
+              )}
+
+              {/* Confidentiality & Data Protection. The services variant casts the
+                  Client as data CONTROLLER and SCIOS as PROCESSOR — correct when
+                  SCIOS analyses the Client's players, but false on a sponsorship,
+                  where SCIOS processes no personal data for the sponsor at all. */}
+              <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{confidentialityNum}.</span> Confidentiality &amp; Data Protection</div>
               <div className="mb-8 pl-4 pr-5 py-4 rounded-r-lg" style={{ background:'#EEF0FB', borderLeft:'3px solid var(--navy-deep)', WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}>
-                <p className="text-sm text-slate-700 mb-2"><span className="font-semibold" style={{ color:'var(--navy-deep)' }}>Confidentiality & GDPR.</span> The Service Provider shall process personal data strictly in accordance with the GDPR, the applicable Cyprus data protection legislation (Law 125(I)/2018), and Regulation (EU) 2016/679, and solely on documented instructions from the Client and exclusively for the purposes of this Agreement.</p>
-                <p className="text-sm text-slate-700 mb-2">In respect of personal data processed under this Agreement, the Client acts as data controller and the Service Provider as data processor. The Service Provider shall process such data only as needed to provide the services, keep it secure, not transfer it outside the EEA without safeguards, assist the Client with data-subject requests, and delete or return the data on termination. Where the data concerns minors, the Client is responsible for obtaining any necessary parental or guardian consent.</p>
-                <p className="text-sm text-slate-700">All match analysis, reports, video clips, data outputs, and technical insights produced under this Agreement shall be treated as strictly confidential and used solely for the Client's internal purposes.</p>
+                {(() => {
+                  const cp = confidentialityParas(contract);
+                  return cp.paras.map((p, i) => (
+                    <p key={i} className={i === cp.paras.length - 1 ? 'text-sm text-slate-700' : 'text-sm text-slate-700 mb-2'}>
+                      {i === 0 && <span className="font-semibold" style={{ color:'var(--navy-deep)' }}>{cp.lead} </span>}
+                      {p}
+                    </p>
+                  ));
+                })()}
               </div>
 
+              {/* IP. The services variant licenses the DELIVERABLES to the Client —
+                  on a sponsorship there are no deliverables, and that wording would
+                  hand a sponsor a perpetual licence over SCIOS's match footage. The
+                  sponsorship variant instead keeps each Party's marks their own. */}
               <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{ipNum}.</span> Intellectual Property Rights</div>
-              <p className="text-sm text-slate-700 mb-3">The match footage, video recordings, reports, analytics outputs, clips and other deliverables produced for the Client under this Agreement (the "Deliverables") are provided for the Client's use. The Service Provider grants the Client a perpetual, irrevocable, royalty-free licence to use, reproduce, store and archive the Deliverables for the Client's own internal football and operational purposes. The Service Provider shall not disclose or share the Client's Deliverables with any third party without the Client's prior written consent, save as required by law.</p>
-              <p className="text-sm text-slate-700 mb-8">The Service Provider retains all right, title and interest in its platform, software, systems, methodologies, know-how, models and templates, and in any pre-existing or independently developed materials (the "Service Provider IP"), which are licensed to the Client only as necessary to receive the services. The Service Provider may retain internal copies of the Deliverables and may use anonymised and aggregated data derived from the services for benchmarking, research and the improvement and provision of its products and services, provided that no such use identifies the Client, its players or its teams without the Client's consent.</p>
+              {ipParas(contract).map((p, i, arr) => (
+                <p key={i} className={i === arr.length - 1 ? 'text-sm text-slate-700 mb-8' : 'text-sm text-slate-700 mb-3'}>{p}</p>
+              ))}
 
               <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{durationNum}.</span> Duration</div>
               <p className="text-sm text-slate-700 mb-8">This Agreement shall commence on <strong>{fmtDate(contract.startDate)}</strong> and shall remain in force until <strong>{fmtDate(contract.endDate)}</strong>{termYears ? ` (approximately ${termYears} year${termYears>1?'s':''})` : ''}, unless terminated earlier in accordance with Section {terminationNum}.</p>
 
               <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{terminationNum}.</span> Termination</div>
               <p className="text-sm text-slate-700 mb-2">Either Party may terminate this Agreement with three (3) months' written notice, or immediately in the event of a material breach not remedied within thirty (30) days.</p>
-              <p className="text-sm text-slate-700 mb-8">Upon termination or expiration of this Agreement for any reason, the Service Provider shall promptly deliver to the Client all Deliverables produced under this Agreement.</p>
+              {/* On a sponsorship there are no Deliverables to hand back; what
+                  matters is that exposure stops and fees already earned stand. */}
+              <p className="text-sm text-slate-700 mb-8">{terminationEffectPara(contract)}</p>
 
               <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{liabilityNum}.</span> Limitation of Liability</div>
               <p className="text-sm text-slate-700 mb-8">The Service Provider shall not be responsible for sporting results, team selection decisions, or competition outcomes. Total liability under this Agreement shall not exceed the fees paid during the preceding twelve (12) months. This limitation shall not apply to breaches of confidentiality, data protection obligations, or unauthorized use of the Client's data or intellectual property.</p>

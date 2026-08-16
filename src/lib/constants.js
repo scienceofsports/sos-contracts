@@ -163,6 +163,74 @@ export function platformSeatsSummary(svc) {
   return parts.join(', ');
 }
 
+/* CLAUSE BODIES THAT DIFFER BY CONTRACT KIND.
+   -------------------------------------------------------------------------
+   Three of the "standard legal tail" clauses are written for a SERVICES deal
+   and are wrong — some materially — on a sponsorship:
+
+   * Confidentiality: the services text makes the Client a data CONTROLLER and
+     SCIOS its PROCESSOR. On a sponsorship SCIOS processes no personal data for
+     the sponsor at all, so that allocation is simply false.
+   * IP: the services text licenses the "Deliverables" (match footage, reports,
+     clips) to the Client in perpetuity. A sponsor receives EXPOSURE, not
+     deliverables — printing it would hand a sponsor a perpetual licence over
+     SCIOS's match footage. This is a real commercial exposure, not a wording nit.
+   * Termination: promises delivery of Deliverables on termination; a sponsor
+     has none, and what matters instead is that exposure stops and earned fees
+     stand.
+
+   Centralised here so all three generators render identical prose.
+   NOTE: consumed by all three generators — do not inline copies. */
+export function confidentialityParas(contract) {
+  if (isSponsorship(contract)) {
+    return {
+      lead: 'Confidentiality.',
+      paras: [
+        "Each Party shall keep confidential the commercial terms of this Agreement and any non-public information disclosed to it by the other Party in connection with it, and shall not disclose such information to any third party without the other Party's prior written consent, save as required by law.",
+        'Each Party acts as an independent data controller in respect of any personal data it processes in connection with this Agreement, and shall comply with the GDPR, the applicable Cyprus data protection legislation (Law 125(I)/2018) and Regulation (EU) 2016/679. No personal data is transferred between the Parties under this Agreement other than the business contact details of their respective representatives.',
+      ],
+    };
+  }
+  return {
+    lead: 'Confidentiality & GDPR.',
+    paras: [
+      'The Service Provider shall process personal data strictly in accordance with the GDPR, the applicable Cyprus data protection legislation (Law 125(I)/2018), and Regulation (EU) 2016/679, and solely on documented instructions from the Client and exclusively for the purposes of this Agreement.',
+      'In respect of personal data processed under this Agreement, the Client acts as data controller and the Service Provider as data processor. The Service Provider shall process such data only as needed to provide the services, keep it secure, not transfer it outside the EEA without safeguards, assist the Client with data-subject requests, and delete or return the data on termination. Where the data concerns minors, the Client is responsible for obtaining any necessary parental or guardian consent.',
+      "All match analysis, reports, video clips, data outputs, and technical insights produced under this Agreement shall be treated as strictly confidential and used solely for the Client's internal purposes.",
+    ],
+  };
+}
+
+export function ipParas(contract) {
+  if (isSponsorship(contract)) {
+    return [
+      "Each Party retains all right, title and interest in its own name, logos, trade marks and brand assets. Neither Party acquires any right in the other's intellectual property save for the limited licences expressly granted in this Agreement, which terminate automatically on expiry or termination.",
+      'The Service Provider retains all right, title and interest in the Property and in all footage, recordings, reports, analytics outputs, clips, platform, software and other materials produced or used in connection with it. Nothing in this Agreement grants the Client any right to use, reproduce or exploit such materials beyond the sponsorship rights expressly set out above.',
+    ];
+  }
+  return [
+    'The match footage, video recordings, reports, analytics outputs, clips and other deliverables produced for the Client under this Agreement (the "Deliverables") are provided for the Client\'s use. The Service Provider grants the Client a perpetual, irrevocable, royalty-free licence to use, reproduce, store and archive the Deliverables for the Client\'s own internal football and operational purposes. The Service Provider shall not disclose or share the Client\'s Deliverables with any third party without the Client\'s prior written consent, save as required by law.',
+    'The Service Provider retains all right, title and interest in its platform, software, systems, methodologies, know-how, models and templates, and in any pre-existing or independently developed materials (the "Service Provider IP"), which are licensed to the Client only as necessary to receive the services. The Service Provider may retain internal copies of the Deliverables and may use anonymised and aggregated data derived from the services for benchmarking, research and the improvement and provision of its products and services, provided that no such use identifies the Client, its players or its teams without the Client\'s consent.',
+  ];
+}
+
+export function terminationEffectPara(contract) {
+  return isSponsorship(contract)
+    ? "Upon termination or expiration of this Agreement for any reason, the Client's sponsorship rights shall cease and the Service Provider shall remove the Client's brand assets from the Property within a reasonable period. Fees in respect of sponsorship rights already delivered shall remain payable, and the Service Provider shall refund any fees paid in advance for rights not delivered."
+    : 'Upon termination or expiration of this Agreement for any reason, the Service Provider shall promptly deliver to the Client all Deliverables produced under this Agreement.';
+}
+
+// Opening words of the Fees clause. A sponsorship buys RIGHTS, not services, so
+// "In consideration of the services provided under this Agreement" is factually
+// wrong on a sponsorship document (and is the exact phrase the executed KFC
+// agreement avoids — it says "In consideration of the above rights").
+// NOTE: ported into both PDF generators — keep in sync.
+export function feesConsiderationPhrase(contract) {
+  return isSponsorship(contract)
+    ? 'In consideration of the sponsorship rights granted under this Agreement'
+    : 'In consideration of the services provided under this Agreement';
+}
+
 // Is this contract the sponsorship document rather than the services document?
 // Robust to snake_case (frozen snapshots) and to a missing field (legacy rows
 // pre-0026 are always 'services'). NOTE: ported into both PDF generators.
