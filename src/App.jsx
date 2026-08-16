@@ -1079,8 +1079,18 @@ const CONTRACT_PACKAGES = [
     teamSla: { U14:72, U15:72, U16:72, U17:24, U19:24, "Men's":24 } },
   { key:'essential', label:'Essential', icon:'🥉', price:10000,
     teamSla: Object.fromEntries(ALL_TEAMS.map(t => [t, 72])) },
-  { key:'div2',      label:'2nd Division', icon:'⚽', price:DIV2_LIST_PRICE - DIV2_DISCOUNT,
+  { key:'div2',      label:'2nd Division 2026/27', icon:'⚽', price:DIV2_LIST_PRICE - DIV2_DISCOUNT,
     teamSla: { "Men's":72 },
+    // The whole division signs the same season and the same two instalments, so
+    // the package fills them too. SEASON-SPECIFIC: the label carries the season
+    // so it is obvious these dates need updating for 2027/28 (see DIV2_SCHEDULE).
+    dates: { startDate:'2026-09-01', endDate:'2027-08-31' },
+    // Gross (incl. VAT) — the schedule is always on the GROSS basis, and the two
+    // rows must sum to the gross total or the form refuses to save.
+    schedule: [
+      { date:'2026-09-15', amount:'1368.50' },
+      { date:'2026-11-15', amount:'1368.50' },
+    ],
     // Directors + coaches only — 0 player seats is what makes platformSeatsSummary
     // print "3 Directors, 5 Coaches" with no player line.
     seats: { directorSeats:2, coachSeats:5, playerSeats:0 },
@@ -1561,10 +1571,23 @@ function ContractForm({ navigate, editContractId }) {
         return [...existing, ...fresh.map(t => ({ ...t }))];
       });
     }
+    // A package may pin the contract term and the instalment schedule (the 2nd
+    // Division programme is one season, one schedule, for every club).
+    // endDateTouched MUST be set or `set('startDate')` re-rolls the end date from
+    // the start via seasonEndYmd, throwing away the package's end date.
+    // The milestone effect keeps existing rows' dates and only re-splits amounts
+    // proportionally, so the pinned rows survive it (they already sum to the
+    // gross total); datesTouched is set so later start-date edits leave them be.
+    if (pkg.dates) endDateTouched.current = true;
+    if (pkg.schedule) {
+      datesTouched.current = true;
+      setInstallments(pkg.schedule.map(r => ({ ...r })));
+    }
     setForm(f => ({ ...f, analysisTeams: teams, teamSla: { ...pkg.teamSla }, packageKey: pkg.key, packageEdited: false,
-      // Optional package extra: opponent-access toggles. Omitted by the academy
-      // packages, which leave the form's current values alone.
+      // Optional package extras: opponent-access toggles and a pinned term.
+      // Omitted by the academy packages, which leave the form's values alone.
       ...(pkg.opponent || {}),
+      ...(pkg.dates || {}),
       description: generateDescriptionFromServices(nextServices, { slaBands: buildSlaBands(teams, pkg.teamSla), slaHours: f.slaHours }) }));
   };
   // Build the slaBands storage [{teams,hours}] from the per-team map, grouping
