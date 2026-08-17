@@ -2378,6 +2378,7 @@ function ContractDetail({ contractId, navigate }) {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showMarkPaidPayment, setShowMarkPaidPayment] = useState(null);
   const [showCancelModal, setShowCancelModal] = useState(false);
+  const [showActivateModal, setShowActivateModal] = useState(false);
   const [certificate, setCertificate] = useState(null);
   // Inline invoice-ref editing: { id, value } while a row is being edited.
   const [editingRef, setEditingRef] = useState(null);
@@ -2516,6 +2517,26 @@ function ContractDetail({ contractId, navigate }) {
     }
   };
 
+  // Mark a draft active without a signing ceremony or an uploaded document, for
+  // deals agreed outside the platform (e.g. by email). No signature evidence
+  // exists for these, so the audit entry records that explicitly — the contract
+  // still says how it became active, even though nothing was attached.
+  const activateExternally = async () => {
+    try {
+      await contractService.updateStatus(contract.id, 'active');
+      await contractService.addAuditEntry(contract.id, {
+        type: 'status',
+        message: 'Marked active manually — agreed outside the platform; no signature evidence or signed document on file.',
+        by: auth.user.id,
+      });
+      toast.push('Contract marked active.', 'success');
+      setShowActivateModal(false);
+      load();
+    } catch (err) {
+      toast.push(err.message || 'Could not mark this contract active.', 'error');
+    }
+  };
+
   const deleteContract = async () => {
     try {
       await contractService.delete(contract.id);
@@ -2579,6 +2600,7 @@ function ContractDetail({ contractId, navigate }) {
         <button onClick={()=>navigate('document:'+contract.id)} className="px-4 py-2 border border-[var(--border)] text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition">View Contract Document</button>
         {auth.isAdmin && contract.status === 'draft' && <button onClick={()=>navigate('contracts:edit:'+contract.id)} className="px-4 py-2 border border-[var(--border)] text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition">Edit</button>}
         {auth.isAdmin && contract.status === 'draft' && <button onClick={()=>setShowSendModal(true)} className="px-4 py-2 sos-btn-cyan rounded-lg text-sm font-medium transition">Send for Signature</button>}
+        {auth.isAdmin && contract.status === 'draft' && <button onClick={()=>setShowActivateModal(true)} className="px-4 py-2 border border-[var(--border)] text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition">Mark Active (agreed externally)</button>}
         {auth.isAdmin && (contract.status === 'sent' || contract.status === 'expired' || contract.status === 'declined') && <button onClick={resendContract} className="px-4 py-2 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">Resend / New link</button>}
         {auth.isAdmin && (contract.status === 'sent' || contract.status === 'expired' || contract.status === 'declined') && <button onClick={reviseContract} className="px-4 py-2 border border-[var(--border)] text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 transition">Revise (recall to draft)</button>}
         {auth.isAdmin && (contract.status === 'signed' || contract.status === 'active') && <button onClick={()=>setShowPaymentModal(true)} className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition">+ Add Payment Milestone</button>}
@@ -2887,6 +2909,9 @@ function ContractDetail({ contractId, navigate }) {
       <ConfirmModal open={showDeleteModal} onClose={()=>setShowDeleteModal(false)} onConfirm={deleteContract} title="Delete Contract"
         message={`This will permanently delete "${contract.title}". It has not been signed, but this cannot be undone.`}
         confirmLabel="Delete" danger />
+      <ConfirmModal open={showActivateModal} onClose={()=>setShowActivateModal(false)} onConfirm={activateExternally} title="Mark Active"
+        message={`This marks "${contract.title}" as active without a signature or an uploaded document — for a deal agreed outside the platform. It will start counting toward revenue and receivables, and its legal terms become locked against editing. Check the value and contract kind are correct first. Continue?`}
+        confirmLabel="Mark active" />
       <ConfirmModal open={showCancelModal} onClose={()=>setShowCancelModal(false)} onConfirm={cancelContract} title="Cancel Contract"
         message={`This marks "${contract.title}" as cancelled and removes it from active views. The signed record, signature evidence, and Certificate of Completion are RETAINED (a signed agreement cannot be deleted). Continue?`}
         confirmLabel="Cancel contract" danger />
