@@ -1191,6 +1191,25 @@ export function cameraLabel(contract) {
 // Details panel — just WHAT is included, no marketing prose. Pass the whole
 // contract (or an object with .services, .slaBands, .slaHours). Returns an array
 // of one-line strings.
+// Admin-panel bullets for a SPONSORSHIP — the rights granted, not services.
+// Mirrors summarizeAgreement's shape so the "What's included" list can render
+// either kind. Uncountable rights are standing entitlements ("Official Partner
+// recognition"), so they print without a "N ×" prefix.
+export function summarizeSponsorship(contract) {
+  const byKey = Object.fromEntries(SPONSORSHIP_RIGHT_TYPES.map(r => [r.key, r]));
+  const rights = contract?.sponsorshipRights ?? contract?.sponsorship_rights ?? [];
+  if (!Array.isArray(rights)) return [];
+  return rights.map(r => {
+    const def = byKey[r?.type];
+    if (!def) return null;
+    if (def.uncountable) return def.uncountableText || def.label;
+    const qty = Number(r.qty) || 0;
+    if (qty <= 0) return null;
+    const per = r.per && r.per !== 'total' ? ` per ${r.per}` : '';
+    return `${def.label} — ${qty}${per}`;
+  }).filter(Boolean);
+}
+
 export function summarizeAgreement(contract, slaHoursLegacy) {
   // Back-compat: earlier callers passed (services, slaHours). Detect that shape.
   const isContract = contract && (contract.services || contract.slaBands);

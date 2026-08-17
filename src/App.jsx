@@ -12,6 +12,7 @@ import {
   seatsForService,
   generateDescriptionFromServices,
   summarizeAgreement,
+  summarizeSponsorship,
   slaLabel,
   cameraLabel,
   analysisScopeText,
@@ -2698,7 +2699,9 @@ function ContractDetail({ contractId, navigate }) {
           <div className="font-heading text-base mb-3">Contract Details</div>
           <dl className="text-sm space-y-2">
             <div className="flex justify-between"><dt className="text-slate-500">Client</dt><dd className="font-medium">{client?.companyName}</dd></div>
-            <div className="flex justify-between"><dt className="text-slate-500">Type</dt><dd className="capitalize">{contract.type.replace('_',' ')}</dd></div>
+            {/* `type` is the services descriptor (e.g. "Platform Subscription")
+                and is meaningless on a sponsorship — show the document kind. */}
+            <div className="flex justify-between"><dt className="text-slate-500">Type</dt><dd className="capitalize">{isSponsorship(contract) ? 'Sponsorship Agreement' : contract.type.replace('_',' ')}</dd></div>
             <div className="flex justify-between"><dt className="text-slate-500">Value</dt><dd className="font-data text-right">{fmtMoney(contract.value, contract.currency)}{contractTermYears(contract) >= 1.5 && <div className="text-xs text-slate-400 font-normal">≈ {fmtMoney(annualisedValue(contract), contract.currency)}/yr over {Math.round(contractTermYears(contract))} yrs{contract.annualValueOverride != null && ' · pinned'}</div>}</dd></div>
             {/* Funding model + how the value was derived. Without this the panel
                 shows a bare Value with no indication that it is a player-fee
@@ -2783,7 +2786,12 @@ function ContractDetail({ contractId, navigate }) {
             <div className="flex justify-between"><dt className="text-slate-500">Governing Law</dt><dd>{contract.governingLaw}</dd></div>
           </dl>
           {(() => {
-            const bullets = contract.services ? summarizeAgreement(contract) : [];
+            // A sponsorship grants rights, not services. Summarising its (often
+            // leftover) services data here listed platform access and match
+            // reports on a document that delivers none of them.
+            const bullets = isSponsorship(contract)
+              ? summarizeSponsorship(contract)
+              : (contract.services ? summarizeAgreement(contract) : []);
             if (!bullets.length) return null;
             return (
               <div className="mt-4 pt-4 border-t border-[var(--border)]">
