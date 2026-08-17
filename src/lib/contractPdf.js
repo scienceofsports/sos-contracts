@@ -538,7 +538,8 @@ export function generateContractPdf({ contract, client, company }) {
       });
       y += 6;
     });
-    text('Key analytical outputs are delivered after each match in accordance with the Service Levels set out below.', { size: 10, gap: 10 });
+    // Only when the deal covers matches — see the note in contractPdf.ts.
+    if (hasMatchServices(contract)) text('Key analytical outputs are delivered after each match in accordance with the Service Levels set out below.', { size: 10, gap: 10 });
   } else {
     text(contract.description || 'The purpose of this Agreement is to define the terms of cooperation between the Parties for the provision of performance analysis and related services by the Service Provider to the Client.', { size: 10, gap: 10 });
   }
@@ -813,7 +814,7 @@ export function generateContractPdf({ contract, client, company }) {
       y += 8;
     }
     if (pt.advanceInvoiceSentence) text(pt.advanceInvoiceSentence, { size: 10, gap: 6 });
-    text(`All payments shall be made by bank transfer following the issuance of a valid invoice by the Service Provider${pt.advanceInvoiceSentence ? ' for the applicable instalment' : ''}, in accordance with applicable VAT regulations. A late payment penalty of ${contract.latePaymentPenalty}% per month applies to overdue amounts.`, { size: 10, gap: 10 });
+    text(`All payments shall be made by bank transfer following the issuance of a valid invoice by the Service Provider${pt.advanceInvoiceSentence ? ' for the applicable instalment' : ''}, in accordance with applicable VAT regulations.${contract.latePaymentPenalty == null || contract.latePaymentPenalty === '' ? '' : ` A late payment penalty of ${contract.latePaymentPenalty}% per month applies to overdue amounts.`}`, { size: 10, gap: 10 });
   }
 
   // --- Tinted bank-details box. --------------------------------------------

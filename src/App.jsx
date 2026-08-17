@@ -129,7 +129,7 @@ function LoginScreen() {
         </div>
         <form onSubmit={submit} className="bg-white rounded-xl shadow-2xl overflow-hidden">
           <div className="sos-rainbow" />
-          <div className="p-8">
+          <div className="p-5 sm:p-8">
             <Field label="Email" required>
               <input type="email" value={email} onChange={e=>setEmail(e.target.value)} className={inputCls(false)} placeholder="admin@scienceofsports.com" autoFocus />
             </Field>
@@ -1300,7 +1300,8 @@ function SponsorshipRightsEditor({ rows, onChange }) {
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-2">
                             <div>
                               <label className="block text-xs text-slate-500 mb-1">How many</label>
-                              <input type="number" min="1" value={row.qty ?? ''} onChange={e => update(def.key, { qty: e.target.value })} className={inputCls(false)} />
+                              {/* inputMode numeric => phone shows the number pad. */}
+                              <input type="number" min="1" step="1" inputMode="numeric" value={row.qty ?? ''} onChange={e => update(def.key, { qty: e.target.value })} className={inputCls(false)} />
                             </div>
                             <div>
                               <label className="block text-xs text-slate-500 mb-1">How often</label>
@@ -3284,7 +3285,7 @@ function ContractDocumentBody({ contract, client, company, showAdminWarnings = f
                       </div>
                     );
                   })}
-                  <p className="text-sm text-slate-700 mt-4">Key analytical outputs are delivered after each match in accordance with the Service Levels set out below.</p>
+                  {hasMatchServices(contract) && <p className="text-sm text-slate-700 mt-4">Key analytical outputs are delivered after each match in accordance with the Service Levels set out below.</p>}
                 </div>
               ) : (
                 <p className="text-sm text-slate-700 mb-8 whitespace-pre-line">{contract.description || 'The purpose of this Agreement is to define the terms of cooperation between the Parties for the provision of performance analysis and related services by the Service Provider to the Client.'}</p>
@@ -4834,11 +4835,11 @@ function CompanyProfileSettings() {
         </Field>
         <Field label="Company Name"><input disabled={!auth.isAdmin} value={form.name} onChange={e=>set('name',e.target.value)} className={inputCls(false)} /></Field>
         <Field label="Registered Address"><input disabled={!auth.isAdmin} value={form.registeredAddress} onChange={e=>set('registeredAddress',e.target.value)} className={inputCls(false)} /></Field>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Field label="VAT Number"><input disabled={!auth.isAdmin} value={form.vatNumber} onChange={e=>set('vatNumber',e.target.value)} className={inputCls(false)} /></Field>
           <Field label="Registration Number"><input disabled={!auth.isAdmin} value={form.registrationNumber} onChange={e=>set('registrationNumber',e.target.value)} className={inputCls(false)} /></Field>
         </div>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Field label="Contact Email"><input disabled={!auth.isAdmin} value={form.contactEmail} onChange={e=>set('contactEmail',e.target.value)} className={inputCls(false)} /></Field>
           <Field label="Website"><input disabled={!auth.isAdmin} value={form.website} onChange={e=>set('website',e.target.value)} className={inputCls(false)} /></Field>
         </div>
@@ -4855,7 +4856,7 @@ function CompanyProfileSettings() {
       <div className="bg-white rounded-xl border border-[var(--border)] p-6 mb-6">
         <div className="font-heading text-base mb-1 text-[var(--navy-deep)]">Authorised Signatory</div>
         <p className="text-sm text-slate-500 mb-4">This person's signature is automatically applied as the Service Provider's counter-signature on every contract, so each agreement is signed by both parties.</p>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Field label="Signatory Name"><input disabled={!auth.isAdmin} value={form.signatoryName || ''} onChange={e=>set('signatoryName',e.target.value)} placeholder="e.g. Constantinos Charalambides" className={inputCls(false)} /></Field>
           <Field label="Signatory Title"><input disabled={!auth.isAdmin} value={form.signatoryTitle || ''} onChange={e=>set('signatoryTitle',e.target.value)} placeholder="e.g. CEO / Director" className={inputCls(false)} /></Field>
         </div>
@@ -5812,7 +5813,7 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
               <SigningSteps current={screen === 6 ? 1 : screen === 3 ? 2 : screen === 2 ? 3 : screen === 4 ? 4 : 1} />
             )}
             {screen === 1 && (
-              <div className="p-8">
+              <div className="p-5 sm:p-8">
                 <div className="font-heading mb-1">You have been invited to sign a document</div>
                 <p className="text-sm text-slate-500 mb-6">{company.name} has sent you a contract for electronic signature.</p>
                 <div className="bg-slate-50 rounded-lg p-4 mb-6">
@@ -5831,7 +5832,7 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
 
             {/* OTP screen — server mode only (inserted between email and review) */}
             {screen === 6 && (
-              <div className="p-8">
+              <div className="p-5 sm:p-8">
                 <div className="font-heading mb-1">Verify it's you</div>
                 <p className="text-sm text-slate-500 mb-6">We've emailed a 6-digit code to <strong>{emailInput}</strong>. Enter it below to continue.</p>
                 <Field label="Verification code" required error={otpError}>
@@ -5854,7 +5855,7 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
             )}
 
             {screen === 2 && (
-              <div className="p-8">
+              <div className="p-5 sm:p-8">
                 <div className="font-heading mb-4">Review Document</div>
                 <div ref={scrollRef} onScroll={onScroll} className="border border-[var(--border)] rounded-lg p-5 h-[60vh] md:h-96 overflow-y-auto text-sm text-slate-600 mb-4 bg-white">
                   <ContractDocumentBody contract={contract} client={client} company={company} />
@@ -5880,7 +5881,7 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
             )}
 
             {screen === 3 && (
-              <div className="p-8">
+              <div className="p-5 sm:p-8">
                 <div className="font-heading mb-4">Confirm Agreement Summary</div>
                 <div className="bg-slate-50 rounded-lg p-5 text-sm space-y-2">
                   <div className="flex justify-between"><span className="text-slate-500">Contract</span><span className="font-medium">{contract.title}</span></div>
@@ -5905,7 +5906,7 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
                   <Field label="Country of Registration" required error={confirmErrors.country}>
                     <input value={clientDetailsForm.country} onChange={e=>setClientDetailsForm(f=>({...f,country:e.target.value}))} className={inputCls(confirmErrors.country)} placeholder="e.g. Cyprus" />
                   </Field>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     {/* A client confirmed to have NO VAT number must not be
                         forced to supply one to sign — required only when a
                         number is genuinely expected. */}
@@ -5924,7 +5925,7 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
                   <Field label="Contact Name" required error={confirmErrors.contactName}>
                     <input value={contactForm.contactName} onChange={e=>setContact('contactName', e.target.value)} className={inputCls(confirmErrors.contactName)} placeholder="e.g. Maria Georgiou" />
                   </Field>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <Field label="Role / Position" required error={confirmErrors.contactRole}>
                       <input value={contactForm.contactRole} onChange={e=>setContact('contactRole', e.target.value)} className={inputCls(confirmErrors.contactRole)} placeholder="e.g. Technical Director" />
                     </Field>
@@ -5937,7 +5938,7 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
                   </Field>
                   <div className="mt-3 pt-3 border-t border-[var(--border)]">
                     <div className="text-xs font-medium text-slate-600 mb-2">Finance / Accounts Contact</div>
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <Field label="Name" required error={confirmErrors.financeName}>
                         <input value={contactForm.financeName} onChange={e=>setContact('financeName', e.target.value)} className={inputCls(confirmErrors.financeName)} />
                       </Field>
@@ -5959,7 +5960,7 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
             )}
 
             {screen === 4 && (
-              <div className="p-8">
+              <div className="p-5 sm:p-8">
                 <div className="font-heading mb-4">Signature</div>
                 <Field label="Full Name" required error={formErrors.sigName}>
                   <input value={sigName} onChange={e=>setSigName(e.target.value)} className={inputCls(formErrors.sigName)} />

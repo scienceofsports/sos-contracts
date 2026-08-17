@@ -87,6 +87,12 @@ function daysBetween(a: Any, b: Any): number {
 const SERVICE_CATALOG: Array<{ key: string; label: string; group: string; unit: string; defaultRate: number; detail: string }> = [
   { key: 'platform_access', label: 'Access to Football Platform', group: 'Core Services', unit: 'flat', defaultRate: 11500,
     detail: 'Video + data combined, match events & clips, player comparisons, team & player rankings — everything accessible in one place.' },
+  // Agency equivalent of platform_access. MUST be present here as well as in
+  // src/lib/constants.js — this catalogue drives the SENT/SIGNED PDF, and a key
+  // missing here is silently DROPPED from the executed document (the agency's
+  // only service vanished from the contract it signed).
+  { key: 'agency_subscription', label: 'Agency Platform Subscription', group: 'Core Services', unit: 'flat', defaultRate: 0,
+    detail: 'Full access to the Science of Sports platform for the agency\'s staff — player profiles and performance data, match events and video clips, player comparisons, team and player rankings, and report downloads.' },
   { key: 'camera_installation', label: 'Installation of Fixed Camera', group: 'Recording Services', unit: 'per_unit', defaultRate: 500,
     detail: 'One-off installation of fixed/robotic camera(s) at the club\'s venue, priced per camera.' },
   { key: 'veo_camera', label: 'VEO Camera', group: 'Recording Services', unit: 'flat', defaultRate: 0,
@@ -1166,7 +1172,10 @@ export async function buildContractPdf(input: {
       });
       y += 6;
     });
-    text('Key analytical outputs are delivered after each match in accordance with the Service Levels set out below.', { size: 10, gap: 10 });
+    // Only true when the deal actually covers matches. An agency subscription
+    // has no matches and no Service Levels clause, so this sentence promised a
+    // delivery standard that does not exist in the document it appears in.
+    if (hasMatchServices(c)) text('Key analytical outputs are delivered after each match in accordance with the Service Levels set out below.', { size: 10, gap: 10 });
   } else {
     text(c.description || 'The purpose of this Agreement is to define the terms of cooperation between the Parties for the provision of performance analysis and related services by the Service Provider to the Client.', { size: 10, gap: 10 });
   }
@@ -1344,14 +1353,26 @@ export async function buildContractPdf(input: {
     });
 
     // Player-funded contribution — the net player portion as its own VAT-free row.
+    // NOTE: `rowH` above is scoped INSIDE the services forEach; referencing it
+    // here threw "rowH is not defined" and crashed the SIGNED contract PDF for
+    // every player-funded / Shared deal. This row computes its own height from
+    // its own wrapped label (which can be long — it spells out the derivation,
+    // e.g. "Player-funded contribution (100 × €10 × 11 months, less 25%
+    // commission)") so a wrapping label can no longer overlap the total block.
     if (pfPlayerLine) {
-      ensure(rowH);
-      const baseline = y + 12;
-      drawSafeText(page, pfPlayerLine.label, { x: M + cellPadX, y: py(baseline), size: 9.5, font, color: BLACK });
+      const pfLines = wrap(pfPlayerLine.label, font, 9.5, svcColW - cellPadX * 2);
+      const pfRowH = 10 + pfLines.length * 12;
+      ensure(pfRowH + 2);
+      const pfTop = y;
+      let ply = pfTop + 12;
+      for (const ln of pfLines) {
+        drawSafeText(page, ln, { x: M + cellPadX, y: py(ply), size: 9.5, font, color: BLACK });
+        ply += 12;
+      }
       const aStr = fmtMoney(pfPlayerLine.amount, currency);
       const aw = font.widthOfTextAtSize(aStr, 9.5);
-      drawSafeText(page, aStr, { x: W - M - cellPadX - aw, y: py(baseline), size: 9.5, font, color: BLACK });
-      y += rowH;
+      drawSafeText(page, aStr, { x: W - M - cellPadX - aw, y: py(pfTop + 12), size: 9.5, font, color: BLACK });
+      y = pfTop + pfRowH;
       page.drawLine({ start: { x: M, y: py(y) }, end: { x: W - M, y: py(y) }, thickness: 0.5, color: rgb(0.862, 0.878, 0.902) });
     }
 
@@ -1435,7 +1456,7 @@ export async function buildContractPdf(input: {
       y += 8;
     }
     if (pt.advanceInvoiceSentence) text(pt.advanceInvoiceSentence, { size: 10, gap: 6 });
-    text(`All payments shall be made by bank transfer following the issuance of a valid invoice by the Service Provider${pt.advanceInvoiceSentence ? ' for the applicable instalment' : ''}, in accordance with applicable VAT regulations. A late payment penalty of ${latePaymentPenalty}% per month applies to overdue amounts.`, { size: 10, gap: 10 });
+    text(`All payments shall be made by bank transfer following the issuance of a valid invoice by the Service Provider${pt.advanceInvoiceSentence ? ' for the applicable instalment' : ''}, in accordance with applicable VAT regulations.${latePaymentPenalty == null || latePaymentPenalty === '' ? '' : ` A late payment penalty of ${latePaymentPenalty}% per month applies to overdue amounts.`}`, { size: 10, gap: 10 });
   }
   {
     const bankName = pick(co, 'bankName', 'bank_name');
