@@ -9,6 +9,7 @@ import {
   UNLIMITED_SEATS,
   computeServiceLineItems,
   platformSeatsSummary,
+  seatsForService,
   generateDescriptionFromServices,
   summarizeAgreement,
   slaLabel,
@@ -3270,12 +3271,12 @@ function ContractDocumentBody({ contract, client, company, showAdminWarnings = f
                                 {qtyNote && <span className="text-slate-500">{qtyNote}</span>}
                                 {chip && <span className="sos-chip sos-chip-green ml-2 align-middle" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}>{chip}</span>}
                                 <span className="text-slate-500"> — {i.detail}</span>
-                                {i.key === 'platform_access' && platformSeatsSummary(contract.services.platform_access) && (
+                                {seatsForService(contract.services, i.key) && (
                                   <div
                                     className="text-xs mt-1 inline-block rounded px-2 py-1 border-l-2"
                                     style={{ background:'rgba(34,199,230,.12)', borderColor:'var(--cyan)', color:'var(--navy-deep)', WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}
                                   >
-                                    <span className="font-semibold">Access:</span> {platformSeatsSummary(contract.services.platform_access)} <span className="italic">(exact users to be confirmed with the client)</span>
+                                    <span className="font-semibold">Access:</span> {seatsForService(contract.services, i.key)} <span className="italic">(exact users to be confirmed with the client)</span>
                                   </div>
                                 )}
                               </div>
@@ -3371,12 +3372,12 @@ function ContractDocumentBody({ contract, client, company, showAdminWarnings = f
                         <tr key={i.key} className="border-b border-[var(--border)]">
                           <td className="py-2 px-3">
                             {i.label}
-                            {i.key === 'platform_access' && platformSeatsSummary(contract.services.platform_access) && (
+                            {seatsForService(contract.services, i.key) && (
                               <div
                                 className="text-xs mt-1 inline-block rounded px-2 py-1 border-l-2"
                                 style={{ background:'rgba(34,199,230,.12)', borderColor:'var(--cyan)', color:'var(--navy-deep)', WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}
                               >
-                                <span className="font-semibold">Access:</span> {platformSeatsSummary(contract.services.platform_access)} <span className="italic">(exact users to be confirmed with the client)</span>
+                                <span className="font-semibold">Access:</span> {seatsForService(contract.services, i.key)} <span className="italic">(exact users to be confirmed with the client)</span>
                               </div>
                             )}
                           </td>

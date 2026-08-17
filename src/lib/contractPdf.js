@@ -22,7 +22,7 @@
    ========================================================================= */
 import { jsPDF } from 'jspdf';
 import { fmtDate, fmtMoney, daysBetween } from './format.js';
-import { computeServiceLineItems, platformSeatsSummary, SERVICE_GROUPS, analysisScopeText, seasonLabelFromDates, commercialModelText, parseSpecialTerms, serviceLevelsLines, vatSummary, paymentTimingWording, agreementDate, clientPartyClause, clientVatDisplay, isPlayerFunded, playerFundedScopeRows, isSponsorship, hasMatchServices, computeSponsorshipRights, sponsorshipRightText, feesConsiderationPhrase, SPONSORSHIP_RIGHT_GROUPS, confidentialityParas, ipParas, terminationEffectPara } from './constants.js';
+import { computeServiceLineItems, platformSeatsSummary, seatsForService, SERVICE_GROUPS, analysisScopeText, seasonLabelFromDates, commercialModelText, parseSpecialTerms, serviceLevelsLines, vatSummary, paymentTimingWording, agreementDate, clientPartyClause, clientVatDisplay, isPlayerFunded, playerFundedScopeRows, isSponsorship, hasMatchServices, computeSponsorshipRights, sponsorshipRightText, feesConsiderationPhrase, SPONSORSHIP_RIGHT_GROUPS, confidentialityParas, ipParas, terminationEffectPara } from './constants.js';
 
 export function generateContractPdf({ contract, client, company }) {
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
@@ -532,7 +532,7 @@ export function generateContractPdf({ contract, client, company }) {
         // Detail line(s) in grey, indented.
         text(i.detail, { size: 9.5, color: SOFT_GREY, gap: 2, x: itemX, width: itemW });
         if (i.key === 'platform_access') {
-          const seats = platformSeatsSummary(services?.platform_access);
+          const seats = seatsForService(services, i.key);
           if (seats) accessCallout(`Access: ${seats} (exact users to be confirmed with the client).`, itemX + 10, itemW - 10);
         }
       });
@@ -633,7 +633,7 @@ export function generateContractPdf({ contract, client, company }) {
     lineItems.forEach((i) => {
       const priceStr = fmtMoney(i.listPrice, contract.currency);
       // Compose the service label; platform access carries a seats subline.
-      const seats = (i.key === 'platform_access') ? platformSeatsSummary(services?.platform_access) : '';
+      const seats = seatsForService(services, i.key);
       const subline = seats ? `Access: ${seats} (exact users to be confirmed with the client)` : '';
 
       // Measure wrapped label height so the row + rule size correctly.

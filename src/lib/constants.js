@@ -51,9 +51,16 @@ export const SERVICE_CATALOG = [
   // has no teams, venues or fixtures of its own: it buys full read access to the
   // platform to track and evidence the players it represents. Priced as a flat
   // annual subscription rather than a season fee tied to match volume.
+  // AGENCY SUBSCRIPTION — scope is the agency's OWN REPRESENTED PLAYERS, not the
+  // league. This is deliberate and legally load-bearing: the signed club
+  // agreements bind SCIOS not to disclose a club's Deliverables to any third
+  // party without that club's written consent, and an agency IS a third party.
+  // Wording this as league-wide access would put those club contracts in breach.
+  // Widening it requires the clubs' written consent first — do not soften this
+  // detail text without that. See [[five-customer-types-0026]].
   { key:'agency_subscription', label:'Agency Platform Subscription', group:'Core Services', unit:'flat', defaultRate:0, defaultQty:1,
-    appliesTo:['agency'],
-    detail:'Full access to the Science of Sports platform for the agency\'s staff — player profiles and performance data, match events and video clips, player comparisons, team and player rankings, and report downloads.' },
+    appliesTo:['agency','company'],
+    detail:"Platform access for the Client’s staff covering the players it represents — each represented player’s profile and performance data, their match events and video clips, individual performance reports, and progress tracking across the season." },
   { key:'camera_installation', label:'Installation of Fixed Camera', group:'Recording Services', unit:'per_unit', defaultRate:500, defaultQty:1,
     appliesTo:['federation','club'],
     detail:'One-off installation of fixed/robotic camera(s) at the club\'s venue, priced per camera.' },
@@ -153,14 +160,25 @@ export function seatLabel(count, singular, plural) {
   return '';
 }
 
-export function platformSeatsSummary(svc) {
+// `svc` is the platform_access / agency_subscription service row. On an AGENCY
+// subscription the club seat roles are meaningless — an agency has no directors
+// or coaches — so the same three counts are labelled for an agency instead:
+// staff seats, and the number of players it represents (which is also the scope
+// of the data it can see). Pass isAgency from the caller.
+export function platformSeatsSummary(svc, isAgency = false) {
   if (!svc) return '';
-  const parts = [
-    seatLabel(svc.directorSeats, 'Director', 'Directors'),
-    seatLabel(svc.coachSeats, 'Coach', 'Coaches'),
-    seatLabel(svc.playerSeats, 'Player', 'Players'),
-  ].filter(Boolean);
-  return parts.join(', ');
+  const parts = isAgency
+    ? [
+        seatLabel(svc.directorSeats, 'Agency user', 'Agency users'),
+        seatLabel(svc.coachSeats, 'Scout / analyst', 'Scouts / analysts'),
+        seatLabel(svc.playerSeats, 'Represented player', 'Represented players'),
+      ]
+    : [
+        seatLabel(svc.directorSeats, 'Director', 'Directors'),
+        seatLabel(svc.coachSeats, 'Coach', 'Coaches'),
+        seatLabel(svc.playerSeats, 'Player', 'Players'),
+      ];
+  return parts.filter(Boolean).join(', ');
 }
 
 /* CLAUSE BODIES THAT DIFFER BY CONTRACT KIND.
@@ -253,6 +271,16 @@ export function hasMatchServices(contract) {
   const bands = Array.isArray(contract?.slaBands ?? contract?.sla_bands)
     ? (contract.slaBands ?? contract.sla_bands) : [];
   return bands.some(b => b && Array.isArray(b.teams) && b.teams.length && Number(b.hours));
+}
+
+// Seat-bearing service keys: the club platform and the agency subscription both
+// carry seat counts. Callers use this so a seats line renders for EITHER, and is
+// labelled for the right audience.
+export const SEAT_SERVICE_KEYS = ['platform_access', 'agency_subscription'];
+
+export function seatsForService(services, key) {
+  if (!SEAT_SERVICE_KEYS.includes(key)) return '';
+  return platformSeatsSummary(services?.[key], key === 'agency_subscription');
 }
 
 // Build the two "Scope of Analysis" sentences from a contract's scope fields.

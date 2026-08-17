@@ -92,7 +92,7 @@ const SERVICE_CATALOG: Array<{ key: string; label: string; group: string; unit: 
   // missing here is silently DROPPED from the executed document (the agency's
   // only service vanished from the contract it signed).
   { key: 'agency_subscription', label: 'Agency Platform Subscription', group: 'Core Services', unit: 'flat', defaultRate: 0,
-    detail: 'Full access to the Science of Sports platform for the agency\'s staff — player profiles and performance data, match events and video clips, player comparisons, team and player rankings, and report downloads.' },
+    detail: "Platform access for the Client’s staff covering the players it represents — each represented player’s profile and performance data, their match events and video clips, individual performance reports, and progress tracking across the season." },
   { key: 'camera_installation', label: 'Installation of Fixed Camera', group: 'Recording Services', unit: 'per_unit', defaultRate: 500,
     detail: 'One-off installation of fixed/robotic camera(s) at the club\'s venue, priced per camera.' },
   { key: 'veo_camera', label: 'VEO Camera', group: 'Recording Services', unit: 'flat', defaultRate: 0,
@@ -471,14 +471,30 @@ function seatLabel(count: Any, singular: string, plural: string): string {
   if (count > 0) return `${count} ${count > 1 ? plural : singular}`;
   return '';
 }
-function platformSeatsSummary(svc: Any): string {
+function platformSeatsSummary(svc: Any, isAgency = false): string {
   if (!svc) return '';
-  const parts = [
-    seatLabel(svc.directorSeats, 'Director', 'Directors'),
-    seatLabel(svc.coachSeats, 'Coach', 'Coaches'),
-    seatLabel(svc.playerSeats, 'Player', 'Players'),
-  ].filter(Boolean);
-  return parts.join(', ');
+  // On an AGENCY subscription the club seat roles are meaningless — the same
+  // three counts are labelled for an agency instead. Keep in sync with
+  // src/lib/constants.js.
+  const parts = isAgency
+    ? [
+        seatLabel(svc.directorSeats, 'Agency user', 'Agency users'),
+        seatLabel(svc.coachSeats, 'Scout / analyst', 'Scouts / analysts'),
+        seatLabel(svc.playerSeats, 'Represented player', 'Represented players'),
+      ]
+    : [
+        seatLabel(svc.directorSeats, 'Director', 'Directors'),
+        seatLabel(svc.coachSeats, 'Coach', 'Coaches'),
+        seatLabel(svc.playerSeats, 'Player', 'Players'),
+      ];
+  return parts.filter(Boolean).join(', ');
+}
+
+const SEAT_SERVICE_KEYS = ['platform_access', 'agency_subscription'];
+
+function seatsForService(services: Any, key: string): string {
+  if (!SEAT_SERVICE_KEYS.includes(key)) return '';
+  return platformSeatsSummary(services?.[key], key === 'agency_subscription');
 }
 
 // Port of clientEntityDescriptor — the Client party's legal descriptor.
@@ -1166,7 +1182,7 @@ export async function buildContractPdf(input: {
         // Detail line(s) in grey, indented.
         text(i.detail, { size: 9.5, color: SOFT_GREY, gap: 2, x: itemX, width: itemW });
         if (i.key === 'platform_access') {
-          const seats = platformSeatsSummary(services?.platform_access);
+          const seats = seatsForService(services, i.key);
           if (seats) accessCallout(`Access: ${seats} (exact users to be confirmed with the client).`, itemX + 10, itemW - 10);
         }
       });
@@ -1290,7 +1306,7 @@ export async function buildContractPdf(input: {
     // Body rows.
     lineItems.forEach((i) => {
       const priceStr = fmtMoney(i.listPrice, currency);
-      const seats = (i.key === 'platform_access') ? platformSeatsSummary(services?.platform_access) : '';
+      const seats = seatsForService(services, i.key);
       const subline = seats ? `Access: ${seats} (exact users to be confirmed with the client)` : '';
 
       const labelLines = wrap(i.label, font, 9.5, svcColW - cellPadX * 2);
