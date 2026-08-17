@@ -2220,7 +2220,9 @@ function ContractForm({ navigate, editContractId }) {
         <div className="font-heading text-sm mt-6 mb-3 pt-5 border-t border-[var(--border)] text-[var(--navy-deep)]">Value & Dates</div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Field label="Value" required error={errors.value}>
-            <input disabled type="number" step="0.01" value={form.value} onChange={e=>set('value',e.target.value)} className={inputCls(errors.value)} placeholder="12000.00" />
+            {/* A sponsorship is one hand-priced package fee (no services catalogue to
+                sum), so it's the one kind where the value is typed, not computed. */}
+            <input disabled={!isSponsorshipForm} type="number" step="0.01" value={form.value} onChange={e=>set('value',e.target.value)} className={inputCls(errors.value)} placeholder="12000.00" />
           </Field>
           <Field label="Currency">
             <select value={form.currency} onChange={e=>set('currency',e.target.value)} className={inputCls(false)}>
