@@ -63,6 +63,10 @@ import {
   effectiveStatus,
   daysOverdue,
   effectiveContractStatus,
+  contractTermYears,
+  annualisedValue,
+  netReceived,
+  netAnnualised,
   SIGNING_LINK_DAYS,
   agingBucket,
   AGING_LABELS,
@@ -85,6 +89,7 @@ import { userService } from './services/authService.js';
 import { signingService } from './services/signingService.js';
 import { ToastProvider, useToast } from './context/ToastContext.jsx';
 import { AuthProvider, useAuth } from './context/AuthContext.jsx';
+import { DataProvider, useData } from './context/DataContext.jsx';
 import {
   Badge,
   SendCountChip,
@@ -237,52 +242,19 @@ function Sidebar({ route, navigate, mobileOpen, setMobileOpen }) {
 /* =========================================================================
    DASHBOARD
    ========================================================================= */
+// Shared admin dataset — one copy for the whole app, from DataContext. Every
+// page reads the same arrays and every mutation calls reload(), so a change on
+// one page updates the Dashboard, Receivables and Revenue Report immediately.
+// (Previously each caller fetched its own copy once on mount and never
+// re-fetched, so views silently disagreed until a manual browser reload.)
 function useContractsData() {
-  const [contracts, setContracts] = useState(null);
-  const [clients, setClients] = useState(null);
-  const reload = useCallback(async () => {
-    const [c, cl] = await Promise.all([contractService.getAll(), clientService.getAll()]);
-    setContracts(c); setClients(cl);
-  }, []);
-  useEffect(() => { reload(); }, [reload]);
-  return { contracts, clients, reload };
+  const { contracts, clients, refresh } = useData();
+  return { contracts, clients, reload: refresh };
 }
 
-// Term length of a contract in years (>= 1), from its start/end dates. Falls
-// back to 1 year when dates are missing, so a value is never divided by 0.
-function contractTermYears(contract) {
-  if (!contract?.startDate || !contract?.endDate) return 1;
-  const days = daysBetween(contract.startDate, contract.endDate);
-  if (!(days > 0)) return 1;
-  return Math.max(1, days / 365);
-}
-// The per-YEAR value of a contract = total contract value ÷ term years. This is
-// what "annual revenue" views should sum, so a 3-year €164,500 deal contributes
-// ~€54,833/yr rather than distorting the annual figure with its whole lifetime
-// total. Rounded to cents.
-//
-// If a contract carries a manual `annualValueOverride` (a display-only reporting
-// figure — see migration 0019), that pinned amount wins. Use it when a clean
-// yearly deal's dates don't land on a whole number of 365-day years, so the
-// run-rate reads e.g. €47,000 instead of €47,277.56. The override never changes
-// the signed value/dates — only what these annualised views report.
-function annualisedValue(contract) {
-  const override = Number(contract?.annualValueOverride);
-  if (Number.isFinite(override) && override > 0) return Math.round(override * 100) / 100;
-  return Math.round((Number(contract?.value || 0) / contractTermYears(contract)) * 100) / 100;
-}
-
-// The NET (ex-VAT) portion of what was actually received for a payment. Revenue
-// / income figures use this — VAT collected isn't income, it's passed to the tax
-// office. Split by the payment's net:gross ratio so it's correct for partial
-// payments and VAT-exempt rows. Money-OWED figures (receivables) stay gross.
-function netReceived(payment) {
-  const gross = Number(payment?.totalAmount || 0);
-  const net = Number(payment?.amount != null ? payment.amount : gross);
-  const received = Number(payment?.paidAmount || 0);
-  if (gross > 0 && net >= 0) return Math.round(received * (net / gross) * 100) / 100;
-  return received;
-}
+// contractTermYears / annualisedValue / netReceived / netAnnualised now live in
+// lib/format.js so every revenue panel shares one definition — see the "Revenue
+// basis" block there.
 
 // A receivable only exists once a contract is EXECUTED. Draft and sent-but-
 // unsigned contracts carry a payment schedule, but no client owes anything under
@@ -374,7 +346,10 @@ function ReminderBanners({ contracts, clients, navigate }) {
         else if (days <= 7) { dueSoonCount++; dueSoonAmount += amt; }   // due today/this week → summarised
       }
     });
-    if (c.status === 'active' && c.endDate) {
+    // Renewal reminders follow EXECUTED status (signed + active), matching the
+    // dashboard's renewal figures — a signed contract nearing its end date needs
+    // renewing whether or not its start date has arrived.
+    if (isReceivableContract(c) && c.endDate) {
       const days = daysBetween(now, c.endDate);
       if (days >= 0 && days <= 60) renewalCount++;
     }
@@ -433,19 +408,34 @@ function Dashboard({ navigate }) {
   const clientMap = Object.fromEntries(clients.map(c => [c.id, c]));
   const now = new Date();
 
+  // Annual run-rate of one contract, net of VAT. Thin wrapper over the shared
+  // helper in lib/format.js — it resolves the client and injects vatSplit (kept
+  // out of format.js to avoid a circular import with constants.js). EVERY
+  // revenue figure on this page goes through here, so the hero card, the tier
+  // cards and the ops table cannot drift apart.
+  const netAnnual = (c) => netAnnualised(c, clientMap[c.clientId], vatSplit);
+
   // EXECUTED = 'active' OR 'signed'. Both are legally in force; 'signed' is an
   // executed deal whose start date has not arrived yet (or one imported after a
   // paper signing). isReceivableContract already treats the two identically, so
   // counting only 'active' here meant a signed-but-not-started contract was
   // chased for money in Receivables while contributing nothing to Annual Revenue
   // or the Active Business count — the board under-reporting a real agreement.
-  const activeContracts = contracts.filter(isReceivableContract);
+  //
+  // ONE definition, used by the hero card, the committed-operations figures, the
+  // renewal windows and the Client Operations Overview, so those panels can
+  // never disagree about which contracts count.
+  const isExecuted = (c) => { const st = effectiveContractStatus(c); return st === 'signed' || st === 'active'; };
+  const activeContracts = contracts.filter(isExecuted);
   const activeClientCount = new Set(activeContracts.map(c => c.clientId)).size;
   const awaitingSignature = contracts.filter(c => effectiveContractStatus(c) === 'sent').length;
   const totalActiveValue = activeContracts.reduce((s,c) => s + Number(c.value||0), 0);
-  // Annualised = each active contract's value ÷ its term years, summed. This is
-  // the true yearly run-rate (a 3-year deal counts once per year, not in full).
-  const annualisedActiveValue = activeContracts.reduce((s,c) => s + annualisedValue(c), 0);
+  // Annualised = each active contract's value ÷ its term years, summed, NET of
+  // VAT. This is the true yearly run-rate (a 3-year deal counts once per year,
+  // not in full). Net basis matches the card's own "ex-VAT" wording, the
+  // Agreements Overview tiers and the Client Operations Overview — previously
+  // this line summed the gross figure, overstating any VAT-inclusive deal by 19%.
+  const annualisedActiveValue = round2(activeContracts.reduce((s,c) => s + netAnnual(c), 0));
   const allPayments = contracts.flatMap(c => c.payments.map(p => ({ ...p, contractTitle: c.title, contractNumber: c.contractNumber, clientId: c.clientId })));
   // Collected YTD is NET of VAT, to match Annual Revenue and the Revenue Report
   // (every "income" figure on the board is net; money-owed figures stay gross).
@@ -468,7 +458,12 @@ function Dashboard({ navigate }) {
   const overduePays = receivablePayments.filter(p => effectiveStatus(p) === 'overdue');
   const overdueBuckets = { d30: 0, d60: 0, d90: 0 };
   overduePays.forEach(p => { const d = daysOverdue(p); const amt = Number(p.totalAmount||0); if (d > 90) overdueBuckets.d90 += amt; else if (d > 60) overdueBuckets.d60 += amt; else overdueBuckets.d30 += amt; });
-  const renewalCount = contracts.filter(c => c.status === 'active' && c.endDate && daysBetween(now, c.endDate) >= 0 && daysBetween(now, c.endDate) <= 60).length;
+  // Renewals are judged on EXECUTED status (signed + active), not just 'active'.
+  // A signed contract whose start date hasn't arrived is still a real agreement
+  // running to an end date — filtering on c.status === 'active' meant it never
+  // raised a renewal flag. isRenewing centralises the window test.
+  const isRenewing = (c, window) => isExecuted(c) && c.endDate && daysBetween(now, c.endDate) >= 0 && daysBetween(now, c.endDate) <= window;
+  const renewalCount = contracts.filter(c => isRenewing(c, 60)).length;
   // Forecast billing over the next 12 months — expected invoices on per-usage
   // deals (e.g. per-match filming). NOT a receivable and never added to the
   // figures above; shown separately so the run-rate view is complete.
@@ -483,7 +478,7 @@ function Dashboard({ navigate }) {
     const list = contracts.filter(c => effectiveContractStatus(c) === s);
     return { stage: s, count: list.length, value: list.reduce((sum,c)=>sum+Number(c.value||0),0) };
   });
-  const renewalDue = contracts.filter(c => c.status === 'active' && c.endDate && daysBetween(now,c.endDate) >= 0 && daysBetween(now,c.endDate) <= 60);
+  const renewalDue = contracts.filter(c => isRenewing(c, 60));
   funnel.splice(4, 0, { stage: 'renewal_due', count: renewalDue.length, value: renewalDue.reduce((s,c)=>s+Number(c.value||0),0) });
   const maxFunnel = Math.max(1, ...funnel.map(f => f.value));
 
@@ -498,7 +493,7 @@ function Dashboard({ navigate }) {
   const maxCash = Math.max(1, ...cashFlow.flatMap(c => [c.expected, c.received]));
 
   const riskWindows = [30,60,90].map(w => {
-    const list = contracts.filter(c => c.status === 'active' && c.endDate && daysBetween(now, c.endDate) >= 0 && daysBetween(now, c.endDate) <= w);
+    const list = contracts.filter(c => isRenewing(c, w));
     return { window: w, count: list.length, value: list.reduce((s,c)=>s+Number(c.value||0),0) };
   });
   const hasRenewals = riskWindows.some(r => r.count > 0);
@@ -512,22 +507,6 @@ function Dashboard({ navigate }) {
      against all clients, agreed SLA bands, and cameras still to install.
      "Committed/agreed" for operational figures (SLA, cameras) = signed + active
      only — a draft creates no delivery obligation. Revenue is shown per tier. */
-  const netAnnualised = (c) => {
-    // Annual run-rate, net of VAT. For a VAT-inclusive deal we back VAT out of
-    // the gross; a net (ex-VAT) value is unchanged. On a player-funded / shared
-    // deal only the club fixed fee carries VAT, so back it out of the vatable
-    // portion only (the player-funded remainder is already VAT-free).
-    const annual = annualisedValue(c);
-    const client = clientMap[c.clientId];
-    const split = vatSplit(c);
-    // Scale the split to the annualised figure (annual may be value ÷ term years).
-    const factor = Number(c.value) > 0 ? annual / Number(c.value) : 1;
-    const vatablePart = round2(split.vatableNet * factor);
-    const exemptPart = round2(annual - vatablePart);
-    const v = computeVAT(client, vatablePart, c.vatInclusive);
-    const net = v.netAmount != null ? v.netAmount : vatablePart;
-    return round2(net + exemptPart);
-  };
   const tierOf = (c) => {
     const st = effectiveContractStatus(c);
     if (st === 'signed' || st === 'active') return 'signed';
@@ -543,7 +522,7 @@ function Dashboard({ navigate }) {
   const revenueTiers = TIERS.map(t => {
     const list = contracts.filter(c => tierOf(c) === t.key);
     const clientsInTier = new Set(list.map(c => c.clientId)).size;
-    return { ...t, annual: list.reduce((s,c)=>s+netAnnualised(c),0), clubs: clientsInTier };
+    return { ...t, annual: round2(list.reduce((s,c)=>s+netAnnual(c),0)), clubs: clientsInTier };
   });
 
   // Club-status progress vs. every client in the system. A client's status is
@@ -559,8 +538,9 @@ function Dashboard({ navigate }) {
   clients.forEach(cl => { clubStatus[clientBestTier(cl)]++; });
   const totalClubs = clients.length;
 
-  // Agreed operational commitments — signed + active contracts only.
-  const committedContracts = contracts.filter(c => { const st = effectiveContractStatus(c); return st === 'signed' || st === 'active'; });
+  // Agreed operational commitments — signed + active contracts only, i.e. the
+  // same executed set the revenue figures use (aliased for readability here).
+  const committedContracts = activeContracts;
 
   // SLA commitments: count clubs per agreed SLA band. A contract's bands come
   // from slaBands (per-team hours) or fall back to its single slaHours (or 72).
@@ -587,33 +567,73 @@ function Dashboard({ navigate }) {
     if (qty > 0) { camerasToInstall += qty; cameraClubs.add(c.clientId); }
   });
 
-  // CLIENT OPERATIONS OVERVIEW — one row per client, showing their most-advanced
-  // contract, with the annual run-rate, status, SLA and cameras in one scan. All
-  // clients are shown (even without a contract) and sorted by status priority.
+  // CLIENT OPERATIONS OVERVIEW — one row per client, aggregating ALL of that
+  // client's contracts: total annual run-rate, tightest SLA, total cameras, and
+  // the money position. All clients are shown (even without a contract).
+  //
+  // This row used to describe only the client's single most-advanced ("lead")
+  // contract, while the money columns already summed every contract. A client
+  // with two live deals — e.g. CFA's National Teams agreement AND the B-Division
+  // filming agreement — therefore showed one deal's annual value against both
+  // deals' outstanding, and the column total under-reported the run-rate. Every
+  // column is now aggregated on the same basis, so the table reconciles with the
+  // hero card and the Contracts list.
   const opsStatusRank = { active: 6, signed: 5, sent: 4, draft: 3, expired: 2, declined: 1, cancelled: 0, none: -1 };
   const opsRows = clients.map(cl => {
     const clientContracts = contracts.filter(c => c.clientId === cl.id);
-    // Pick the most-advanced contract (by effective status) as the client's lead.
+    // The status pill still reflects the most-advanced contract — that's the
+    // client's headline relationship state.
     const lead = clientContracts.slice().sort((a, b) =>
       (opsStatusRank[effectiveContractStatus(b)] ?? -1) - (opsStatusRank[effectiveContractStatus(a)] ?? -1)
     )[0] || null;
     const st = lead ? effectiveContractStatus(lead) : 'none';
-    // Money position is summed across ALL the client's contracts (money owed is
-    // money owed, regardless of which contract). Annual/status/SLA/cameras
-    // describe the LEAD contract (their current operational deal).
+    // Executed contracts drive every operational figure: annual value, SLA and
+    // cameras are commitments, and only a signed/active deal commits anything.
+    const executed = clientContracts.filter(isExecuted);
+    // Annual value = the sum of every executed contract's net run-rate, on the
+    // same basis as the hero card and the tier cards.
+    const annual = round2(executed.reduce((s, c) => s + netAnnual(c), 0));
+    // Tightest SLA across executed contracts — that's what drives staffing.
+    // slaLabel returns e.g. "48h", "48h+" (mixed bands) or "—".
+    const slaHours = executed
+      .map(c => parseInt(slaLabel(c), 10))
+      .filter(h => Number.isFinite(h));
+    const anyMixed = executed.some(c => slaLabel(c).endsWith('+'));
+    const minSla = slaHours.length ? Math.min(...slaHours) : null;
+    // "+" when bands differ within or across the client's contracts.
+    const sla = minSla == null ? '—'
+      : `${minSla}h${anyMixed || new Set(slaHours).size > 1 ? '+' : ''}`;
+    // Cameras summed across executed contracts, by type.
+    const camTotals = executed.reduce((acc, c) => {
+      const items = c.services ? computeServiceLineItems(c.services) : [];
+      const byKey = Object.fromEntries(items.map(i => [i.key, i]));
+      if (byKey['veo_camera']) acc.veo += Number(byKey['veo_camera'].qty) || 1;
+      if (byKey['camera_installation']) acc.fixed += Number(byKey['camera_installation'].qty) || 1;
+      return acc;
+    }, { veo: 0, fixed: 0 });
+    const camParts = [];
+    if (camTotals.veo) camParts.push(`${camTotals.veo}× VEO`);
+    if (camTotals.fixed) camParts.push(`${camTotals.fixed}× Fixed`);
+    const cameras = camParts.length ? camParts.join(' + ') : '—';
+    // Money position across ALL contracts (money owed is money owed, regardless
+    // of which contract). Collected is NET of VAT to match every other income
+    // figure on the board — VAT received isn't income, it's remitted onward.
     const allPays = clientContracts.flatMap(c => c.payments || []);
-    const collected = allPays.filter(p => p.status === 'paid').reduce((s, p) => s + Number(p.paidAmount || 0), 0);
+    const collected = round2(allPays.filter(p => p.status === 'paid').reduce((s, p) => s + netReceived(p), 0));
     // Owed only under executed contracts — see isReceivableContract.
-    const outstanding = receivableRows(clientContracts).reduce((s, p) => s + Number(p.totalAmount || 0), 0);
+    const outstanding = round2(receivableRows(clientContracts).reduce((s, p) => s + Number(p.totalAmount || 0), 0));
     // Latest end date across the client's contracts — when the relationship runs to.
     const endDate = clientContracts.reduce((latest, c) => c.endDate && (!latest || new Date(c.endDate) > new Date(latest)) ? c.endDate : latest, null);
     return {
       id: cl.id,
       name: cl.companyName || '—',
-      annual: lead ? annualisedValue(lead) : 0,
+      annual,
       status: st,
-      sla: lead ? slaLabel(lead) : '—',
-      cameras: lead ? cameraLabel(lead) : '—',
+      // How many executed contracts this row aggregates — surfaced in the client
+      // cell so a multi-contract client is obvious at a glance.
+      contractCount: executed.length,
+      sla,
+      cameras,
       collected,
       outstanding,
       endDate,
@@ -643,10 +663,13 @@ function Dashboard({ navigate }) {
     return opsSort.dir === 'asc' ? cmp : -cmp;
   });
   // Column totals (the summable columns; status / SLA / cameras are categories).
-  const opsAnnualTotal = opsRows.reduce((s, r) => s + (Number(r.annual) || 0), 0);
-  const opsCollectedTotal = opsRows.reduce((s, r) => s + (Number(r.collected) || 0), 0);
-  const opsOutstandingTotal = opsRows.reduce((s, r) => s + (Number(r.outstanding) || 0), 0);
-  const opsWithContract = opsRows.filter(r => r.status !== 'none').length;
+  const opsAnnualTotal = round2(opsRows.reduce((s, r) => s + (Number(r.annual) || 0), 0));
+  const opsCollectedTotal = round2(opsRows.reduce((s, r) => s + (Number(r.collected) || 0), 0));
+  const opsOutstandingTotal = round2(opsRows.reduce((s, r) => s + (Number(r.outstanding) || 0), 0));
+  // Footer label counts clients with an EXECUTED contract, matching the basis of
+  // the Annual Value total directly above it (a drafted-only client contributes
+  // nothing to that total, so counting it here would misexplain the figure).
+  const opsWithContract = opsRows.filter(r => r.contractCount > 0).length;
 
   return (
     <div className="p-4 md:p-6 board-print">
@@ -815,8 +838,21 @@ function Dashboard({ navigate }) {
                   className={`border-b border-[var(--border)] last:border-0 ${r.leadId ? 'cursor-pointer hover:bg-slate-50' : ''}`}
                   onClick={r.leadId ? (()=>navigate('contract:'+r.leadId)) : undefined}
                 >
-                  <td className="py-3 pr-4 font-medium text-[var(--navy-deep)]">{r.name}</td>
-                  <td className="py-3 px-4 text-right font-data">{r.status === 'none' ? <span className="text-slate-300">—</span> : fmtMoney(r.annual, r.currency)}</td>
+                  <td className="py-3 pr-4 font-medium text-[var(--navy-deep)]">
+                    {r.name}
+                    {/* Flag a client whose row aggregates more than one executed
+                        contract, so the summed value is self-explanatory. */}
+                    {r.contractCount > 1 && (
+                      <span className="ml-2 text-[10px] font-normal text-slate-500 bg-slate-100 rounded px-1.5 py-0.5 align-middle">
+                        {r.contractCount} contracts
+                      </span>
+                    )}
+                  </td>
+                  {/* Annual value counts EXECUTED contracts only, so a client
+                      whose only contract is a draft or sent shows a dash, not
+                      €0 — nothing is committed yet, and €0 would read as a
+                      zero-value deal rather than "not signed". */}
+                  <td className="py-3 px-4 text-right font-data">{r.contractCount === 0 ? <span className="text-slate-300">—</span> : fmtMoney(r.annual, r.currency)}</td>
                   <td className="py-3 px-4">{r.status === 'none' ? <span className="text-xs text-slate-400">No contract</span> : <Badge status={r.status} />}</td>
                   <td className="py-3 px-4 font-data text-slate-600">{r.sla}</td>
                   <td className="py-3 px-4 text-slate-600">{r.cameras}</td>
@@ -828,7 +864,7 @@ function Dashboard({ navigate }) {
             </tbody>
             <tfoot>
               <tr style={{ borderTop:'2px solid var(--navy-deep)' }}>
-                <td className="py-3 pr-4 font-semibold text-[var(--navy-deep)]">Total <span className="text-xs font-normal text-slate-400">({opsWithContract} with contract)</span></td>
+                <td className="py-3 pr-4 font-semibold text-[var(--navy-deep)]">Total <span className="text-xs font-normal text-slate-400">({opsWithContract} signed/active)</span></td>
                 <td className="py-3 px-4 text-right font-data font-bold text-[var(--navy-deep)]">{fmtMoney(opsAnnualTotal, 'EUR')}</td>
                 <td className="py-3 px-4"></td>
                 <td className="py-3 px-4"></td>
@@ -1340,6 +1376,8 @@ function SponsorshipRightsEditor({ rows, onChange }) {
 function ContractForm({ navigate, editContractId }) {
   const auth = useAuth();
   const toast = useToast();
+  // Shared-store refresh, called after a save so every other page updates.
+  const { reload: reloadData } = useContractsData();
   const isEdit = !!editContractId;
   const [clients, setClients] = useState(null);
   const [loadingExisting, setLoadingExisting] = useState(isEdit);
@@ -1925,6 +1963,11 @@ function ContractForm({ navigate, editContractId }) {
         }
         toast.push('Contract created.', 'success');
       }
+      // Creating or editing a contract changes the Dashboard run-rate, the
+      // Client Operations Overview, Receivables and the Revenue Report. Refresh
+      // the shared store BEFORE navigating so the destination page renders the
+      // new figures rather than a stale copy.
+      await reloadData();
       navigate('contract:'+contract.id);
     } catch (err) {
       toast.push(err.message, 'error');
@@ -2372,6 +2415,9 @@ function ContractForm({ navigate, editContractId }) {
 function ContractDetail({ contractId, navigate }) {
   const auth = useAuth();
   const toast = useToast();
+  // Shared-store refresh — called from load(), so every mutation on this page
+  // propagates to the Dashboard, Receivables and Revenue Report.
+  const { reload: reloadData } = useContractsData();
   const [contract, setContract] = useState(null);
   const [client, setClient] = useState(null);
   const [showSendModal, setShowSendModal] = useState(false);
@@ -2413,7 +2459,13 @@ function ContractDetail({ contractId, navigate }) {
     } else {
       setCertificate(null);
     }
-  }, [contractId]);
+    // Keep the shared store in step. Every mutation on this page (send, recall
+    // to draft, mark active, cancel, add/mark-paid a payment, annual override)
+    // already calls load(), so refreshing here means one hook point updates the
+    // Dashboard, Receivables and Revenue Report for all of them. Non-blocking:
+    // this page's own render never waits on the list fetch.
+    reloadData().catch(() => {});
+  }, [contractId, reloadData]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -2542,6 +2594,8 @@ function ContractDetail({ contractId, navigate }) {
     try {
       await contractService.delete(contract.id);
       toast.push('Contract deleted.', 'success');
+      // Refresh before navigating — this page unmounts, so load() won't run.
+      await reloadData();
       navigate('contracts:all');
     } catch (err) {
       // Server-side trigger blocks deleting signed/active contracts.
@@ -3958,7 +4012,7 @@ function MarkPaidModal({ contract, payment, onClose, onDone }) {
 const AGING_ORDER = ['current', 'd1_30', 'd31_60', 'd61_90', 'd90_plus'];
 
 function PaymentsReceivables({ navigate }) {
-  const { contracts, clients } = useContractsData();
+  const { contracts, clients, reload } = useContractsData();
   const auth = useAuth();
   const toast = useToast();
   const [reminderPayment, setReminderPayment] = useState(null);
@@ -4210,7 +4264,10 @@ function PaymentsReceivables({ navigate }) {
         </div>
       )}
       {reminderPayment && <ReminderModal payment={reminderPayment} client={clientMap[reminderPayment.contract.clientId]} onClose={()=>setReminderPayment(null)} />}
-      {markPaid && <MarkPaidModal contract={markPaid.contract} payment={markPaid} onClose={()=>setMarkPaid(null)} onDone={()=>{ setMarkPaid(null); location.reload(); }} />}
+      {/* Marking a payment paid moves money on the Dashboard (Collected YTD, Due
+          now) and the Revenue Report too — refresh the shared store so all of
+          them update at once, instead of hard-reloading the browser. */}
+      {markPaid && <MarkPaidModal contract={markPaid.contract} payment={markPaid} onClose={()=>setMarkPaid(null)} onDone={()=>{ setMarkPaid(null); reload(); }} />}
     </div>
   );
 }
@@ -4321,6 +4378,8 @@ function ClientLogo({ client, size }) {
 function ClientsPage({ navigate }) {
   const auth = useAuth();
   const toast = useToast();
+  // Shared-store refresh — called from load(), so client changes reach the board.
+  const { reload: reloadData } = useContractsData();
   const [clients, setClients] = useState(null);
   const [statsByClient, setStatsByClient] = useState({});
   const [showForm, setShowForm] = useState(false);
@@ -4347,7 +4406,11 @@ function ClientsPage({ navigate }) {
       });
       setStatsByClient(stats);
     });
-  }, []);
+    // Every client mutation on this page (create, edit, delete) routes through
+    // load(), so refreshing the shared store here keeps the Dashboard's client
+    // count, Client Operations Overview and club-status bar in step.
+    reloadData().catch(() => {});
+  }, [reloadData]);
   useEffect(() => { load(); }, [load]);
 
   if (!clients) return <div className="p-6"><Skeleton className="h-96 w-full" /></div>;
@@ -4705,21 +4768,26 @@ function RevenueReport() {
 }
 
 function BoardExport() {
-  const { contracts } = useContractsData();
+  const { contracts, clients } = useContractsData();
   const toast = useToast();
-  if (!contracts) return <div className="p-6"><Skeleton className="h-64 w-full" /></div>;
+  if (!contracts || !clients) return <div className="p-6"><Skeleton className="h-64 w-full" /></div>;
 
   const now = new Date();
+  const clientMap = Object.fromEntries(clients.map(c => [c.id, c]));
   // Executed = active OR signed — same rule as the dashboard and Receivables, so
   // the board pack cannot report a different portfolio from the app.
-  const active = contracts.filter(isReceivableContract);
+  const active = contracts.filter(c => { const st = effectiveContractStatus(c); return st === 'signed' || st === 'active'; });
   const mrr = active.filter(c=>c.paymentType==='monthly').reduce((s,c)=>s+Number(c.value||0),0);
-  // ARR = annualised run-rate (each contract's value ÷ its term years); the
-  // lifetime total is reported separately so multi-year deals don't inflate ARR.
-  const arr = active.reduce((s,c)=>s+annualisedValue(c),0);
+  // ARR = annualised run-rate (each contract's value ÷ its term years), NET of
+  // VAT — the same basis as the dashboard's Annual Revenue, so the board pack
+  // and the app report the same number. The lifetime total is reported
+  // separately so multi-year deals don't inflate ARR.
+  const arr = round2(active.reduce((s,c)=>s+netAnnualised(c, clientMap[c.clientId], vatSplit),0));
   const lifetimeValue = active.reduce((s,c)=>s+Number(c.value||0),0);
   const allPayments = contracts.flatMap(c=>c.payments);
-  const ytd = allPayments.filter(p=>p.status==='paid' && new Date(p.paidAt).getFullYear()===now.getFullYear()).reduce((s,p)=>s+Number(p.paidAmount||0),0);
+  // YTD revenue is NET of VAT, matching the dashboard's Collected YTD and the
+  // Revenue Report (VAT collected is remitted onward, it isn't income).
+  const ytd = round2(allPayments.filter(p=>p.status==='paid' && new Date(p.paidAt).getFullYear()===now.getFullYear()).reduce((s,p)=>s+netReceived(p),0));
   // Outstanding on the board = signed contracts only, matching Receivables, and
   // split by horizon: what's collectable this FY vs contracted future-year
   // backlog. Reporting them as one number overstates the current position.
@@ -4727,10 +4795,14 @@ function BoardExport() {
   const boardFuture = boardRows.filter(p => receivableHorizon(p) === 'future');
   const backlog = boardFuture.reduce((s,p)=>s+Number(p.totalAmount||0),0);
   const outstanding = boardRows.reduce((s,p)=>s+Number(p.totalAmount||0),0) - backlog;
-  const renewalPipeline = contracts.filter(c=>c.status==='active' && c.endDate && daysBetween(now,c.endDate)>=0 && daysBetween(now,c.endDate)<=60).length;
+  // Renewals on EXECUTED status, matching the dashboard — a signed contract that
+  // hasn't started is still an agreement running to an end date.
+  const renewalPipeline = active.filter(c=>c.endDate && daysBetween(now,c.endDate)>=0 && daysBetween(now,c.endDate)<=60).length;
 
   const download = () => {
-    const rows = [['Metric','Value'],['MRR',mrr.toFixed(2)],['ARR (annualised)',arr.toFixed(2)],['Total active value (lifetime)',lifetimeValue.toFixed(2)],['YTD Revenue',ytd.toFixed(2)],['Outstanding (due this FY)',outstanding.toFixed(2)],['Contracted backlog (future FYs)',backlog.toFixed(2)],['Renewal Pipeline (60d)',renewalPipeline]];
+    // Income metrics are labelled net; money-owed metrics are gross — the basis
+    // rule the whole app follows, made explicit so the CSV can't be misread.
+    const rows = [['Metric','Value'],['MRR',mrr.toFixed(2)],['ARR (annualised, net of VAT)',arr.toFixed(2)],['Total active value (lifetime)',lifetimeValue.toFixed(2)],['YTD Revenue (net of VAT)',ytd.toFixed(2)],['Outstanding incl. VAT (due this FY)',outstanding.toFixed(2)],['Contracted backlog incl. VAT (future FYs)',backlog.toFixed(2)],['Renewal Pipeline (60d)',renewalPipeline]];
     downloadFile('﻿'+rows.map(r=>r.join(',')).join('\r\n'), 'sos-board-export.csv');
     toast.push('Board export downloaded.', 'success');
   };
@@ -4741,11 +4813,11 @@ function BoardExport() {
       <div className="bg-white rounded-xl border border-[var(--border)] p-6 max-w-lg">
         <dl className="text-sm space-y-3 mb-6">
           <div className="flex justify-between"><dt className="text-slate-500">MRR</dt><dd className="font-data">{fmtMoney(mrr,'EUR')}</dd></div>
-          <div className="flex justify-between"><dt className="text-slate-500">ARR (annualised)</dt><dd className="font-data">{fmtMoney(arr,'EUR')}</dd></div>
+          <div className="flex justify-between"><dt className="text-slate-500">ARR <span className="text-xs text-slate-400">(annualised, ex-VAT)</span></dt><dd className="font-data">{fmtMoney(arr,'EUR')}</dd></div>
           <div className="flex justify-between"><dt className="text-slate-500">Total active value (lifetime)</dt><dd className="font-data">{fmtMoney(lifetimeValue,'EUR')}</dd></div>
-          <div className="flex justify-between"><dt className="text-slate-500">YTD Revenue</dt><dd className="font-data">{fmtMoney(ytd,'EUR')}</dd></div>
-          <div className="flex justify-between"><dt className="text-slate-500">Outstanding <span className="text-xs text-slate-400">(due this FY)</span></dt><dd className="font-data">{fmtMoney(outstanding,'EUR')}</dd></div>
-          <div className="flex justify-between"><dt className="text-slate-500">Contracted backlog <span className="text-xs text-slate-400">(future FYs)</span></dt><dd className="font-data text-slate-500">{fmtMoney(backlog,'EUR')}</dd></div>
+          <div className="flex justify-between"><dt className="text-slate-500">YTD Revenue <span className="text-xs text-slate-400">(ex-VAT)</span></dt><dd className="font-data">{fmtMoney(ytd,'EUR')}</dd></div>
+          <div className="flex justify-between"><dt className="text-slate-500">Outstanding <span className="text-xs text-slate-400">(due this FY, incl. VAT)</span></dt><dd className="font-data">{fmtMoney(outstanding,'EUR')}</dd></div>
+          <div className="flex justify-between"><dt className="text-slate-500">Contracted backlog <span className="text-xs text-slate-400">(future FYs, incl. VAT)</span></dt><dd className="font-data text-slate-500">{fmtMoney(backlog,'EUR')}</dd></div>
           <div className="flex justify-between"><dt className="text-slate-500">Renewal Pipeline (60d)</dt><dd className="font-data">{renewalPipeline}</dd></div>
         </dl>
         <button onClick={download} className="w-full py-2.5 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">Download CSV</button>
@@ -4760,6 +4832,7 @@ function BoardExport() {
 function CompanyProfileSettings() {
   const auth = useAuth();
   const toast = useToast();
+  const { reload } = useContractsData();
   const [company, setCompany] = useState(null);
   const [form, setForm] = useState(null);
   const [showReset, setShowReset] = useState(false);
@@ -4841,7 +4914,8 @@ function CompanyProfileSettings() {
       toast.push('All clients and contracts cleared.', 'success');
       setShowReset(false);
       setConfirmText('');
-      location.reload();
+      // Refresh the shared store so every page reflects the wipe immediately.
+      await reload();
     } finally {
       setResetting(false);
     }
@@ -6349,7 +6423,14 @@ function App() {
     return <div className="min-h-screen flex items-center justify-center bg-[var(--navy-deep)]"><div className="text-white text-sm">Loading…</div></div>;
   }
   if (!auth.user) return <LoginScreen />;
-  return <AuthedApp />;
+  // DataProvider wraps only the authed app — the public signing flow above must
+  // never fetch the admin contract list (it has no rights to it, and RLS would
+  // reject it anyway).
+  return (
+    <DataProvider>
+      <AuthedApp />
+    </DataProvider>
+  );
 }
 
 function Root() {

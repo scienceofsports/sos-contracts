@@ -147,6 +147,80 @@ export function effectiveContractStatus(contract) {
   return s;
 }
 
+/* ---------------------------------------------------------------------------
+   Revenue basis — ONE definition of "what a contract is worth per year"
+   ---------------------------------------------------------------------------
+   These four live here, not in a component, because every revenue panel on the
+   board must agree permanently. The dashboard hero card, the Agreements
+   Overview tiers and the Client Operations Overview all call netAnnualised, so
+   a change to the basis moves all of them together. Previously netAnnualised
+   was defined inside Dashboard() and only two of its three consumers used it,
+   which is how the ops table drifted onto a gross, non-annualised basis while
+   still being labelled "ex-VAT".
+--------------------------------------------------------------------------- */
+
+// Term length of a contract in years (>= 1), from its start/end dates. Falls
+// back to 1 year when dates are missing, so a value is never divided by 0.
+export function contractTermYears(contract) {
+  if (!contract?.startDate || !contract?.endDate) return 1;
+  const days = daysBetween(contract.startDate, contract.endDate);
+  if (!(days > 0)) return 1;
+  return Math.max(1, days / 365);
+}
+
+// The per-YEAR value of a contract = total contract value ÷ term years. This is
+// what "annual revenue" views should sum, so a 3-year €164,500 deal contributes
+// ~€54,833/yr rather than distorting the annual figure with its whole lifetime
+// total. Rounded to cents.
+//
+// If a contract carries a manual `annualValueOverride` (a display-only reporting
+// figure — see migration 0019), that pinned amount wins. Use it when a clean
+// yearly deal's dates don't land on a whole number of 365-day years, so the
+// run-rate reads e.g. €47,000 instead of €47,277.56. The override never changes
+// the signed value/dates — only what these annualised views report.
+export function annualisedValue(contract) {
+  const override = Number(contract?.annualValueOverride);
+  if (Number.isFinite(override) && override > 0) return round2(override);
+  return round2(Number(contract?.value || 0) / contractTermYears(contract));
+}
+
+// The NET (ex-VAT) portion of what was actually received for a payment. Revenue
+// / income figures use this — VAT collected isn't income, it's passed to the tax
+// office. Split by the payment's net:gross ratio so it's correct for partial
+// payments and VAT-exempt rows. Money-OWED figures (receivables) stay gross.
+export function netReceived(payment) {
+  const gross = Number(payment?.totalAmount || 0);
+  const net = Number(payment?.amount != null ? payment.amount : gross);
+  const received = Number(payment?.paidAmount || 0);
+  if (gross > 0 && net >= 0) return round2(received * (net / gross));
+  return received;
+}
+
+// Annual run-rate of a contract, NET of VAT — the canonical revenue figure.
+// For a VAT-inclusive deal VAT is backed out of the gross; a net (ex-VAT) value
+// is unchanged. On a player-funded / shared deal only the club fixed fee carries
+// VAT, so VAT comes out of the vatable portion only (the player-funded remainder
+// is already VAT-free).
+//
+// `vatSplitFn` is injected rather than imported: format.js sits below
+// constants.js in the dependency order, and importing vatSplit here would make
+// the two modules circular. Callers pass it in.
+export function netAnnualised(contract, client, vatSplitFn) {
+  const annual = annualisedValue(contract);
+  const split = vatSplitFn ? vatSplitFn(contract) : null;
+  if (!split) {
+    const v = computeVAT(client, annual, contract?.vatInclusive);
+    return round2(v.netAmount != null ? v.netAmount : annual);
+  }
+  // Scale the split to the annualised figure (annual may be value ÷ term years).
+  const factor = Number(contract?.value) > 0 ? annual / Number(contract.value) : 1;
+  const vatablePart = round2(split.vatableNet * factor);
+  const exemptPart = round2(annual - vatablePart);
+  const v = computeVAT(client, vatablePart, contract?.vatInclusive);
+  const net = v.netAmount != null ? v.netAmount : vatablePart;
+  return round2(net + exemptPart);
+}
+
 // AR aging bucket for a payment, by days past due. 'current' = not yet overdue.
 // Buckets follow the standard accounts-receivable aging: 1–30 / 31–60 / 61–90 / 90+.
 export function agingBucket(payment) {
