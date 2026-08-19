@@ -245,7 +245,7 @@ const EL = {
   regNoShort: 'Αρ. Εγγραφής',
   vatShort: 'ΑΦΤ',
   executedBy: 'Υπογράφεται από τους δεόντως εξουσιοδοτημένους εκπροσώπους των Μερών κατά τις πιο κάτω ημερομηνίες.',
-  forAndOnBehalfOf: 'ΓΙΑ ΚΑΙ ΕΚ ΜΕΡΟΥΣ',
+  forAndOnBehalfOf: 'ΕΚ ΜΕΡΟΥΣ',
   sig_signature: 'ΥΠΟΓΡΑΦΗ',
   sig_name: 'ΟΝΟΜΑ',
   sig_title: 'ΘΕΣΗ',

@@ -1175,6 +1175,13 @@ export async function generateContractPdf({ contract, client, company }) {
     doc.setTextColor(...NAVY);
     // Narrower columns (3+) need the heading wrapped rather than truncated, or
     // an association's full name is cut mid-word.
+    // Shrink slightly rather than wrap when a heading only just overflows, so
+    // one long party name does not leave its column a line taller than the rest.
+    let headSize = 8.5;
+    while (headSize > 7 && doc.splitTextToSize(upper(heads[idx]), colW).length > 1) {
+      headSize -= 0.25;
+      doc.setFontSize(headSize);
+    }
     const headLines = doc.splitTextToSize(upper(heads[idx]), colW).slice(0, 2);
     headLines.forEach((ln, i) => doc.text(ln, x, yy + i * 10));
     // Reserve the TALLEST heading across all columns, so a one-line heading does

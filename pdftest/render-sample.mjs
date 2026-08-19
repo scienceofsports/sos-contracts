@@ -23,7 +23,7 @@ const { generateContractPdf } = await import('../src/lib/contractPdf.js');
 
 const company = {
   logo: _b64('public/Logo-scios-dark.png'),
-  signatoryName: 'Constantinos Charalambides',
+  signatoryName: 'Κωνσταντίνος Χαραλαμπίδης',
   signatoryTitle: 'CEO',
   signatorySignature: _b64('public/signature-constantinos.png'),
   name: 'C.C. Science of Sports Ltd',
