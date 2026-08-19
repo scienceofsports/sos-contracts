@@ -55,6 +55,7 @@ const contract = {
   jurisdiction: 'Nicosia, Cyprus',
   paymentModel: 'club_funded',
   paymentType: 'milestone',
+  extraSignatories: [{ organisation: 'Παγκύπριος Σύνδεσμος Προπονητών Ποδοσφαίρου', name: 'Μιχάλης Σεργίου', title: '', signature: _b64('public/signature-sergiou.png'), date: '19/08/2026' }],
   partnerLogos: [{ name: 'Cyprus Football Coaches Association', logoBase64: _b64('public/CFCA-logo.png') }],
   discountAmount: 700,
   discountLabel: 'Έκπτωση συνεργασίας με τον Παγκύπριο Σύνδεσμο Προπονητών Ποδοσφαίρου',

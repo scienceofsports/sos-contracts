@@ -1135,7 +1135,14 @@ const CFCA_PARTNER = { name: 'Cyprus Football Coaches Association', logoUrl: 'CF
 // The association countersigns the 2nd Division agreement, so its representative
 // gets his own signature column. He signs on paper: the name and title are
 // pre-filled, the signature and date lines are left for him to complete.
-const CFCA_SIGNATORY = { organisation: 'Παγκύπριος Σύνδεσμος Προπονητών Ποδοσφαίρου', name: 'Μιχάλης Σεργίου', title: '' };
+// His signature is pre-applied: he signs off the programme once for the whole
+// division rather than each club's copy. It ships in public/ like the logos.
+const CFCA_SIGNATORY = {
+  organisation: 'Παγκύπριος Σύνδεσμος Προπονητών Ποδοσφαίρου',
+  name: 'Μιχάλης Σεργίου',
+  title: '',
+  signatureUrl: 'signature-sergiou.png',
+};
 const DIV2_LIST_PRICE = 3000;
 const DIV2_DISCOUNT = 700;
 const DIV2_PLAYER_FEE = 150;
@@ -3469,7 +3476,8 @@ function ContractDocumentBody({ contract, client, company, showAdminWarnings = f
           const forceMajeureNum = shortForm ? null : n++;
           const governingLawNum = shortForm ? null : n++;
           const specialTermsParsed = parseSpecialTerms(contract.specialTerms);
-          const specialTermsNum = specialTermsParsed.length ? n++ : null;
+          // SHORT FORM: no Special Terms section — see isShortForm.
+          const specialTermsNum = (!shortForm && specialTermsParsed.length) ? n++ : null;
           // SHORT FORM: no general-terms clause at all — the document ends
           // with the commercial sections. See isShortForm for what this drops.
           const entireAgreementNum = shortForm ? null : n++;

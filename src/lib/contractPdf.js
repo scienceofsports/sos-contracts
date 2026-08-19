@@ -68,6 +68,18 @@ export async function generateContractPdf({ contract, client, company }) {
 
   // Resolve any partner logo referenced by file into inline data, since the
   // header is drawn synchronously and addImage cannot take a URL.
+  // Extra signatories may carry a pre-applied signature (the association's
+  // representative signs once for the whole programme rather than per club).
+  // Resolve a file reference to inline data, as the block draws synchronously.
+  const extraSignatories = [];
+  for (const sg of (contract.extraSignatories || [])) {
+    if (!sg) continue;
+    extraSignatories.push({
+      ...sg,
+      signature: sg.signature || await imageUrlToDataUrl(sg.signatureUrl),
+    });
+  }
+
   const partnerLogos = [];
   for (const p of (contract.partnerLogos || [])) {
     if (!p) continue;
@@ -125,6 +137,9 @@ export async function generateContractPdf({ contract, client, company }) {
   // from the data-URL prefix and fall back to PNG. Every call is wrapped in
   // try/catch by the caller so a bad/missing image never breaks the PDF.
   // -------------------------------------------------------------------------
+  // NOTE: every addImage call passes compression 'FAST' (deflate). Without it
+  // jsPDF stores PNG bitmaps raw, and a header carrying three logos produced a
+  // ~10MB PDF — a file that then gets emailed to every club in the division.
   const imgFormat = (dataUrl) => {
     if (typeof dataUrl === 'string' && /^data:image\/(jpe?g)/i.test(dataUrl)) return 'JPEG';
     return 'PNG';
@@ -212,7 +227,7 @@ export async function generateContractPdf({ contract, client, company }) {
       let placed = false;
       if (el.img && el.fit) {
         try {
-          doc.addImage(el.img, imgFormat(el.img), cx, lockCenterY - el.fit.h / 2, el.fit.w, el.fit.h);
+          doc.addImage(el.img, imgFormat(el.img), cx, lockCenterY - el.fit.h / 2, el.fit.w, el.fit.h, undefined, 'FAST');
           placed = true;
         } catch (_) { placed = false; }
       }
@@ -570,7 +585,10 @@ export async function generateContractPdf({ contract, client, company }) {
   const forceMajeureNum = shortForm ? null : n++;
   const governingLawNum = shortForm ? null : n++;
   const specialTermsParsed = parseSpecialTerms(contract.specialTerms);
-  const specialTermsNum = specialTermsParsed.length ? n++ : null;
+  // SHORT FORM: no Special Terms section — the document carries only the
+  // commercial clauses. NOTE this drops the season-limit on the CFCA discount
+  // and the €150 player-subscription terms; see isShortForm.
+  const specialTermsNum = (!shortForm && specialTermsParsed.length) ? n++ : null;
   // SHORT FORM: no general-terms clause at all — the document ends with the
   // commercial sections. See isShortForm for what this drops.
   const entireAgreementNum = shortForm ? null : n++;
@@ -1081,7 +1099,7 @@ export async function generateContractPdf({ contract, client, company }) {
   // additional signatories — the 2nd Division agreement is countersigned by the
   // coaches association, whose collaboration underpins the programme. Built as a
   // list so the columns size themselves rather than being hard-coded at two.
-  const extraSignatories = (contract.extraSignatories || []).filter(Boolean);
+  // (resolved above, with any signature file already inlined)
   const colCount = 2 + extraSignatories.length;
   const colGap = colCount > 2 ? 18 : 30;
   const colW = (maxW - colGap * (colCount - 1)) / colCount;
@@ -1106,7 +1124,9 @@ export async function generateContractPdf({ contract, client, company }) {
     // for them to complete by hand.
     // sigFallback stays EMPTY: the name belongs on the Name line, not written
     // across the signature rule as if it were a signature.
-    ...extraSignatories.map(sg => ({ sigImg: null, sigFallback: '', name: sg.name || '', title: sg.title || '', date: '' })),
+    // A pre-applied signature renders like the provider's counter-signature;
+    // without one the lines stay blank to be completed by hand.
+    ...extraSignatories.map(sg => ({ sigImg: sg.signature || null, sigFallback: '', name: sg.name || '', title: sg.title || '', date: sg.signature && sg.date ? sg.date : '' })),
   ];
 
   // Pre-compute the authorised-representative caption (client column only) so we
@@ -1169,7 +1189,7 @@ export async function generateContractPdf({ contract, client, company }) {
       const fit = idx === 0 ? fitImage(col.sigImg, Math.min(135, colW - 4), 46) : fitImage(col.sigImg, Math.min(190, colW - 4), 64);
       if (fit) {
         try {
-          doc.addImage(col.sigImg, imgFormat(col.sigImg), x + 2, sigLineY - fit.h - 3, fit.w, fit.h);
+          doc.addImage(col.sigImg, imgFormat(col.sigImg), x + 2, sigLineY - fit.h - 3, fit.w, fit.h, undefined, 'FAST');
           drewImg = true;
         } catch (_) { drewImg = false; }
       }
