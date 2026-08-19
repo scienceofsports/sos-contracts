@@ -79,6 +79,7 @@ import {
 } from './lib/format.js';
 import { decodePortablePayload } from './lib/portable.js';
 import { downloadContractPdf } from './lib/contractPdf.js';
+import { t as contractT, isGreek, elClientEntityDescriptor, elServiceGroup, durationSentence, governingLawSentence, closingNote, clauseName, bankTransferSentence, LANGUAGES } from './lib/contractText.js';
 import {
   companyService,
   clientService,
@@ -1149,9 +1150,13 @@ const CONTRACT_PACKAGES = [
     // print "3 Directors, 5 Coaches" with no player line.
     seats: { directorSeats:2, coachSeats:5, playerSeats:0 },
     opponent: { oppMatchFootage:true, oppTeamAnalysis:true, oppPlayerAnalysis:true },
+    // The 2nd Division document is issued in GREEK: it is sold division-wide to
+    // club chairmen and technical directors, not to lawyers. Same protections,
+    // short-form wording — see contractText.js.
+    language: 'el',
     specialTerms: [
-      { relatesTo:'Fees & Payment', text:`The standard annual fee for the services set out in this Agreement is €${DIV2_LIST_PRICE.toLocaleString('en-GB')}. Through the Service Provider's collaboration with the Cyprus Football Coaches Association, a discount of €${DIV2_DISCOUNT} is applied, giving the fee of €${(DIV2_LIST_PRICE - DIV2_DISCOUNT).toLocaleString('en-GB')} (exclusive of VAT) set out in the Fees & Payment section. This discount applies to the 2026/2027 season and is not automatically carried forward to any subsequent season.` },
-      { relatesTo:'Scope of Services', text:`Platform access under this Agreement is granted to the Client's technical director and coaching staff only. Individual players may, at their own option, subscribe separately for access to their own individual match clips at €${DIV2_PLAYER_FEE} per player per year. Such subscriptions are agreed directly between the individual player and the Service Provider, are not part of the fees payable by the Client, and place no obligation on the Client. The Client is not required to procure or guarantee any minimum number of player subscriptions.` },
+      { relatesTo:'Fees & Payment', text:`Η κανονική ετήσια χρέωση για τις υπηρεσίες της παρούσας Συμφωνίας είναι €${DIV2_LIST_PRICE.toLocaleString('el-GR')}. Μέσω της συνεργασίας του Παρόχου με τον Παγκύπριο Σύνδεσμο Προπονητών Ποδοσφαίρου, εφαρμόζεται έκπτωση €${DIV2_DISCOUNT}, δίνοντας τη χρέωση των €${(DIV2_LIST_PRICE - DIV2_DISCOUNT).toLocaleString('el-GR')} (πλέον ΦΠΑ) που αναφέρεται στις Χρεώσεις & Πληρωμή. Η έκπτωση αφορά τη σεζόν 2026/2027 και δεν μεταφέρεται αυτόματα σε επόμενη σεζόν.` },
+      { relatesTo:'Scope of Services', text:`Η πρόσβαση στην πλατφόρμα παραχωρείται μόνο στον τεχνικό διευθυντή και στο προπονητικό επιτελείο του Πελάτη. Οι παίκτες μπορούν, εφόσον το επιθυμούν, να εγγραφούν ξεχωριστά για πρόσβαση στα δικά τους κλιπ με €${DIV2_PLAYER_FEE} ανά παίκτη τον χρόνο. Οι εγγραφές αυτές συμφωνούνται απευθείας μεταξύ του κάθε παίκτη και του Παρόχου, δεν αποτελούν μέρος των χρεώσεων του Πελάτη και δεν δημιουργούν καμία υποχρέωση για τον Πελάτη. Ο Πελάτης δεν υποχρεούται να εξασφαλίσει ελάχιστο αριθμό εγγραφών.` },
     ] },
 ];
 function defaultServicesState() {
@@ -1397,6 +1402,10 @@ function ContractForm({ navigate, editContractId }) {
     // document, so a new contract behaves exactly as it does today.
     contractKind:'services', sponsorshipProperty:'', sponsorshipPropertyDetail:'',
     sponsorshipRights:[], sponsorshipActivation:'',
+    // Document language (0027). English by default; the 2nd Division package
+    // switches it to Greek, since that programme is sold division-wide to club
+    // officers who read Greek.
+    language:'en',
   });
   const [titleEdited, setTitleEdited] = useState(isEdit);
   // Which service groups are expanded in the form (collapsible sections).
@@ -1458,6 +1467,7 @@ function ContractForm({ navigate, editContractId }) {
         oppTeamAnalysis: !!existing.oppTeamAnalysis,
         oppPlayerAnalysis: !!existing.oppPlayerAnalysis,
         contractKind: existing.contractKind || 'services',
+        language: existing.language || 'en',
         sponsorshipProperty: existing.sponsorshipProperty ?? '',
         sponsorshipPropertyDetail: existing.sponsorshipPropertyDetail ?? '',
         sponsorshipRights: Array.isArray(existing.sponsorshipRights) ? existing.sponsorshipRights : [],
@@ -1769,6 +1779,10 @@ function ContractForm({ navigate, editContractId }) {
       // Omitted by the academy packages, which leave the form's values alone.
       ...(pkg.opponent || {}),
       ...(pkg.dates || {}),
+      // A package may pin the document language (the 2nd Division programme is
+      // sold division-wide in Greek). Packages that omit it leave the current
+      // choice alone rather than forcing English back on.
+      ...(pkg.language ? { language: pkg.language } : {}),
       description: generateDescriptionFromServices(nextServices, { slaBands: buildSlaBands(teams, pkg.teamSla), slaHours: f.slaHours }) }));
   };
   // Build the slaBands storage [{teams,hours}] from the per-team map, grouping
@@ -2163,6 +2177,23 @@ function ContractForm({ navigate, editContractId }) {
           {isSponsorshipForm
             ? 'A sponsorship grants rights (ad spots, branding, event presence) rather than delivering services. Scope of Analysis, Service Levels and Commercial Terms are omitted from the document.'
             : 'The standard SCIOS agreement — services, analysis scope and service levels.'}
+        </p>
+
+        {/* Document language. The Greek version is a SHORT-FORM agreement —
+            same protections, plainer and more compact wording — written for
+            club officers rather than lawyers. The 2nd Division package selects
+            it automatically. Only editable on a draft: 0027 freezes `language`
+            on an executed contract, since it defines the words the
+            counterparty agreed to. */}
+        <Field label="Document Language">
+          <select value={form.language} onChange={e=>set('language', e.target.value)} className={inputCls(false)}>
+            {LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.native}</option>)}
+          </select>
+        </Field>
+        <p className="text-xs text-slate-500 -mt-2 mb-4">
+          {form.language === 'el'
+            ? 'Ελληνικά — the short-form Greek agreement. Every clause (GDPR, IP, liability cap) is preserved; the wording is plainer and roughly half the length.'
+            : 'The full English agreement.'}
         </p>
 
         {isSponsorshipForm ? (
@@ -3193,7 +3224,9 @@ function ClientFillHint({ children }) {
 // Used by the admin ContractDocument view AND the client SigningFlow review
 // screen so both parties review EXACTLY the same legal document.
 function ContractDocumentBody({ contract, client, company, showAdminWarnings = false }) {
-  const lineItems = contract.services ? computeServiceLineItems(contract.services) : [];
+  // Document wording for this contract's language (English fallback per key).
+  const T = contractT(contract);
+  const lineItems = contract.services ? computeServiceLineItems(contract.services, contract.language) : [];
   const termYears = contract.startDate && contract.endDate ? Math.max(1, Math.round(daysBetween(contract.startDate, contract.endDate)/365)) : null;
   // Client country as readable prose: admin stores an ISO code ("CY") for VAT;
   // render the full name in the legal party clause. Blank ⇒ show a fill hint.
@@ -3236,18 +3269,20 @@ function ContractDocumentBody({ contract, client, company, showAdminWarnings = f
         })()}
 
         <p className="text-sm text-slate-700 mb-6">
-          This Agreement is made on <strong>{fmtDate(agreementDate(contract))}</strong> between:
+          {T.agreementMadeOn} <strong>{fmtDate(agreementDate(contract))}</strong> {T.between}
         </p>
         <p className="text-sm text-slate-700 mb-4">
-          <strong>{company.name}</strong>, a company registered under the laws of the Republic of Cyprus with registration number {company.registrationNumber}, VAT number {company.vatNumber}, having its registered office at {company.registeredAddress} (the "Service Provider"),
+          {isGreek(contract)
+            ? <><strong>{company.name}</strong>, εταιρεία εγγεγραμμένη κατά τους νόμους της Κυπριακής Δημοκρατίας με αριθμό εγγραφής {company.registrationNumber}, ΑΦΤ {company.vatNumber}, με έδρα {company.registeredAddress} (ο «Πάροχος»),</>
+            : <><strong>{company.name}</strong>, a company registered under the laws of the Republic of Cyprus with registration number {company.registrationNumber}, VAT number {company.vatNumber}, having its registered office at {company.registeredAddress} (the "Service Provider"),</>}
         </p>
-        <p className="text-sm text-slate-700 mb-6">and</p>
+        <p className="text-sm text-slate-700 mb-6">{T.and}</p>
         <p className="text-sm text-slate-700 mb-8">
-          <strong>{client.companyName}</strong>, {clientEntityDescriptor(client.entityType)}{' '}
+          <strong>{client.companyName}</strong>, {isGreek(contract) ? elClientEntityDescriptor(client.entityType) : clientEntityDescriptor(client.entityType)}{' '}
           {clientCountryLabel
             ? clientCountryLabel
             : <ClientFillHint>country to be confirmed on signing</ClientFillHint>}
-          {' '}with registration number{' '}
+          {' '}{isGreek(contract) ? 'με αριθμό εγγραφής' : 'with registration number'}{' '}
           {client.registrationNumber
             ? client.registrationNumber
             : <ClientFillHint>to be confirmed on signing</ClientFillHint>}
@@ -3256,25 +3291,28 @@ function ContractDocumentBody({ contract, client, company, showAdminWarnings = f
               number is genuinely still expected. See clientVatDisplay. */}
           {clientVatDisplay(client, 'TBC') !== '' && (
             <>
-              , VAT number{' '}
+              , {isGreek(contract) ? 'ΑΦΤ' : 'VAT number'}{' '}
               {client.vatNumber
                 ? client.vatNumber
                 : <ClientFillHint>to be confirmed on signing</ClientFillHint>}
             </>
           )}
-          , having its registered office at{' '}
+          , {isGreek(contract) ? 'με έδρα' : 'having its registered office at'}{' '}
           {client.address
             ? client.address
             : <ClientFillHint>to be confirmed on signing</ClientFillHint>}
-          {' '}(the "Client").
+          {' '}{isGreek(contract) ? '(ο «Πελάτης»).' : '(the "Client").'}
         </p>
-        <p className="text-sm text-slate-700 mb-8">The above are hereinafter jointly referred to as the "Parties".</p>
+        <p className="text-sm text-slate-700 mb-8">{T.partiesJointly}</p>
 
         {/* About the Service Provider — informational credibility section, kept OUTSIDE
             the numbered-clause IIFE so it never shifts clause numbers. Rendered as a
             clean section (no tinted box) to match the Purpose clause below. */}
-        <div className="mb-8">
-          <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}>About the Service Provider</div>
+        {/* Sales credibility copy, not contractual terms. The Greek document is
+            deliberately a short-form agreement, and this block is a third of its
+            first page — so it is omitted there. See contractText.js. */}
+        {!isGreek(contract) && <div className="mb-8">
+          <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}>{T.s_about}</div>
           <p className="text-sm text-slate-700 mb-3">Science of Sports (C.C. Science of Sports Ltd, HE 449875) is Cyprus's leading football intelligence company. Built by UEFA-qualified analysts and engineers, it operates the first fully integrated football analytics platform originating from Cyprus, serving federations, academies, coaches, scouts and players.</p>
           <ul className="text-sm text-slate-700 space-y-1.5 list-disc pl-5">
             <li>Official Performance Analysis Partner of the Cyprus Football Association — the platform trusted by all Cyprus National Teams.</li>
@@ -3284,7 +3322,7 @@ function ContractDocumentBody({ contract, client, company, showAdminWarnings = f
             <li>Founders of the Annual Youth Football Player &amp; Coach Awards.</li>
             <li>Creators of "Youth Zone" with Cablenet — Cyprus's first TV show dedicated to youth football.</li>
           </ul>
-        </div>
+        </div>}
 
         {(() => {
           let n = 1;
@@ -3328,7 +3366,7 @@ function ContractDocumentBody({ contract, client, company, showAdminWarnings = f
           const entireAgreementNum = n++;
           return (
             <React.Fragment>
-              <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{purposeNum}.</span> Purpose</div>
+              <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{purposeNum}.</span> {T.s_purpose}</div>
               {sponsorship ? (
                 <p className="text-sm text-slate-700 mb-8">
                   The purpose of this Agreement is to establish the sponsorship collaboration between the Parties in relation to{' '}
@@ -3340,7 +3378,7 @@ function ContractDocumentBody({ contract, client, company, showAdminWarnings = f
                 </p>
               ) : lineItems.length > 0 ? (
                 <div className="mb-8">
-                  <p className="text-sm text-slate-700 mb-4">The purpose of this Agreement is to define the terms of cooperation between the Parties, under which the Service Provider shall provide the Client with the following services:</p>
+                  <p className="text-sm text-slate-700 mb-4">{T.purposeIntro}</p>
                   {SERVICE_GROUPS.map(group => {
                     const groupItems = lineItems.filter(i => i.group === group);
                     if (!groupItems.length) return null;
@@ -3348,7 +3386,7 @@ function ContractDocumentBody({ contract, client, company, showAdminWarnings = f
                       <div key={group} className="mb-5 last:mb-0">
                         <div className="flex items-center gap-2 mb-2.5">
                           <span aria-hidden style={{ background:'var(--cyan)', width:3, height:14, borderRadius:2, WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }} />
-                          <span className="text-xs font-bold uppercase tracking-wide" style={{ color:'var(--navy-deep)' }}>{group}</span>
+                          <span className="text-xs font-bold uppercase tracking-wide" style={{ color:'var(--navy-deep)' }}>{isGreek(contract) ? elServiceGroup(group) : group}</span>
                         </div>
                         <div className="space-y-2">
                           {groupItems.map(i => {
@@ -3360,12 +3398,12 @@ function ContractDocumentBody({ contract, client, company, showAdminWarnings = f
                                 {qtyNote && <span className="text-slate-500">{qtyNote}</span>}
                                 {chip && <span className="sos-chip sos-chip-green ml-2 align-middle" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}>{chip}</span>}
                                 <span className="text-slate-500"> — {i.detail}</span>
-                                {seatsForService(contract.services, i.key) && (
+                                {seatsForService(contract.services, i.key, contract.language) && (
                                   <div
                                     className="text-xs mt-1 inline-block rounded px-2 py-1 border-l-2"
                                     style={{ background:'rgba(34,199,230,.12)', borderColor:'var(--cyan)', color:'var(--navy-deep)', WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}
                                   >
-                                    <span className="font-semibold">Access:</span> {seatsForService(contract.services, i.key)} <span className="italic">(exact users to be confirmed with the client)</span>
+                                    <span className="font-semibold">{T.accessLabel}</span> {seatsForService(contract.services, i.key, contract.language)} <span className="italic">{T.accessConfirmNoStop}</span>
                                   </div>
                                 )}
                               </div>
@@ -3396,7 +3434,7 @@ function ContractDocumentBody({ contract, client, company, showAdminWarnings = f
                           <div key={group} className="mb-5 last:mb-0">
                             <div className="flex items-center gap-2 mb-2.5">
                               <span aria-hidden style={{ background:'var(--cyan)', width:3, height:14, borderRadius:2, WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }} />
-                              <span className="text-xs font-bold uppercase tracking-wide" style={{ color:'var(--navy-deep)' }}>{group}</span>
+                              <span className="text-xs font-bold uppercase tracking-wide" style={{ color:'var(--navy-deep)' }}>{isGreek(contract) ? elServiceGroup(group) : group}</span>
                             </div>
                             <div className="space-y-2">
                               {groupRows.map((r, idx) => (
@@ -3461,12 +3499,12 @@ function ContractDocumentBody({ contract, client, company, showAdminWarnings = f
                         <tr key={i.key} className="border-b border-[var(--border)]">
                           <td className="py-2 px-3">
                             {i.label}
-                            {seatsForService(contract.services, i.key) && (
+                            {seatsForService(contract.services, i.key, contract.language) && (
                               <div
                                 className="text-xs mt-1 inline-block rounded px-2 py-1 border-l-2"
                                 style={{ background:'rgba(34,199,230,.12)', borderColor:'var(--cyan)', color:'var(--navy-deep)', WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}
                               >
-                                <span className="font-semibold">Access:</span> {seatsForService(contract.services, i.key)} <span className="italic">(exact users to be confirmed with the client)</span>
+                                <span className="font-semibold">{T.accessLabel}</span> {seatsForService(contract.services, i.key, contract.language)} <span className="italic">{T.accessConfirmNoStop}</span>
                               </div>
                             )}
                           </td>
@@ -3515,7 +3553,7 @@ function ContractDocumentBody({ contract, client, company, showAdminWarnings = f
 
               {analysisNum && (
                 <React.Fragment>
-                  <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{analysisNum}.</span> Scope of Analysis</div>
+                  <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{analysisNum}.</span> {T.s_analysis}</div>
                   <p className={`text-sm text-slate-700 ${analysisScope.opponent ? 'mb-3' : 'mb-8'}`}>The Service Provider shall provide performance analysis for the following teams of the Client: <strong style={{ color:'var(--navy-deep)' }}>{analysisScope.teams}</strong>. {analysisScope.coverage}</p>
                   {analysisScope.opponent && (
                     <div className="mb-8 flex items-center gap-2 flex-wrap">
@@ -3529,7 +3567,7 @@ function ContractDocumentBody({ contract, client, company, showAdminWarnings = f
 
               {(() => { const vs = vatSummary(contract, (a) => fmtMoney(a, contract.currency), client); const pt = paymentTimingWording(contract); return (
               <React.Fragment>
-              <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{feesNum}.</span> Fees & Payment</div>
+              <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{feesNum}.</span> {T.s_fees}</div>
               <p className="text-sm text-slate-700 mb-2">{feesConsiderationPhrase(contract)}, the Client shall pay the Service Provider a total of <strong>{fmtMoney(vs.net, contract.currency)}</strong>{vs.applies ? ' (exclusive of VAT)' : ''}, payable <strong>{contract.paymentType === 'one_time' ? 'in a single payment' : contract.paymentType === 'milestone' ? 'in instalments' : contract.paymentType.replace('_',' ')}</strong>{pt.timingPhrase}</p>
               {vs.sentence && <p className="text-sm text-slate-700 mb-2">{vs.sentence}</p>}
               {Array.isArray(contract.payments) && contract.payments.length > 1 && (
@@ -3553,22 +3591,26 @@ function ContractDocumentBody({ contract, client, company, showAdminWarnings = f
                 </table>
               )}
               {pt.advanceInvoiceSentence && <p className="text-sm text-slate-700 mb-2">{pt.advanceInvoiceSentence}</p>}
-              <p className="text-sm text-slate-700 mb-4">All payments shall be made by bank transfer following the issuance of a valid invoice by the Service Provider{pt.advanceInvoiceSentence ? ' for the applicable instalment' : ''}, in accordance with applicable VAT regulations. A late payment penalty of {contract.latePaymentPenalty}% per month applies to overdue amounts.</p>
+              {/* Built, not inlined, so the instalment qualifier and the penalty
+                  sentence stay identical to both PDF generators. Note the
+                  penalty clause is now correctly OMITTED when no penalty is
+                  set, matching the PDFs (it used to print "undefined%" here). */}
+              <p className="text-sm text-slate-700 mb-4">{bankTransferSentence({ language: contract.language, perInstalment: !!pt.advanceInvoiceSentence, latePaymentPenalty: contract.latePaymentPenalty })}</p>
               </React.Fragment>
               ); })()}
               {(company.bankName || company.bankIBAN || company.bankSWIFT) && (
                 <div className="text-sm text-slate-700 mb-8 rounded-lg p-4" style={{ background:'rgba(10,26,63,0.04)', border:'1px solid var(--border)' }}>
-                  <div className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color:'var(--navy-deep)' }}>Bank Details (Service Provider)</div>
-                  <div>Account Name: <strong>{company.name}</strong></div>
-                  {company.bankName && <div>Bank: <strong>{company.bankName}</strong></div>}
-                  {company.bankIBAN && <div>IBAN: <strong>{company.bankIBAN}</strong></div>}
-                  {company.bankSWIFT && <div>SWIFT/BIC: <strong>{company.bankSWIFT}</strong></div>}
+                  <div className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color:'var(--navy-deep)' }}>{T.bankDetails}</div>
+                  <div>{T.accountName}: <strong>{company.name}</strong></div>
+                  {company.bankName && <div>{T.bank}: <strong>{company.bankName}</strong></div>}
+                  {company.bankIBAN && <div>{T.iban}: <strong>{company.bankIBAN}</strong></div>}
+                  {company.bankSWIFT && <div>{T.swift}: <strong>{company.bankSWIFT}</strong></div>}
                 </div>
               )}
 
               {commercialNum && (
                 <React.Fragment>
-                  <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{commercialNum}.</span> Commercial Terms & Club Commission</div>
+                  <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{commercialNum}.</span> {T.s_commercial}</div>
                   <p className="text-sm text-slate-700 mb-2"><span className="font-semibold" style={{ color:'var(--navy-deep)' }}>{commercial.intro}.</span> {commercial.breakdown}</p>
                   {commercial.commission && <p className="text-sm text-slate-700 mb-8">{commercial.commission}</p>}
                 </React.Fragment>
@@ -3578,7 +3620,7 @@ function ContractDocumentBody({ contract, client, company, showAdminWarnings = f
                   after Fees, mirroring the executed KFC agreement's clause order. */}
               {brandingNum && (
                 <React.Fragment>
-                  <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{brandingNum}.</span> Branding &amp; Materials</div>
+                  <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{brandingNum}.</span> {T.s_branding}</div>
                   <p className="text-sm text-slate-700 mb-2">The Client shall provide all required advertising materials and brand assets in a suitable format within the agreed production timelines. The Service Provider shall ensure the placement and visibility of the agreed sponsorship elements in accordance with this Agreement.</p>
                   <p className="text-sm text-slate-700 mb-8">The Client grants the Service Provider a non-exclusive, royalty-free licence to use the Client's name, logo and brand assets solely for the purpose of delivering the sponsorship rights set out in this Agreement. Where the Client fails to supply materials within the agreed timelines, the Service Provider shall not be liable for any resulting loss of exposure, and the fee shall remain payable in full.</p>
                 </React.Fragment>
@@ -3586,7 +3628,7 @@ function ContractDocumentBody({ contract, client, company, showAdminWarnings = f
 
               {serviceLevelsNum && (
                 <React.Fragment>
-                  <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{serviceLevelsNum}.</span> Service Levels</div>
+                  <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{serviceLevelsNum}.</span> {T.s_serviceLevels}</div>
                   {serviceLevelsLines(contract).map((ln, i) => (
                     <p key={i} className="text-sm text-slate-700 mb-2">{ln} These timeframes exclude weekends, public holidays and any delay caused by the Client, third parties or events beyond the Service Provider's reasonable control.</p>
                   ))}
@@ -3598,7 +3640,7 @@ function ContractDocumentBody({ contract, client, company, showAdminWarnings = f
                   Client as data CONTROLLER and SCIOS as PROCESSOR — correct when
                   SCIOS analyses the Client's players, but false on a sponsorship,
                   where SCIOS processes no personal data for the sponsor at all. */}
-              <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{confidentialityNum}.</span> Confidentiality &amp; Data Protection</div>
+              <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{confidentialityNum}.</span> {T.s_confidentiality}</div>
               <div className="mb-8 pl-4 pr-5 py-4 rounded-r-lg" style={{ background:'#EEF0FB', borderLeft:'3px solid var(--navy-deep)', WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}>
                 {(() => {
                   const cp = confidentialityParas(contract);
@@ -3615,36 +3657,36 @@ function ContractDocumentBody({ contract, client, company, showAdminWarnings = f
                   on a sponsorship there are no deliverables, and that wording would
                   hand a sponsor a perpetual licence over SCIOS's match footage. The
                   sponsorship variant instead keeps each Party's marks their own. */}
-              <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{ipNum}.</span> Intellectual Property Rights</div>
+              <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{ipNum}.</span> {T.s_ip}</div>
               {ipParas(contract).map((p, i, arr) => (
                 <p key={i} className={i === arr.length - 1 ? 'text-sm text-slate-700 mb-8' : 'text-sm text-slate-700 mb-3'}>{p}</p>
               ))}
 
-              <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{durationNum}.</span> Duration</div>
-              <p className="text-sm text-slate-700 mb-8">This Agreement shall commence on <strong>{fmtDate(contract.startDate)}</strong> and shall remain in force until <strong>{fmtDate(contract.endDate)}</strong>{termYears ? ` (approximately ${termYears} year${termYears>1?'s':''})` : ''}, unless terminated earlier in accordance with Section {terminationNum}.</p>
+              <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{durationNum}.</span> {T.s_duration}</div>
+              <p className="text-sm text-slate-700 mb-8">{durationSentence({ language: contract.language, startDate: fmtDate(contract.startDate), endDate: fmtDate(contract.endDate), termYears, terminationNum })}</p>
 
-              <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{terminationNum}.</span> Termination</div>
-              <p className="text-sm text-slate-700 mb-2">Either Party may terminate this Agreement with three (3) months' written notice, or immediately in the event of a material breach not remedied within thirty (30) days.</p>
+              <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{terminationNum}.</span> {T.s_termination}</div>
+              <p className="text-sm text-slate-700 mb-2">{T.terminationNotice}</p>
               {/* On a sponsorship there are no Deliverables to hand back; what
                   matters is that exposure stops and fees already earned stand. */}
               <p className="text-sm text-slate-700 mb-8">{terminationEffectPara(contract)}</p>
 
-              <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{liabilityNum}.</span> Limitation of Liability</div>
-              <p className="text-sm text-slate-700 mb-8">The Service Provider shall not be responsible for sporting results, team selection decisions, or competition outcomes. Total liability under this Agreement shall not exceed the fees paid during the preceding twelve (12) months. This limitation shall not apply to breaches of confidentiality, data protection obligations, or unauthorized use of the Client's data or intellectual property.</p>
+              <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{liabilityNum}.</span> {T.s_liability}</div>
+              <p className="text-sm text-slate-700 mb-8">{T.liability}</p>
 
-              <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{forceMajeureNum}.</span> Force Majeure</div>
-              <p className="text-sm text-slate-700 mb-8">Neither Party shall be liable for failure to perform due to events beyond reasonable control.</p>
+              <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{forceMajeureNum}.</span> {T.s_forceMajeure}</div>
+              <p className="text-sm text-slate-700 mb-8">{T.forceMajeure}</p>
 
-              <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{governingLawNum}.</span> Governing Law & Jurisdiction</div>
-              <p className="text-sm text-slate-700 mb-8">This Agreement shall be governed by the laws of {contract.governingLaw}, with exclusive jurisdiction in {contract.jurisdiction}.</p>
+              <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{governingLawNum}.</span> {T.s_governingLaw}</div>
+              <p className="text-sm text-slate-700 mb-8">{governingLawSentence({ language: contract.language, governingLaw: contract.governingLaw, jurisdiction: contract.jurisdiction })}</p>
 
               {specialTermsNum && (
                 <React.Fragment>
-                  <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{specialTermsNum}.</span> Special Terms</div>
+                  <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{specialTermsNum}.</span> {T.s_specialTerms}</div>
                   <ol className="text-sm text-slate-700 mb-8 space-y-2 list-decimal pl-5">
                     {specialTermsParsed.map((t, i) => (
                       <li key={i}>
-                        {t.relatesTo && t.relatesTo !== 'General' && <span className="font-semibold" style={{ color:'var(--navy-deep)' }}>Re: {t.relatesTo}. </span>}
+                        {t.relatesTo && t.relatesTo !== 'General' && <span className="font-semibold" style={{ color:'var(--navy-deep)' }}>{T.reRef} {clauseName(t.relatesTo, contract.language)}. </span>}
                         <span className="whitespace-pre-line">{t.text}</span>
                       </li>
                     ))}
@@ -3652,8 +3694,8 @@ function ContractDocumentBody({ contract, client, company, showAdminWarnings = f
                 </React.Fragment>
               )}
 
-              <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{entireAgreementNum}.</span> Entire Agreement & Amendments</div>
-              <p className="text-sm text-slate-700 mb-12">This Agreement constitutes the entire agreement between the Parties. Any amendment must be made in writing and signed by both Parties.</p>
+              <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{entireAgreementNum}.</span> {T.s_entireAgreement}</div>
+              <p className="text-sm text-slate-700 mb-12">{T.entireAgreement}</p>
             </React.Fragment>
           );
         })()}
@@ -3677,18 +3719,17 @@ function ContractDocumentBody({ contract, client, company, showAdminWarnings = f
         {/* Navy closing panel — warm, confident sign-off before the signatures. */}
         <div className="rounded-lg px-6 py-5 mb-10" style={{ background:'var(--navy-deep)', WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}>
           <p className="text-sm leading-relaxed" style={{ color:'#E6ECF7' }}>
-            Science of Sports is proud to partner with {client.companyName} and is committed to delivering
-            performance analysis of the highest professional standard throughout this Agreement.
-            <span className="font-semibold" style={{ color:'var(--cyan)' }}> Transforming matches into knowledge — together.</span>
+            {closingNote({ language: contract.language, clientName: client.companyName })}
+            <span className="font-semibold" style={{ color:'var(--cyan)' }}> {T.closingTagline}</span>
           </p>
         </div>
 
-        <div className="sos-pill mb-2" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}>Signatures</div>
-        <p className="text-xs text-slate-500 mb-6">Executed by the duly authorised representatives of the Parties as of the dates set out below.</p>
+        <div className="sos-pill mb-2" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}>{T.s_signatures}</div>
+        <p className="text-xs text-slate-500 mb-6">{T.executedBy}</p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-10 text-sm">
           {/* Service Provider — auto-applied Scios authorised signatory. */}
           <div>
-            <div className="text-xs font-semibold uppercase tracking-wide mb-4" style={{ color:'var(--navy-deep)' }}>For and on behalf of {company.name}</div>
+            <div className="text-xs font-semibold uppercase tracking-wide mb-4" style={{ color:'var(--navy-deep)' }}>{T.forAndOnBehalfOf} {company.name}</div>
             {company.signatoryName ? (
               <SignatureLines
                 provider
@@ -3704,7 +3745,7 @@ function ContractDocumentBody({ contract, client, company, showAdminWarnings = f
           </div>
           {/* Client */}
           <div>
-            <div className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color:'var(--navy-deep)' }}>For and on behalf of {client.companyName}</div>
+            <div className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color:'var(--navy-deep)' }}>{T.forAndOnBehalfOf} {client.companyName}</div>
             {contract.signerOnBehalf && contract.representativeCompany && (
               <div className="text-[11px] text-slate-600 mb-3 leading-snug">
                 Signed by <strong>{contract.representativeCompany}</strong>
@@ -5208,6 +5249,12 @@ function normalizeSnapshot(snapshot) {
     // in the admin frozen view (wrong clause set, wrong Purpose). Legacy
     // snapshots carry no contract_kind and correctly default to 'services'.
     contractKind: pick(c, 'contractKind', 'contract_kind') || 'services',
+    // Document language (0027) — WITHOUT this a frozen Greek snapshot would
+    // re-render in ENGLISH on the signing page and in the admin frozen view,
+    // i.e. the counterparty would be shown different words from the ones in
+    // the PDF they were emailed. Legacy snapshots carry no language and
+    // correctly default to 'en'.
+    language: pick(c, 'language') || 'en',
     sponsorshipProperty: pick(c, 'sponsorshipProperty', 'sponsorship_property'),
     sponsorshipPropertyDetail: pick(c, 'sponsorshipPropertyDetail', 'sponsorship_property_detail'),
     sponsorshipRights: pick(c, 'sponsorshipRights', 'sponsorship_rights') || [],

@@ -22,6 +22,7 @@
    ========================================================================= */
 import { jsPDF } from 'jspdf';
 import { loadPdfFonts, PDF_FONT } from './pdfFont.js';
+import { t as contractT, isGreek, elServiceGroup, durationSentence, governingLawSentence, closingNote, clauseName, bankTransferSentence } from './contractText.js';
 import { fmtDate, fmtMoney, daysBetween, upper } from './format.js';
 import { computeServiceLineItems, platformSeatsSummary, seatsForService, SERVICE_GROUPS, analysisScopeText, seasonLabelFromDates, commercialModelText, parseSpecialTerms, serviceLevelsLines, vatSummary, paymentTimingWording, agreementDate, clientPartyClause, clientVatDisplay, isPlayerFunded, playerFundedScopeRows, isSponsorship, hasMatchServices, computeSponsorshipRights, sponsorshipRightText, feesConsiderationPhrase, SPONSORSHIP_RIGHT_GROUPS, confidentialityParas, ipParas, terminationEffectPara } from './constants.js';
 
@@ -66,6 +67,8 @@ export async function generateContractPdf({ contract, client, company }) {
   const FOOTER_BAND = 34;
   const BOTTOM = FOOTER_BAND + 10; // keep content above the footer band
 
+  // Document wording for this contract's language (English fallback per key).
+  const T = contractT(contract);
   const contractNumber = contract.contractNumber || '';
   const companyName = company?.name || 'C.C. Science of Sports Ltd';
   const clientName = client?.companyName || 'Client';
@@ -225,7 +228,7 @@ export async function generateContractPdf({ contract, client, company }) {
     const email = company?.contactEmail || 'info@scienceofsports.net';
     const reg = company?.registrationNumber || 'HE 449875';
     const vat = company?.vatNumber;
-    const line2 = `${email} · +357 22 396997 · Reg. No. ${reg}${vat ? ' · VAT ' + vat : ''}`;
+    const line2 = `${email} · +357 22 396997 · ${T.regNoShort} ${reg}${vat ? ` · ${T.vatShort} ` + vat : ''}`;
     doc.setFont(FONT, 'normal');
     doc.setFontSize(7);
     doc.setTextColor(...FOOTER_GREY);
@@ -390,7 +393,7 @@ export async function generateContractPdf({ contract, client, company }) {
 
   // --- Data prep -----------------------------------------------------------
   const services = contract.services;
-  const lineItems = services ? computeServiceLineItems(services) : [];
+  const lineItems = services ? computeServiceLineItems(services, contract.language) : [];
   const termYears = contract.startDate && contract.endDate
     ? Math.max(1, Math.round(daysBetween(contract.startDate, contract.endDate) / 365)) : null;
 
@@ -415,19 +418,21 @@ export async function generateContractPdf({ contract, client, company }) {
   rule();
 
   // --- Preamble — both parties, full details. ------------------------------
-  text(`This Agreement is made on ${fmtDate(agreementDate(contract))} between:`, { size: 10, gap: 4 });
-  text(`${company?.name || '—'}, a company registered under the laws of the Republic of Cyprus with registration number ${company?.registrationNumber || '—'}, VAT number ${company?.vatNumber || '—'}, having its registered office at ${company?.registeredAddress || '—'} (the "Service Provider"),`, { size: 10, gap: 2 });
-  text('and', { size: 10, gap: 2 });
+  text(`${T.agreementMadeOn} ${fmtDate(agreementDate(contract))} ${T.between}`, { size: 10, gap: 4 });
+  text(isGreek(contract)
+    ? `${company?.name || '—'}, εταιρεία εγγεγραμμένη κατά τους νόμους της Κυπριακής Δημοκρατίας με αριθμό εγγραφής ${company?.registrationNumber || '—'}, ΑΦΤ ${company?.vatNumber || '—'}, με έδρα ${company?.registeredAddress || '—'} (ο «Πάροχος»),`
+    : `${company?.name || '—'}, a company registered under the laws of the Republic of Cyprus with registration number ${company?.registrationNumber || '—'}, VAT number ${company?.vatNumber || '—'}, having its registered office at ${company?.registeredAddress || '—'} (the "Service Provider"),`, { size: 10, gap: 2 });
+  text(T.and, { size: 10, gap: 2 });
   // Blank client fields show a bracketed "[ … ]" placeholder so it's obvious
   // what the Client will confirm on signing; a filled value reads as plain text.
-  const TBC = '[ to be confirmed on signing ]';
+  const TBC = isGreek(contract) ? '[ θα επιβεβαιωθεί κατά την υπογραφή ]' : '[ to be confirmed on signing ]';
   // country may be a bare ISO code ("CY") from the admin record — expand to a
   // readable country name for the legal party clause.
   const ISO = { CY: 'Cyprus', GR: 'Greece', GB: 'United Kingdom', SA: 'Saudi Arabia', MT: 'Malta' };
   const rawCountry = (client?.country || '').trim();
   const clientCountry = rawCountry
     ? (/^[A-Za-z]{2}$/.test(rawCountry) ? (ISO[upper(rawCountry)] || upper(rawCountry)) : rawCountry)
-    : '[ country to be confirmed on signing ]';
+    : (isGreek(contract) ? '[ η χώρα θα επιβεβαιωθεί κατά την υπογραφή ]' : '[ country to be confirmed on signing ]');
   const clientReg = client?.registrationNumber || TBC;
   const clientAddr = client?.address || TBC;
   const entityType = client?.entityType || 'company';
@@ -439,11 +444,15 @@ export async function generateContractPdf({ contract, client, company }) {
     registration: clientReg,
     vat: clientVat,
     address: clientAddr,
+    language: contract.language,
   }), { size: 10, gap: 2 });
-  text('The above are hereinafter jointly referred to as the "Parties".', { size: 10, gap: 10 });
+  text(T.partiesJointly, { size: 10, gap: 10 });
 
   // --- About the Service Provider — navy pill + intro + credential bullets. --
-  {
+  // Sales credibility copy, not contractual terms. The Greek document is a
+  // deliberately short-form agreement and this block is a third of its first
+  // page, so it is omitted there — matching ContractDocumentBody.
+  if (!isGreek(contract)) {
     const aboutIntro = "Science of Sports (C.C. Science of Sports Ltd, HE 449875) is Cyprus's leading football intelligence company. Built by UEFA-qualified analysts and engineers, it operates the first fully integrated football analytics platform originating from Cyprus, serving federations, academies, coaches, scouts and players.";
     const aboutBullets = [
       'Official Performance Analysis Partner of the Cyprus Football Association — the platform trusted by all Cyprus National Teams.',
@@ -493,14 +502,14 @@ export async function generateContractPdf({ contract, client, company }) {
   const entireAgreementNum = n++;
 
   // --- Purpose — STRUCTURED by service group when services exist. -----------
-  pillHeader(purposeNum, 'Purpose');
+  pillHeader(purposeNum, T.s_purpose);
   if (sponsorship) {
     // Sponsorship: name the Property, mirroring the executed KFC agreement.
     const propName = contract.sponsorshipProperty || '[the sponsored property to be confirmed]';
     const propDetail = contract.sponsorshipPropertyDetail ? `, ${contract.sponsorshipPropertyDetail}` : '';
     text(`The purpose of this Agreement is to establish the sponsorship collaboration between the Parties in relation to ${propName}${propDetail} (the "Property"), under which the Service Provider shall grant the Client the sponsorship rights set out in this Agreement.`, { size: 10, gap: 10 });
   } else if (lineItems.length > 0) {
-    text('The purpose of this Agreement is to define the terms of cooperation between the Parties, under which the Service Provider shall provide the Client with the following services:', { size: 10, gap: 6 });
+    text(T.purposeIntro, { size: 10, gap: 6 });
     SERVICE_GROUPS.forEach((group) => {
       const groupItems = lineItems.filter((i) => i.group === group);
       if (!groupItems.length) return;
@@ -514,7 +523,7 @@ export async function generateContractPdf({ contract, client, company }) {
       doc.setFont(FONT, 'bold');
       doc.setFontSize(9);
       doc.setTextColor(...NAVY);
-      doc.text(upper(group), M + 8, ghBaseline);
+      doc.text(upper(isGreek(contract) ? elServiceGroup(group) : group), M + 8, ghBaseline);
       y += 4;
       groupItems.forEach((i) => {
         const qtyNote = i.unit === 'per_match' ? ` (${i.qty} matches)` : i.unit === 'per_unit' ? ` (${i.qty})` : '';
@@ -542,8 +551,8 @@ export async function generateContractPdf({ contract, client, company }) {
         // Detail line(s) in grey, indented.
         text(i.detail, { size: 9.5, color: SOFT_GREY, gap: 2, x: itemX, width: itemW });
         if (i.key === 'platform_access') {
-          const seats = seatsForService(services, i.key);
-          if (seats) accessCallout(`Access: ${seats} (exact users to be confirmed with the client).`, itemX + 10, itemW - 10);
+          const seats = seatsForService(services, i.key, contract.language);
+          if (seats) accessCallout(`${T.accessLabel} ${seats} ${T.accessConfirm}`, itemX + 10, itemW - 10);
         }
       });
       y += 6;
@@ -610,7 +619,7 @@ export async function generateContractPdf({ contract, client, company }) {
   // to the value. Services-basis deals show real per-line prices. Mirrors
   // ContractDocumentBody + contractPdf.ts.
   if (scopeNum) {
-    pillHeader(scopeNum, 'Scope of Services');
+    pillHeader(scopeNum, T.s_scope);
 
     const pf = isPlayerFunded(contract);
     const pfRows = playerFundedScopeRows(contract, lineItems, (a) => fmtMoney(a, contract.currency));
@@ -633,8 +642,8 @@ export async function generateContractPdf({ contract, client, company }) {
     doc.setFont(FONT, 'bold');
     doc.setFontSize(8.5);
     doc.setTextColor(...WHITE);
-    doc.text('SERVICE', M + cellPadX, headTop + 13);
-    doc.text('AMOUNT', W - M - cellPadX, headTop + 13, { align: 'right' });
+    doc.text(upper(T.th_service), M + cellPadX, headTop + 13);
+    doc.text(upper(T.th_amount), W - M - cellPadX, headTop + 13, { align: 'right' });
     y = headTop + headH;
 
     // Body rows: wrapped service label (+ optional seats subline) on the left,
@@ -643,8 +652,8 @@ export async function generateContractPdf({ contract, client, company }) {
     lineItems.forEach((i) => {
       const priceStr = fmtMoney(i.listPrice, contract.currency);
       // Compose the service label; platform access carries a seats subline.
-      const seats = seatsForService(services, i.key);
-      const subline = seats ? `Access: ${seats} (exact users to be confirmed with the client)` : '';
+      const seats = seatsForService(services, i.key, contract.language);
+      const subline = seats ? `${T.accessLabel} ${seats} ${T.accessConfirmNoStop}` : '';
 
       // Measure wrapped label height so the row + rule size correctly.
       doc.setFontSize(9.5);
@@ -745,14 +754,14 @@ export async function generateContractPdf({ contract, client, company }) {
     doc.setFont(FONT, 'bold');
     doc.setFontSize(10.5);
     doc.setTextColor(...NAVY);
-    doc.text(scopeVs.applies ? 'Total Contract Value (excl. VAT)' : 'Total Contract Value', M + cellPadX, y);
+    doc.text(scopeVs.applies ? T.totalContractValue : T.totalContractValuePlain, M + cellPadX, y);
     doc.text(fmtMoney(scopeVs.net, contract.currency), W - M - cellPadX, y, { align: 'right' });
     y += 12;
     if (scopeVs.applies) {
       doc.setFont(FONT, 'normal');
       doc.setFontSize(9.5);
       doc.setTextColor(90, 100, 110);
-      doc.text(`VAT (${scopeVs.ratePct}%)`, M + cellPadX, y);
+      doc.text(`${T.vatLine} (${scopeVs.ratePct}%)`, M + cellPadX, y);
       doc.text(fmtMoney(scopeVs.vat, contract.currency), W - M - cellPadX, y, { align: 'right' });
       y += 13;
       doc.setDrawColor(...NAVY);
@@ -761,7 +770,7 @@ export async function generateContractPdf({ contract, client, company }) {
       doc.setFont(FONT, 'bold');
       doc.setFontSize(10.5);
       doc.setTextColor(...NAVY);
-      doc.text('Total incl. VAT', M + cellPadX, y);
+      doc.text(T.totalInclVat, M + cellPadX, y);
       doc.text(fmtMoney(scopeVs.gross, contract.currency), W - M - cellPadX, y, { align: 'right' });
       y += 12;
     }
@@ -769,7 +778,7 @@ export async function generateContractPdf({ contract, client, company }) {
 
   // --- Scope of Analysis ---------------------------------------------------
   if (analysisNum) {
-    pillHeader(analysisNum, 'Scope of Analysis');
+    pillHeader(analysisNum, T.s_analysis);
     text(`The Service Provider shall provide performance analysis for the following teams of the Client: ${analysisScope.teams}. ${analysisScope.coverage}`, { size: 10, gap: analysisScope.opponent ? 6 : 10 });
     // Cyan-bar "Opponent access" subheading + granted items — only if any granted.
     if (analysisScope.opponent) {
@@ -789,14 +798,14 @@ export async function generateContractPdf({ contract, client, company }) {
 
   // --- Fees & Payment ------------------------------------------------------
   {
-    const payWord = contract.paymentType === 'one_time' ? 'in a single payment'
-      : contract.paymentType === 'milestone' ? 'in instalments'
-      : (contract.paymentType || '').replace('_', ' ');
+    // Every known payment type has a translation; an unknown one falls back to
+    // the raw value rather than printing nothing.
+    const payWord = T[`payWord_${contract.paymentType}`] || (contract.paymentType || '').replace('_', ' ');
     ensure(40);
-    pillHeader(feesNum, 'Fees & Payment');
+    pillHeader(feesNum, T.s_fees);
     const vs = vatSummary(contract, (a) => fmtMoney(a, contract.currency), client);
     const pt = paymentTimingWording(contract);
-    text(`${feesConsiderationPhrase(contract)}, the Client shall pay the Service Provider a total of ${fmtMoney(vs.net, contract.currency)}${vs.applies ? ' (exclusive of VAT)' : ''}, payable ${payWord}${pt.timingPhrase}`, { size: 10, gap: vs.sentence ? 3 : 6 });
+    text(`${feesConsiderationPhrase(contract)}, ${T.feesShallPay} ${fmtMoney(vs.net, contract.currency)}${vs.applies ? ` ${T.feesExclVat}` : ''}, ${T.feesPayable} ${payWord}${pt.timingPhrase}`, { size: 10, gap: vs.sentence ? 3 : 6 });
     if (vs.sentence) text(vs.sentence, { size: 10, gap: 6 });
     // Instalment schedule table (only when more than one payment).
     const pays = Array.isArray(contract.payments) ? contract.payments : [];
@@ -806,15 +815,15 @@ export async function generateContractPdf({ contract, client, company }) {
       ensure(16);
       y += 12;
       doc.setFont(FONT, 'bold'); doc.setFontSize(8); doc.setTextColor(...NAVY);
-      doc.text('PAYMENT', M + 6, y);
-      doc.text('DUE DATE', dateX, y);
+      doc.text(upper(T.th_payment), M + 6, y);
+      doc.text(upper(T.th_dueDate), dateX, y);
       doc.text(upper(vs.amountLabel || 'Amount'), amtX, y, { align: 'right' });
       y += 3;
       doc.setDrawColor(...NAVY); doc.setLineWidth(0.5); doc.line(M, y, W - M, y);
       pays.forEach((p, i) => {
         ensure(16); y += 13;
         doc.setFont(FONT, 'normal'); doc.setFontSize(9.5); doc.setTextColor(...BLACK);
-        doc.text(`Instalment ${i + 1}`, M + 6, y);
+        doc.text(`${T.instalment} ${i + 1}`, M + 6, y);
         doc.text(p.dueDate ? fmtDate(p.dueDate) : '—', dateX, y);
         doc.setFont(FONT, 'bold');
         doc.text(fmtMoney(p.totalAmount != null ? p.totalAmount : p.amount, contract.currency), amtX, y, { align: 'right' });
@@ -824,16 +833,16 @@ export async function generateContractPdf({ contract, client, company }) {
       y += 8;
     }
     if (pt.advanceInvoiceSentence) text(pt.advanceInvoiceSentence, { size: 10, gap: 6 });
-    text(`All payments shall be made by bank transfer following the issuance of a valid invoice by the Service Provider${pt.advanceInvoiceSentence ? ' for the applicable instalment' : ''}, in accordance with applicable VAT regulations.${contract.latePaymentPenalty == null || contract.latePaymentPenalty === '' ? '' : ` A late payment penalty of ${contract.latePaymentPenalty}% per month applies to overdue amounts.`}`, { size: 10, gap: 10 });
+    text(bankTransferSentence({ language: contract.language, perInstalment: !!pt.advanceInvoiceSentence, latePaymentPenalty: contract.latePaymentPenalty }), { size: 10, gap: 10 });
   }
 
   // --- Tinted bank-details box. --------------------------------------------
   if (company?.bankName || company?.bankIBAN || company?.bankSWIFT) {
     const bankLines = [
-      company?.name ? `Account Name: ${company.name}` : null,
-      company?.bankName ? `Bank: ${company.bankName}` : null,
-      company?.bankIBAN ? `IBAN: ${company.bankIBAN}` : null,
-      company?.bankSWIFT ? `SWIFT/BIC: ${company.bankSWIFT}` : null,
+      company?.name ? `${T.accountName}: ${company.name}` : null,
+      company?.bankName ? `${T.bank}: ${company.bankName}` : null,
+      company?.bankIBAN ? `${T.iban}: ${company.bankIBAN}` : null,
+      company?.bankSWIFT ? `${T.swift}: ${company.bankSWIFT}` : null,
     ].filter(Boolean);
     const boxH = 14 + 12 + bankLines.length * 13 + 10;
     ensure(boxH + 4);
@@ -845,7 +854,7 @@ export async function generateContractPdf({ contract, client, company }) {
     doc.roundedRect(M, boxTop, maxW, boxH, 4, 4, 'FD');
     doc.setLineWidth(0.2);
     y = boxTop + 14;
-    text('BANK DETAILS (SERVICE PROVIDER)', { x: innerX, size: 8, style: 'bold', color: NAVY, gap: 4 });
+    text(T.bankDetailsHeading, { x: innerX, size: 8, style: 'bold', color: NAVY, gap: 4 });
     for (const bl of bankLines) text(bl, { x: innerX, size: 9, color: SOFT_GREY, gap: 1 });
     y = boxTop + boxH + 10;
   }
@@ -877,51 +886,51 @@ export async function generateContractPdf({ contract, client, company }) {
   // sponsor's data processor) — see confidentialityParas in constants.js.
   {
     const cp = confidentialityParas(contract);
-    calloutClause(confidentialityNum, 'Confidentiality & Data Protection', cp.lead, ...cp.paras);
+    calloutClause(confidentialityNum, T.s_confidentiality, cp.lead, ...cp.paras);
   }
 
   // --- Intellectual Property Rights ----------------------------------------
   // Sponsorship must NOT license the Deliverables to the Client — see ipParas.
-  clause(ipNum, 'Intellectual Property Rights', ...ipParas(contract));
+  clause(ipNum, T.s_ip, ...ipParas(contract));
 
   // --- Duration ------------------------------------------------------------
-  clause(durationNum, 'Duration',
-    `This Agreement shall commence on ${fmtDate(contract.startDate)} and shall remain in force until ${fmtDate(contract.endDate)}${termYears ? ` (approximately ${termYears} year${termYears > 1 ? 's' : ''})` : ''}, unless terminated earlier in accordance with Section ${terminationNum}.`);
+  clause(durationNum, T.s_duration,
+    durationSentence({ language: contract.language, startDate: fmtDate(contract.startDate), endDate: fmtDate(contract.endDate), termYears, terminationNum }));
 
   // --- Termination ---------------------------------------------------------
-  clause(terminationNum, 'Termination',
-    "Either Party may terminate this Agreement with three (3) months' written notice, or immediately in the event of a material breach not remedied within thirty (30) days.",
+  clause(terminationNum, T.s_termination,
+    T.terminationNotice,
     terminationEffectPara(contract));
 
   // --- Limitation of Liability ---------------------------------------------
-  clause(liabilityNum, 'Limitation of Liability',
-    "The Service Provider shall not be responsible for sporting results, team selection decisions, or competition outcomes. Total liability under this Agreement shall not exceed the fees paid during the preceding twelve (12) months. This limitation shall not apply to breaches of confidentiality, data protection obligations, or unauthorized use of the Client's data or intellectual property.");
+  clause(liabilityNum, T.s_liability,
+    T.liability);
 
   // --- Force Majeure -------------------------------------------------------
-  clause(forceMajeureNum, 'Force Majeure',
-    'Neither Party shall be liable for failure to perform due to events beyond reasonable control.');
+  clause(forceMajeureNum, T.s_forceMajeure,
+    T.forceMajeure);
 
   // --- Governing Law & Jurisdiction ----------------------------------------
-  clause(governingLawNum, 'Governing Law & Jurisdiction',
-    `This Agreement shall be governed by the laws of ${contract.governingLaw}, with exclusive jurisdiction in ${contract.jurisdiction}.`);
+  clause(governingLawNum, T.s_governingLaw,
+    governingLawSentence({ language: contract.language, governingLaw: contract.governingLaw, jurisdiction: contract.jurisdiction }));
 
   // --- Special Terms (optional) — numbered list, each optionally clause-ref'd.
   if (specialTermsNum) {
     ensure(40);
-    pillHeader(specialTermsNum, 'Special Terms');
+    pillHeader(specialTermsNum, T.s_specialTerms);
     specialTermsParsed.forEach((t, i) => {
-      const ref = t.relatesTo && t.relatesTo !== 'General' ? `Re: ${t.relatesTo}. ` : '';
+      const ref = t.relatesTo && t.relatesTo !== 'General' ? `${T.reRef} ${clauseName(t.relatesTo, contract.language)}. ` : '';
       text(`${i + 1}.  ${ref}${t.text}`, { size: 10, gap: i === specialTermsParsed.length - 1 ? 10 : 3, x: M + 6, width: maxW - 6 });
     });
   }
 
   // --- Entire Agreement ----------------------------------------------------
-  clause(entireAgreementNum, 'Entire Agreement & Amendments',
-    'This Agreement constitutes the entire agreement between the Parties. Any amendment must be made in writing and signed by both Parties.');
+  clause(entireAgreementNum, T.s_entireAgreement,
+    T.entireAgreement);
 
   // --- Designated Contact block (present once captured at signing). ---------
   if (contract.contactName) {
-    pillHeader(null, 'Designated Contact');
+    pillHeader(null, T.designatedContact);
     const opsBits = [contract.contactName, contract.contactRole].filter(Boolean).join(', ');
     const opsTail = [contract.contactEmail, contract.contactPhone].filter(Boolean).join(' · ');
     text(`Client's designated contact for operations & communication: ${opsBits}${opsTail ? ' · ' + opsTail : ''}.`, { size: 10, gap: 2 });
@@ -934,8 +943,8 @@ export async function generateContractPdf({ contract, client, company }) {
   // --- Navy closing panel — warm, confident sign-off before signatures. ----
   {
     const padX = 16, padY = 14, innerW = maxW - padX * 2;
-    const body = `Science of Sports is proud to partner with ${clientName} and is committed to delivering performance analysis of the highest professional standard throughout this Agreement.`;
-    const emph = 'Transforming matches into knowledge — together.';
+    const body = closingNote({ language: contract.language, clientName });
+    const emph = T.closingTagline;
     doc.setFont(FONT, 'normal'); doc.setFontSize(10);
     const bodyLines = doc.splitTextToSize(body, innerW);
     doc.setFont(FONT, 'bold');
@@ -957,12 +966,12 @@ export async function generateContractPdf({ contract, client, company }) {
   // --- SIGNATURES — two columns with real signature IMAGES. ----------------
   // Keep the whole block together; push to a fresh page if it wouldn't fit.
   ensure(210);
-  pillHeader(null, 'Signatures');
-  text('Executed by the duly authorised representatives of the Parties as of the dates set out below.', { size: 8, color: GREY, gap: 12 });
+  pillHeader(null, T.s_signatures);
+  text(T.executedBy, { size: 8, color: GREY, gap: 12 });
 
   const colW = (maxW - 30) / 2;
   const colX = [M, M + colW + 30];
-  const heads = [`For and on behalf of ${companyName}`, `For and on behalf of ${clientName}`];
+  const heads = [`${T.forAndOnBehalfOf} ${companyName}`, `${T.forAndOnBehalfOf} ${clientName}`];
 
   const signed = !!contract.signedAt;
   // The provider counter-signs as of the agreement date — NOT sentAt, which
@@ -981,7 +990,7 @@ export async function generateContractPdf({ contract, client, company }) {
   let repLines = [];
   if (contract.signerOnBehalf && contract.representativeCompany) {
     doc.setFont(FONT, 'normal'); doc.setFontSize(7);
-    const reg = contract.representativeRegistration ? ` (Reg. No. ${contract.representativeRegistration})` : '';
+    const reg = contract.representativeRegistration ? ` (${T.regNoShort} ${contract.representativeRegistration})` : '';
     repLines = doc.splitTextToSize(`Signed by ${contract.representativeCompany}${reg}, as duly authorised representative`, colW).slice(0, 2);
     if (contract.signerAuthorityBasis) {
       repLines = repLines.concat(doc.splitTextToSize(`Authority: ${contract.signerAuthorityBasis}`, colW).slice(0, 1));
@@ -1041,7 +1050,7 @@ export async function generateContractPdf({ contract, client, company }) {
     doc.setFont(FONT, 'normal');
     doc.setFontSize(7);
     doc.setTextColor(140, 148, 156);
-    doc.text('SIGNATURE', x, sigLineY + 10);
+    doc.text(T.sig_signature, x, sigLineY + 10);
     yy = sigLineY + 26;
 
     const field = (label, val) => {
@@ -1059,16 +1068,16 @@ export async function generateContractPdf({ contract, client, company }) {
       doc.text(upper(label), x, yy + 12);
       yy += 28;
     };
-    field('Name', col.name);
-    field('Title', col.title);
-    field('Date', col.date);
+    field(T.sig_name, col.name);
+    field(T.sig_title, col.title);
+    field(T.sig_date, col.date);
     if (yy > maxColBottom) maxColBottom = yy;
   });
   y = maxColBottom + 8;
   rule();
 
   // --- Signature note. -----------------------------------------------------
-  text('This document is provided for review. To execute it, the Client signs electronically through the secure signing link. Upon signing, a Certificate of Completion containing the full signature evidence is issued to both parties.', { size: 9, color: GREY });
+  text(T.reviewNote, { size: 9, color: GREY });
 
   // Drop a trailing page that ended up with no body content (a page-break
   // artifact where the last block spilled but drew nothing meaningful).

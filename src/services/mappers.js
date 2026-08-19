@@ -209,6 +209,9 @@ export function contractFromRow(row, payments = [], events = []) {
     // selects the document/clause set; it defaults to 'services' so every
     // pre-0026 row keeps rendering exactly the document it renders today.
     contractKind: row.contract_kind ?? 'services',
+    // ---- Document language (migration 0027). Defaults to 'en' so every
+    // pre-0027 row renders exactly the document it renders today.
+    language: row.language ?? 'en',
     sponsorshipProperty: row.sponsorship_property ?? null,
     sponsorshipPropertyDetail: row.sponsorship_property_detail ?? null,
     sponsorshipRights: row.sponsorship_rights ?? [],
@@ -304,6 +307,9 @@ export function contractToRow(obj) {
   // field doesn't persist as ''. contract_kind falls back to 'services' (the
   // column is NOT NULL) so a patch can never blank it into a constraint error.
   if ('contractKind' in obj) row.contract_kind = obj.contractKind || 'services';
+  // Document language (0027). Falls back to 'en' (the column is NOT NULL with a
+  // CHECK constraint) so a patch can never blank it into a constraint error.
+  if ('language' in obj) row.language = obj.language || 'en';
   if ('sponsorshipProperty' in obj) row.sponsorship_property = nd(obj.sponsorshipProperty);
   if ('sponsorshipPropertyDetail' in obj) row.sponsorship_property_detail = nd(obj.sponsorshipPropertyDetail);
   if ('sponsorshipRights' in obj) row.sponsorship_rights = Array.isArray(obj.sponsorshipRights) ? obj.sponsorshipRights : [];

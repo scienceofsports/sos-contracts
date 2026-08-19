@@ -7,3 +7,7 @@ dist/
 .DS_Store
 .vite/
 deno.lock
+
+# Generated test output (regenerate with: node pdftest/render-sample.mjs)
+pdftest/*.pdf
+pdftest/*.png

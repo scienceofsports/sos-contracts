@@ -1,6 +1,11 @@
 /* =========================================================================
    CONSTANTS
    ========================================================================= */
+// Greek clause bodies + the language helper. The clause functions below return
+// the Greek variant when contract.language === 'el', so all three renderers
+// (ContractDocumentBody, contractPdf.js, contractPdf.ts) pick it up at once
+// without each needing its own language branch.
+import { EL_CLAUSES, isGreek, elClientEntityDescriptor, elServiceLabel, elServiceDetail, elServiceGroup } from './contractText.js';
 export const STATUS_BADGE = {
   draft:    { bg:'bg-slate-100',  text:'text-slate-600'  },
   sent:     { bg:'bg-amber-100',  text:'text-amber-700'  },
@@ -133,11 +138,19 @@ export const SERVICE_UNIT_LABELS = {
 
 export const SERVICE_GROUPS = ['Core Services', 'Recording Services', 'Analysis Services', 'Reporting Services', 'Coaching Support'];
 
-export function computeServiceLineItems(services) {
+// `language` is optional and defaults to English, so every existing call site
+// keeps its current behaviour. Passing 'el' swaps the service label/detail for
+// the Greek catalog entry (falling back to English per key), which is what makes
+// the Purpose and Scope sections render in Greek for all three generators.
+export function computeServiceLineItems(services, language) {
   if (!services || typeof services !== 'object') return [];
+  const el = language === 'el';
   return SERVICE_CATALOG
     .filter(s => services[s.key] && services[s.key].selected)
-    .map(s => {
+    .map(sRaw => {
+      const s = el
+        ? { ...sRaw, label: elServiceLabel(sRaw.key, sRaw.label), detail: elServiceDetail(sRaw.key, sRaw.detail) }
+        : sRaw;
       const svc = services[s.key];
       const qty = Number(svc.qty) || 0;
       // Single "included" concept (merges the old complimentary + bundledIncluded).
@@ -154,8 +167,8 @@ export function computeServiceLineItems(services) {
 
 export const UNLIMITED_SEATS = -1;
 
-export function seatLabel(count, singular, plural) {
-  if (count === UNLIMITED_SEATS) return `Unlimited ${plural}`;
+export function seatLabel(count, singular, plural, unlimitedWord = 'Unlimited') {
+  if (count === UNLIMITED_SEATS) return `${unlimitedWord} ${plural}`;
   if (count > 0) return `${count} ${count > 1 ? plural : singular}`;
   return '';
 }
@@ -165,19 +178,33 @@ export function seatLabel(count, singular, plural) {
 // or coaches — so the same three counts are labelled for an agency instead:
 // staff seats, and the number of players it represents (which is also the scope
 // of the data it can see). Pass isAgency from the caller.
-export function platformSeatsSummary(svc, isAgency = false) {
+export function platformSeatsSummary(svc, isAgency = false, language) {
   if (!svc) return '';
+  const el = language === 'el';
+  const U = el ? 'Απεριόριστοι' : 'Unlimited';
   const parts = isAgency
-    ? [
-        seatLabel(svc.directorSeats, 'Agency user', 'Agency users'),
-        seatLabel(svc.coachSeats, 'Scout / analyst', 'Scouts / analysts'),
-        seatLabel(svc.playerSeats, 'Represented player', 'Represented players'),
-      ]
-    : [
-        seatLabel(svc.directorSeats, 'Director', 'Directors'),
-        seatLabel(svc.coachSeats, 'Coach', 'Coaches'),
-        seatLabel(svc.playerSeats, 'Player', 'Players'),
-      ];
+    ? (el
+        ? [
+            seatLabel(svc.directorSeats, 'Χρήστης πρακτορείου', 'Χρήστες πρακτορείου', U),
+            seatLabel(svc.coachSeats, 'Σκάουτ / αναλυτής', 'Σκάουτ / αναλυτές', U),
+            seatLabel(svc.playerSeats, 'Εκπροσωπούμενος παίκτης', 'Εκπροσωπούμενοι παίκτες', U),
+          ]
+        : [
+            seatLabel(svc.directorSeats, 'Agency user', 'Agency users'),
+            seatLabel(svc.coachSeats, 'Scout / analyst', 'Scouts / analysts'),
+            seatLabel(svc.playerSeats, 'Represented player', 'Represented players'),
+          ])
+    : (el
+        ? [
+            seatLabel(svc.directorSeats, 'Διευθυντής', 'Διευθυντές', U),
+            seatLabel(svc.coachSeats, 'Προπονητής', 'Προπονητές', U),
+            seatLabel(svc.playerSeats, 'Παίκτης', 'Παίκτες', U),
+          ]
+        : [
+            seatLabel(svc.directorSeats, 'Director', 'Directors'),
+            seatLabel(svc.coachSeats, 'Coach', 'Coaches'),
+            seatLabel(svc.playerSeats, 'Player', 'Players'),
+          ]);
   return parts.filter(Boolean).join(', ');
 }
 
@@ -200,6 +227,9 @@ export function platformSeatsSummary(svc, isAgency = false) {
    Centralised here so all three generators render identical prose.
    NOTE: consumed by all three generators — do not inline copies. */
 export function confidentialityParas(contract) {
+  if (isGreek(contract)) {
+    return EL_CLAUSES.confidentiality[isSponsorship(contract) ? 'sponsorship' : 'services'];
+  }
   if (isSponsorship(contract)) {
     return {
       lead: 'Confidentiality.',
@@ -220,6 +250,9 @@ export function confidentialityParas(contract) {
 }
 
 export function ipParas(contract) {
+  if (isGreek(contract)) {
+    return EL_CLAUSES.ip[isSponsorship(contract) ? 'sponsorship' : 'services'];
+  }
   if (isSponsorship(contract)) {
     return [
       "Each Party retains all right, title and interest in its own name, logos, trade marks and brand assets. Neither Party acquires any right in the other's intellectual property save for the limited licences expressly granted in this Agreement, which terminate automatically on expiry or termination.",
@@ -233,6 +266,9 @@ export function ipParas(contract) {
 }
 
 export function terminationEffectPara(contract) {
+  if (isGreek(contract)) {
+    return EL_CLAUSES.terminationEffect[isSponsorship(contract) ? 'sponsorship' : 'services'];
+  }
   return isSponsorship(contract)
     ? "Upon termination or expiration of this Agreement for any reason, the Client's sponsorship rights shall cease and the Service Provider shall remove the Client's brand assets from the Property within a reasonable period. Fees in respect of sponsorship rights already delivered shall remain payable, and the Service Provider shall refund any fees paid in advance for rights not delivered."
     : 'Upon termination or expiration of this Agreement for any reason, the Service Provider shall promptly deliver to the Client all Deliverables produced under this Agreement.';
@@ -244,6 +280,9 @@ export function terminationEffectPara(contract) {
 // agreement avoids — it says "In consideration of the above rights").
 // NOTE: ported into both PDF generators — keep in sync.
 export function feesConsiderationPhrase(contract) {
+  if (isGreek(contract)) {
+    return EL_CLAUSES.feesConsideration[isSponsorship(contract) ? 'sponsorship' : 'services'];
+  }
   return isSponsorship(contract)
     ? 'In consideration of the sponsorship rights granted under this Agreement'
     : 'In consideration of the services provided under this Agreement';
@@ -278,9 +317,9 @@ export function hasMatchServices(contract) {
 // labelled for the right audience.
 export const SEAT_SERVICE_KEYS = ['platform_access', 'agency_subscription'];
 
-export function seatsForService(services, key) {
+export function seatsForService(services, key, language) {
   if (!SEAT_SERVICE_KEYS.includes(key)) return '';
-  return platformSeatsSummary(services?.[key], key === 'agency_subscription');
+  return platformSeatsSummary(services?.[key], key === 'agency_subscription', language);
 }
 
 // Build the two "Scope of Analysis" sentences from a contract's scope fields.
@@ -361,7 +400,11 @@ export function clientVatDisplay(client, tbc) {
 // keeps control of its own "to be confirmed on signing" placeholder styling;
 // `vat` is passed as null/'' to OMIT the VAT phrase entirely (e.g. an
 // association with no VAT registration) rather than print an empty blank.
-export function clientPartyClause({ name, entityType, country, registration, vat, address }) {
+export function clientPartyClause({ name, entityType, country, registration, vat, address, language }) {
+  if (language === 'el') {
+    const vatPhraseEl = vat ? `, ΑΦΤ ${vat}` : '';
+    return `${name}, ${elClientEntityDescriptor(entityType)} ${country} με αριθμό εγγραφής ${registration}${vatPhraseEl}, με έδρα ${address} (ο «Πελάτης»).`;
+  }
   const vatPhrase = vat ? `, VAT number ${vat}` : '';
   return `${name}, ${clientEntityDescriptor(entityType)} ${country} with registration number ${registration}${vatPhrase}, having its registered office at ${address} (the "Client").`;
 }
@@ -1059,21 +1102,31 @@ export function vatSummary(contract, fm, client) {
   // This is the fix for the old contradiction where the Scope table printed the
   // gross as "Total Contract Value" while the Fees sentence called the very same
   // number "(exclusive of VAT)". net = contract.value everywhere now.
+  const el = isGreek(contract);
   if (applies) {
     return {
       applies: true,
       net, vat, gross, ratePct,
-      sentence: `The above amount is exclusive of VAT. VAT at ${ratePct}% (${fm(vat)}) applies, giving a total amount payable of ${fm(gross)}.`,
-      amountLabel: 'Amount (incl. VAT)',
+      sentence: el
+        ? `Το πιο πάνω ποσό δεν περιλαμβάνει ΦΠΑ. Με ΦΠΑ ${ratePct}% (${fm(vat)}), το συνολικό πληρωτέο ποσό ανέρχεται σε ${fm(gross)}.`
+        : `The above amount is exclusive of VAT. VAT at ${ratePct}% (${fm(vat)}) applies, giving a total amount payable of ${fm(gross)}.`,
+      amountLabel: el ? 'Ποσό (με ΦΠΑ)' : 'Amount (incl. VAT)',
       note: '',
     };
   }
   // No VAT charged — note why (reverse charge or out of scope), if we can tell.
   let noteText = '';
-  if (country && EU.includes(country) && country !== 'CY' && hasVatNo) noteText = 'The VAT reverse-charge mechanism applies (Article 196, EU VAT Directive); the Client shall self-account for VAT.';
-  else if (country && !EU.includes(country)) noteText = 'This supply is outside the scope of Cyprus VAT.';
+  if (country && EU.includes(country) && country !== 'CY' && hasVatNo) {
+    noteText = el
+      ? 'Εφαρμόζεται ο μηχανισμός αντιστροφής της επιβάρυνσης ΦΠΑ (Άρθρο 196, Οδηγία ΦΠΑ ΕΕ). Ο Πελάτης αποδίδει ο ίδιος τον ΦΠΑ.'
+      : 'The VAT reverse-charge mechanism applies (Article 196, EU VAT Directive); the Client shall self-account for VAT.';
+  } else if (country && !EU.includes(country)) {
+    noteText = el
+      ? 'Η παροχή αυτή είναι εκτός πεδίου εφαρμογής του κυπριακού ΦΠΑ.'
+      : 'This supply is outside the scope of Cyprus VAT.';
+  }
   // No VAT: net === gross, vat 0. Renderers show a single Total row.
-  return { applies: false, net, vat: 0, gross: net, ratePct, sentence: noteText, amountLabel: 'Amount', note: noteText };
+  return { applies: false, net, vat: 0, gross: net, ratePct, sentence: noteText, amountLabel: el ? 'Ποσό' : 'Amount', note: noteText };
 }
 
 // THE date of the agreement — the single source for both the "This Agreement is
@@ -1109,17 +1162,24 @@ export function agreementDate(contract) {
 // Returns { timingPhrase, advanceInvoiceSentence } — the latter '' when not
 // applicable. NOTE: ported into both PDF generators; keep all three in sync.
 export function paymentTimingWording(contract) {
+  const el = isGreek(contract);
   const pays = Array.isArray(contract?.payments) ? contract.payments : [];
   const dated = pays.length > 1 && pays.every(p => p?.dueDate || p?.due_date);
   if (dated) {
     return {
-      timingPhrase: ' in accordance with the payment schedule set out below.',
-      advanceInvoiceSentence: 'The Service Provider shall issue a separate invoice for each instalment in advance of its due date.',
+      timingPhrase: el
+        ? ' σύμφωνα με το πρόγραμμα πληρωμών που ακολουθεί.'
+        : ' in accordance with the payment schedule set out below.',
+      advanceInvoiceSentence: el
+        ? 'Ο Πάροχος εκδίδει ξεχωριστό τιμολόγιο για κάθε δόση πριν από την ημερομηνία της.'
+        : 'The Service Provider shall issue a separate invoice for each instalment in advance of its due date.',
     };
   }
   const days = contract?.paymentTermsDays ?? contract?.payment_terms_days;
   return {
-    timingPhrase: days != null ? `, net ${days} days from the date of a valid invoice.` : '.',
+    timingPhrase: days != null
+      ? (el ? `, εντός ${days} ημερών από την ημερομηνία έγκυρου τιμολογίου.` : `, net ${days} days from the date of a valid invoice.`)
+      : '.',
     advanceInvoiceSentence: '',
   };
 }
