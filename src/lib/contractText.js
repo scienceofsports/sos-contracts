@@ -356,13 +356,13 @@ export const EL_CLAUSES = {
  */
 export function durationSentence({ language, startDate, endDate, termYears, terminationNum }) {
   if (language === 'el') {
-    const approx = termYears ? ` (περίπου ${termYears} ${termYears > 1 ? 'έτη' : 'έτος'})` : '';
+    const approx = termYears ? ` (${termYears} ${termYears > 1 ? 'έτη' : 'έτος'})` : '';
     // On the short form there is no separate Termination clause to point at, so
     // the cross-reference is dropped rather than printing "Άρθρο null".
     const ref = terminationNum ? ` σύμφωνα με το Άρθρο ${terminationNum}` : '';
     return `Η Συμφωνία αρχίζει στις ${startDate} και ισχύει μέχρι τις ${endDate}${approx}, εκτός αν τερματιστεί νωρίτερα${ref}.`;
   }
-  const approx = termYears ? ` (approximately ${termYears} year${termYears > 1 ? 's' : ''})` : '';
+  const approx = termYears ? ` (${termYears} year${termYears > 1 ? 's' : ''})` : '';
   const ref = terminationNum ? ` in accordance with Section ${terminationNum}` : '';
   return `This Agreement shall commence on ${startDate} and shall remain in force until ${endDate}${approx}, unless terminated earlier${ref}.`;
 }
