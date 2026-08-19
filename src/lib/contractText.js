@@ -245,7 +245,8 @@ const EL = {
   regNoShort: 'Αρ. Εγγραφής',
   vatShort: 'ΑΦΤ',
   executedBy: 'Υπογράφεται από τους δεόντως εξουσιοδοτημένους εκπροσώπους των Μερών κατά τις πιο κάτω ημερομηνίες.',
-  forAndOnBehalfOf: 'ΕΚ ΜΕΡΟΥΣ',
+  // Greek signature columns are headed by the party name alone.
+  forAndOnBehalfOf: '',
   sig_signature: 'ΥΠΟΓΡΑΦΗ',
   sig_name: 'ΟΝΟΜΑ',
   sig_title: 'ΘΕΣΗ',
@@ -506,7 +507,13 @@ export const EL_SERVICE_GROUPS = {
 export const EL_SERVICES = {
   platform_access: {
     label: 'Πρόσβαση στην Πλατφόρμα',
-    detail: 'Βίντεο και δεδομένα μαζί, φάσεις και κλιπ αγώνων, συγκρίσεις παικτών, κατατάξεις ομάδων και παικτών — όλα σε ένα σημείο.',
+    // Spelled out in full: this single line IS the Scope of Services on the
+    // short-form 2nd Division contract, so anything not named here is not
+    // something the club can point to as promised.
+    detail: 'Ανάλυση όλων των αγώνων της ομάδας και των αντιπάλων, με βίντεο, φάσεις και κλιπ. '
+      + 'Πρόσβαση στα στατιστικά ολόκληρου του πρωταθλήματος και σε όλους τους ποδοσφαιριστές του. '
+      + 'Ανάλυση πρωταθλήματος, ομάδας, αντιπάλων, αγώνων και ποδοσφαιριστών, με συγκρίσεις και κατατάξεις. '
+      + 'Πρόσβαση στο εργαλείο ανάλυσης αγώνα. Βίντεο και δεδομένα μαζί, όλα σε ένα σημείο.',
   },
   agency_subscription: {
     label: 'Συνδρομή Πλατφόρμας για Πρακτορεία',

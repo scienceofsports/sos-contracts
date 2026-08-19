@@ -1119,9 +1119,11 @@ export async function generateContractPdf({ contract, client, company }) {
   const colW = (maxW - colGap * (colCount - 1)) / colCount;
   const colX = Array.from({ length: colCount }, (_, i) => M + i * (colW + colGap));
   const heads = [
-    `${T.forAndOnBehalfOf} ${companyName}`,
-    `${T.forAndOnBehalfOf} ${clientName}`,
-    ...extraSignatories.map(sg => `${T.forAndOnBehalfOf} ${sg.organisation || ''}`),
+    // The prefix is empty in Greek (party name alone), so join and trim rather
+    // than interpolating a stray leading space into every heading.
+    [T.forAndOnBehalfOf, companyName].filter(Boolean).join(' '),
+    [T.forAndOnBehalfOf, clientName].filter(Boolean).join(' '),
+    ...extraSignatories.map(sg => [T.forAndOnBehalfOf, sg.organisation || ''].filter(Boolean).join(' ')),
   ];
 
   const signed = !!contract.signedAt;

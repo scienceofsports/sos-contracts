@@ -80,6 +80,7 @@ if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
 // numbers up to 025 are already in use, so the division starts at 026.
 const FIRST_NUMBER = 26;
 
+const skipped = [];
 let n = FIRST_NUMBER - 1;
 for (const club of CLUBS) {
   n += 1;
@@ -128,7 +129,16 @@ for (const club of CLUBS) {
   const doc = await generateContractPdf({ contract, client, company });
   // Keep the club name in the filename so the right PDF is easy to attach.
   const file = `${outDir}/${contractNumber} ${club.name}.pdf`;
-  writeFileSync(file, Buffer.from(doc.output('arraybuffer')));
-  console.log(`${contractNumber}  ${club.name}`);
+  try {
+    writeFileSync(file, Buffer.from(doc.output('arraybuffer')));
+    console.log(`${contractNumber}  ${club.name}`);
+  } catch (err) {
+    // EBUSY = the PDF is open in a viewer. Report it and carry on, so one open
+    // file does not stop the other fifteen from regenerating.
+    if (err.code === 'EBUSY' || err.code === 'EPERM') {
+      skipped.push(`${contractNumber} ${club.name}`);
+      console.log(`${contractNumber}  ${club.name}   [SKIPPED — file is open]`);
+    } else throw err;
+  }
 }
 console.log(`\n${CLUBS.length} contracts written to ${outDir}/`);

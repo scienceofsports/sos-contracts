@@ -3889,7 +3889,7 @@ function ContractDocumentBody({ contract, client, company, showAdminWarnings = f
         <div className={`grid grid-cols-1 gap-10 text-sm ${(contract.extraSignatories || []).length ? 'md:grid-cols-3' : 'md:grid-cols-2'}`}>
           {/* Service Provider — auto-applied Scios authorised signatory. */}
           <div>
-            <div className="text-xs font-semibold uppercase tracking-wide mb-4" style={{ color:'var(--navy-deep)' }}>{T.forAndOnBehalfOf} {company.name}</div>
+            <div className="text-xs font-semibold uppercase tracking-wide mb-4" style={{ color:'var(--navy-deep)' }}>{[T.forAndOnBehalfOf, company.name].filter(Boolean).join(' ')}</div>
             {company.signatoryName ? (
               <SignatureLines
                 provider
@@ -3905,7 +3905,7 @@ function ContractDocumentBody({ contract, client, company, showAdminWarnings = f
           </div>
           {/* Client */}
           <div>
-            <div className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color:'var(--navy-deep)' }}>{T.forAndOnBehalfOf} {client.companyName}</div>
+            <div className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color:'var(--navy-deep)' }}>{[T.forAndOnBehalfOf, client.companyName].filter(Boolean).join(' ')}</div>
             {contract.signerOnBehalf && contract.representativeCompany && (
               <div className="text-[11px] text-slate-600 mb-3 leading-snug">
                 Signed by <strong>{contract.representativeCompany}</strong>
@@ -3931,7 +3931,7 @@ function ContractDocumentBody({ contract, client, company, showAdminWarnings = f
               touch the evidence chain. Mirrors the PDF generators' columns. */}
           {(contract.extraSignatories || []).map((sg, i) => (
             <div key={i}>
-              <div className="text-xs font-semibold uppercase tracking-wide mb-4" style={{ color:'var(--navy-deep)' }}>{T.forAndOnBehalfOf} {sg.organisation || ''}</div>
+              <div className="text-xs font-semibold uppercase tracking-wide mb-4" style={{ color:'var(--navy-deep)' }}>{[T.forAndOnBehalfOf, sg.organisation || ''].filter(Boolean).join(' ')}</div>
               <SignatureLines name={sg.name} title={sg.title} />
             </div>
           ))}
