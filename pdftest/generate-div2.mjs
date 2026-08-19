@@ -76,7 +76,11 @@ const CFCA_SIG  = b64('public/signature-sergiou.png');
 const outDir = 'pdftest/contracts';
 if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
 
-let n = 0;
+// Contract numbers continue the live sequence rather than restarting at 001 —
+// numbers up to 025 are already in use, so the division starts at 026.
+const FIRST_NUMBER = 26;
+
+let n = FIRST_NUMBER - 1;
 for (const club of CLUBS) {
   n += 1;
   const contractNumber = `SOS-C-2026-${String(n).padStart(3, '0')}`;
