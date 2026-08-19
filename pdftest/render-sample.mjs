@@ -14,6 +14,11 @@ globalThis.fetch = async (url) => {
 // Vite's import.meta.env doesn't exist under plain Node.
 process.env.BASE_URL = '/';
 
+
+// Logos as inline base64 so the test needs no server. In the real app the club
+// badge comes from the DB and the partner logo from public/CFCA-logo.png.
+import { readFileSync as _rf } from 'node:fs';
+const _b64 = (f) => 'data:image/png;base64,' + _rf(f).toString('base64');
 const { generateContractPdf } = await import('../src/lib/contractPdf.js');
 
 const company = {
@@ -33,6 +38,7 @@ const client = {
   registrationNumber: 'HE 654321',
   vatNumber: 'CY10654321Y',
   address: 'Λεωφόρος Αθαλάσσας 100, Λευκωσία',
+  logoBase64: _b64('Club Logos/APOEL.png'),
 };
 
 const contract = {
@@ -48,6 +54,7 @@ const contract = {
   jurisdiction: 'Nicosia, Cyprus',
   paymentModel: 'club_funded',
   paymentType: 'milestone',
+  partnerLogos: [{ name: 'Cyprus Football Coaches Association', logoUrl: 'public/CFCA-logo.png' }],
   discountAmount: 700,
   discountLabel: 'Έκπτωση συνεργασίας με τον Παγκύπριο Σύνδεσμο Προπονητών Ποδοσφαίρου',
   services: {
@@ -55,8 +62,8 @@ const contract = {
   },
   teamSla: { "Men's": 72 },
   payments: [
-    { dueDate: '2026-09-15', amount: 1150, vatAmount: 218.5, totalAmount: 1368.5 },
-    { dueDate: '2026-11-15', amount: 1150, vatAmount: 218.5, totalAmount: 1368.5 },
+    { dueDate: '2026-09-02', amount: 1150, vatAmount: 218.5, totalAmount: 1368.5 },
+    { dueDate: '2026-11-02', amount: 1150, vatAmount: 218.5, totalAmount: 1368.5 },
   ],
   specialTerms: JSON.stringify([
     { relatesTo: 'Fees & Payment', text: 'Η έκπτωση των €700 από τη συνεργασία του Παρόχου με τον Παγκύπριο Σύνδεσμο Προπονητών Ποδοσφαίρου αφορά τη σεζόν 2026/2027 και δεν μεταφέρεται αυτόματα σε επόμενη σεζόν.' },

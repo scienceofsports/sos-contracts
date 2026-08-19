@@ -1126,6 +1126,12 @@ const ALL_TEAMS = ['U14','U15','U16','U17','U19',"Men's"];
 // club's director + coaching staff only (no player seats); players may buy their
 // own individual-clip access directly from SOS. List price €3,000, less a €700
 // CFCA collaboration discount = €2,300 net.
+// The Cyprus Football Coaches Association (ΠΑΣΠ) co-brands the 2nd Division
+// programme — its collaboration is what funds the discount — so its mark sits in
+// the contract header alongside SCIOS and the club.
+// The file lives in public/ because it is the SAME logo on every 2nd Division
+// contract, unlike club logos, which are per-client uploads held in the DB.
+const CFCA_PARTNER = { name: 'Cyprus Football Coaches Association', logoUrl: 'CFCA-logo.png' };
 const DIV2_LIST_PRICE = 3000;
 const DIV2_DISCOUNT = 700;
 const DIV2_PLAYER_FEE = 150;
@@ -1140,6 +1146,7 @@ const CONTRACT_PACKAGES = [
   // (0028), so the club can see the €700 it is being given. Net still €2,300.
   { key:'div2',      label:'2nd Division 2026/27', icon:'⚽', price:DIV2_LIST_PRICE,
     discount: { amount:DIV2_DISCOUNT, label:'Έκπτωση συνεργασίας με τον Παγκύπριο Σύνδεσμο Προπονητών Ποδοσφαίρου' },
+    partnerLogos: [CFCA_PARTNER],
     teamSla: { "Men's":72 },
     // The whole division signs the same season and the same two instalments, so
     // the package fills them too. SEASON-SPECIFIC: the label carries the season
@@ -1148,8 +1155,8 @@ const CONTRACT_PACKAGES = [
     // Gross (incl. VAT) — the schedule is always on the GROSS basis, and the two
     // rows must sum to the gross total or the form refuses to save.
     schedule: [
-      { date:'2026-09-15', amount:'1368.50' },
-      { date:'2026-11-15', amount:'1368.50' },
+      { date:'2026-09-02', amount:'1368.50' },
+      { date:'2026-11-02', amount:'1368.50' },
     ],
     // Directors + coaches only — 0 player seats is what makes platformSeatsSummary
     // print "3 Directors, 5 Coaches" with no player line.
@@ -1413,6 +1420,8 @@ function ContractForm({ navigate, editContractId }) {
     language:'en',
     // Visible discount row (0028). Blank by default.
     discountAmount:'', discountLabel:'',
+    // Co-branding partner logos shown in the contract header.
+    partnerLogos:[],
   });
   const [titleEdited, setTitleEdited] = useState(isEdit);
   // Which service groups are expanded in the form (collapsible sections).
@@ -1477,6 +1486,7 @@ function ContractForm({ navigate, editContractId }) {
         language: existing.language || 'en',
         discountAmount: existing.discountAmount ?? '',
         discountLabel: existing.discountLabel ?? '',
+        partnerLogos: Array.isArray(existing.partnerLogos) ? existing.partnerLogos : [],
         sponsorshipProperty: existing.sponsorshipProperty ?? '',
         sponsorshipPropertyDetail: existing.sponsorshipPropertyDetail ?? '',
         sponsorshipRights: Array.isArray(existing.sponsorshipRights) ? existing.sponsorshipRights : [],
@@ -1815,6 +1825,8 @@ function ContractForm({ navigate, editContractId }) {
       // A package may carry a visible discount row (the 2nd Division CFCA
       // discount). Packages without one leave any existing discount alone.
       ...(pkg.discount ? { discountAmount: String(pkg.discount.amount), discountLabel: pkg.discount.label } : {}),
+      // Co-branding partners shown in the contract header (2nd Division: ΠΑΣΠ).
+      ...(pkg.partnerLogos ? { partnerLogos: pkg.partnerLogos } : {}),
       value: String(Math.max(0, computeServiceLineItems(nextServices).reduce((sum,i)=>sum+i.amount,0) - pkgDiscount)),
       description: generateDescriptionFromServices(nextServices, { slaBands: buildSlaBands(teams, pkg.teamSla), slaHours: f.slaHours }) }));
   };
@@ -3304,6 +3316,19 @@ function ContractDocumentBody({ contract, client, company, showAdminWarnings = f
             <div className="flex items-center justify-center">
               {client.logoBase64 ? <img src={client.logoBase64} alt={client.companyName} className="h-16 w-auto object-contain" /> : <div className="font-heading text-white">{client.companyName}</div>}
             </div>
+            {/* Co-branding partners (2nd Division: the coaches association whose
+                collaboration funds the discount). Kept in sync with the PDF
+                generators' lockup — see drawHeaderP1 in contractPdf.js. */}
+            {(contract.partnerLogos || []).map((p, i) => (
+              <React.Fragment key={i}>
+                <div className="text-[var(--cyan)] text-2xl font-light">×</div>
+                <div className="flex items-center justify-center">
+                  {(p.logoBase64 || p.logoUrl)
+                    ? <img src={p.logoBase64 || p.logoUrl} alt={p.name || ''} className="h-16 w-auto object-contain" />
+                    : <div className="font-heading text-white text-sm">{p.name}</div>}
+                </div>
+              </React.Fragment>
+            ))}
           </div>
           <p className="text-center text-sm font-semibold tracking-wide mt-6" style={{ color:'var(--cyan)' }}>{contract.contractNumber}</p>
         </div>
@@ -5347,6 +5372,7 @@ function normalizeSnapshot(snapshot) {
     // number than the one they signed.
     discountAmount: pick(c, 'discountAmount', 'discount_amount'),
     discountLabel: pick(c, 'discountLabel', 'discount_label'),
+    partnerLogos: pick(c, 'partnerLogos', 'partner_logos') || [],
     sponsorshipProperty: pick(c, 'sponsorshipProperty', 'sponsorship_property'),
     sponsorshipPropertyDetail: pick(c, 'sponsorshipPropertyDetail', 'sponsorship_property_detail'),
     sponsorshipRights: pick(c, 'sponsorshipRights', 'sponsorship_rights') || [],

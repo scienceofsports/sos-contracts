@@ -26,6 +26,35 @@ import { t as contractT, isGreek, elServiceGroup, durationSentence, governingLaw
 import { fmtDate, fmtMoney, daysBetween, upper } from './format.js';
 import { contractDiscount, contractDiscountLabel, computeServiceLineItems, platformSeatsSummary, seatsForService, SERVICE_GROUPS, analysisScopeText, seasonLabelFromDates, commercialModelText, parseSpecialTerms, serviceLevelsLines, vatSummary, paymentTimingWording, agreementDate, clientPartyClause, clientVatDisplay, isPlayerFunded, playerFundedScopeRows, isSponsorship, hasMatchServices, computeSponsorshipRights, sponsorshipRightText, feesConsiderationPhrase, SPONSORSHIP_RIGHT_GROUPS, confidentialityParas, ipParas, terminationEffectPara } from './constants.js';
 
+/**
+ * Fetch an image URL and return it as a data: URL.
+ *
+ * jsPDF's addImage takes a data URL or raw bytes, not an http(s) path, so any
+ * logo referenced by FILE (the SCIOS mark, a co-branding partner) has to be
+ * pulled in before it can be drawn. Client logos are already base64 in the DB
+ * and skip this entirely.
+ *
+ * Returns null on any failure — a missing partner logo falls back to its name
+ * in text, which is far better than failing the whole download.
+ */
+async function imageUrlToDataUrl(url) {
+  if (!url || typeof url !== 'string') return null;
+  if (url.startsWith('data:')) return url;          // already inline
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    return await new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(typeof reader.result === 'string' ? reader.result : null);
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(blob);
+    });
+  } catch (_) {
+    return null;
+  }
+}
+
 export async function generateContractPdf({ contract, client, company }) {
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
 
@@ -36,6 +65,17 @@ export async function generateContractPdf({ contract, client, company }) {
   // width. Falls back to Helvetica if the fonts can't be fetched — fine for a
   // Latin contract, checked by the caller for a Greek one. See pdfFont.js.
   const FONT = (await loadPdfFonts(doc)) ? PDF_FONT : 'helvetica';
+
+  // Resolve any partner logo referenced by file into inline data, since the
+  // header is drawn synchronously and addImage cannot take a URL.
+  const partnerLogos = [];
+  for (const p of (contract.partnerLogos || [])) {
+    if (!p) continue;
+    partnerLogos.push({
+      name: p.name || '',
+      logoBase64: p.logoBase64 || await imageUrlToDataUrl(p.logoUrl),
+    });
+  }
 
   const W = doc.internal.pageSize.getWidth();
   const H = doc.internal.pageSize.getHeight();
@@ -103,9 +143,10 @@ export async function generateContractPdf({ contract, client, company }) {
     doc.setFillColor(...NAVY);
     doc.rect(0, 0, W, HEADER_BAND, 'F');
 
-    // The Scios wordmark PNG is WIDE (star + "SCIENCE OF SPORTS"); give each logo
-    // a generous fit box (200w × 44h) so it renders at full prominence and
-    // matches the server-generated (sent/signed) PDFs.
+    // The lockup is a ROW of logos: SCIOS × Client, plus any partner logos the
+    // contract carries (the 2nd Division agreement adds the coaches association,
+    // whose collaboration funds the discount). Built as a list rather than three
+    // hard-coded slots so a further partner needs no layout work.
     const logoH = 44;
     const logoMaxW = 200;
     const lockCenterY = 30;   // vertical centre of the lockup row
@@ -115,58 +156,67 @@ export async function generateContractPdf({ contract, client, company }) {
     doc.setFontSize(crossSize);
     const crossW = doc.getTextWidth('×');
 
-    // Resolve Scios + client lockup elements. Images preferred; text fallback.
-    const sosLogo = company?.logo || null;
-    const clientLogo = client?.logoBase64 || null;
-    const sosFit = sosLogo ? fitImage(sosLogo, logoMaxW, logoH) : null;
-    const cliFit = clientLogo ? fitImage(clientLogo, logoMaxW, logoH) : null;
+    // Each entry: an image (preferred) or a text fallback at its own size.
+    const lockup = [
+      { img: company?.logo || null, text: 'SCIENCE OF SPORTS', size: 13 },
+      { img: client?.logoBase64 || null, text: upper(clientName), size: 12 },
+    ];
+    // Partner logos ride along after the client. `partnerLogos` is an array of
+    // { logoBase64, name } on the contract.
+    for (const partner of partnerLogos) {
+      if (!partner) continue;
+      lockup.push({ img: partner.logoBase64 || null, text: upper(partner.name || ''), size: 11 });
+    }
 
-    doc.setFont(FONT, 'bold');
-    doc.setFontSize(13);
-    const sosW = sosFit ? sosFit.w : doc.getTextWidth('SCIENCE OF SPORTS');
-    doc.setFontSize(12);
-    const cliW = cliFit ? cliFit.w : doc.getTextWidth(upper(clientName));
+    // Measure every element first so the whole row can be centred.
+    for (const el of lockup) {
+      el.fit = el.img ? fitImage(el.img, logoMaxW, logoH) : null;
+      if (el.fit) { el.w = el.fit.w; continue; }
+      doc.setFont(FONT, 'bold');
+      doc.setFontSize(el.size);
+      el.w = doc.getTextWidth(el.text);
+    }
 
-    const totalW = sosW + gap + crossW + gap + cliW;
+    // A wide row (3+ logos) would overflow the page, so scale the images down
+    // together until the lockup fits the content width. Without this the third
+    // logo simply ran off the edge.
+    const separators = (lockup.length - 1) * (gap + crossW + gap);
+    let totalW = lockup.reduce((sum, el) => sum + el.w, 0) + separators;
+    const avail = W - M * 2;
+    if (totalW > avail) {
+      const scale = (avail - separators) / (totalW - separators);
+      for (const el of lockup) {
+        el.w *= scale;
+        if (el.fit) el.fit = { w: el.fit.w * scale, h: el.fit.h * scale };
+      }
+      totalW = avail;
+    }
+
     let cx = (W - totalW) / 2;
-
-    // --- Scios logo / wordmark. ---
-    let placed = false;
-    if (sosLogo && sosFit) {
-      try {
-        doc.addImage(sosLogo, imgFormat(sosLogo), cx, lockCenterY - sosFit.h / 2, sosFit.w, sosFit.h);
-        placed = true;
-      } catch (_) { placed = false; }
-    }
-    if (!placed) {
-      doc.setFont(FONT, 'bold');
-      doc.setFontSize(13);
-      doc.setTextColor(...WHITE);
-      doc.text('SCIENCE OF SPORTS', cx, lockCenterY + 4);
-    }
-    cx += sosW + gap;
-
-    // --- Cyan multiplication cross. ---
-    doc.setFont(FONT, 'normal');
-    doc.setFontSize(crossSize);
-    doc.setTextColor(...CYAN);
-    doc.text('×', cx, lockCenterY + 5);
-    cx += crossW + gap;
-
-    // --- Client logo / name. ---
-    placed = false;
-    if (clientLogo && cliFit) {
-      try {
-        doc.addImage(clientLogo, imgFormat(clientLogo), cx, lockCenterY - cliFit.h / 2, cliFit.w, cliFit.h);
-        placed = true;
-      } catch (_) { placed = false; }
-    }
-    if (!placed) {
-      doc.setFont(FONT, 'bold');
-      doc.setFontSize(12);
-      doc.setTextColor(...WHITE);
-      doc.text(upper(clientName), cx, lockCenterY + 4);
-    }
+    lockup.forEach((el, i) => {
+      if (i > 0) {
+        // Cyan multiplication cross between each pair.
+        doc.setFont(FONT, 'normal');
+        doc.setFontSize(crossSize);
+        doc.setTextColor(...CYAN);
+        doc.text('×', cx, lockCenterY + 5);
+        cx += crossW + gap;
+      }
+      let placed = false;
+      if (el.img && el.fit) {
+        try {
+          doc.addImage(el.img, imgFormat(el.img), cx, lockCenterY - el.fit.h / 2, el.fit.w, el.fit.h);
+          placed = true;
+        } catch (_) { placed = false; }
+      }
+      if (!placed && el.text) {
+        doc.setFont(FONT, 'bold');
+        doc.setFontSize(el.size);
+        doc.setTextColor(...WHITE);
+        doc.text(el.text, cx, lockCenterY + 4);
+      }
+      cx += el.w + gap;
+    });
 
     // --- Cyan contract number, centred below the lockup. ---
     if (contractNumber) {

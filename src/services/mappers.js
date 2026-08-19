@@ -216,6 +216,8 @@ export function contractFromRow(row, payments = [], events = []) {
     // is exactly the pre-0028 document.
     discountAmount: row.discount_amount ?? null,
     discountLabel: row.discount_label ?? null,
+    // Co-branding partner logos in the contract header (migration 0029).
+    partnerLogos: row.partner_logos ?? [],
     sponsorshipProperty: row.sponsorship_property ?? null,
     sponsorshipPropertyDetail: row.sponsorship_property_detail ?? null,
     sponsorshipRights: row.sponsorship_rights ?? [],
@@ -318,6 +320,7 @@ export function contractToRow(obj) {
   // 0 and print a "-€0.00" row.
   if ('discountAmount' in obj) row.discount_amount = obj.discountAmount === '' || obj.discountAmount == null ? null : Number(obj.discountAmount);
   if ('discountLabel' in obj) row.discount_label = nd(obj.discountLabel);
+  if ('partnerLogos' in obj) row.partner_logos = Array.isArray(obj.partnerLogos) ? obj.partnerLogos : [];
   if ('sponsorshipProperty' in obj) row.sponsorship_property = nd(obj.sponsorshipProperty);
   if ('sponsorshipPropertyDetail' in obj) row.sponsorship_property_detail = nd(obj.sponsorshipPropertyDetail);
   if ('sponsorshipRights' in obj) row.sponsorship_rights = Array.isArray(obj.sponsorshipRights) ? obj.sponsorshipRights : [];
