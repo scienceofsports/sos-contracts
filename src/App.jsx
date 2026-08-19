@@ -81,7 +81,7 @@ import {
 } from './lib/format.js';
 import { decodePortablePayload } from './lib/portable.js';
 import { downloadContractPdf } from './lib/contractPdf.js';
-import { t as contractT, isGreek, elClientEntityDescriptor, elServiceGroup, durationSentence, governingLawSentence, closingNote, clauseName, bankTransferSentence, isShortForm, LANGUAGES } from './lib/contractText.js';
+import { t as contractT, isGreek, elClientEntityDescriptor, elServiceGroup, durationSentence, governingLawSentence, closingNote, clauseName, bankTransferSentence, isShortForm, shortPreamble, LANGUAGES } from './lib/contractText.js';
 import {
   companyService,
   clientService,
@@ -1132,6 +1132,10 @@ const ALL_TEAMS = ['U14','U15','U16','U17','U19',"Men's"];
 // The file lives in public/ because it is the SAME logo on every 2nd Division
 // contract, unlike club logos, which are per-client uploads held in the DB.
 const CFCA_PARTNER = { name: 'Cyprus Football Coaches Association', logoUrl: 'CFCA-logo.png' };
+// The association countersigns the 2nd Division agreement, so its representative
+// gets his own signature column. He signs on paper: the name and title are
+// pre-filled, the signature and date lines are left for him to complete.
+const CFCA_SIGNATORY = { organisation: 'Παγκύπριος Σύνδεσμος Προπονητών Ποδοσφαίρου', name: 'Μιχάλης Σεργίου', title: '' };
 const DIV2_LIST_PRICE = 3000;
 const DIV2_DISCOUNT = 700;
 const DIV2_PLAYER_FEE = 150;
@@ -1147,6 +1151,7 @@ const CONTRACT_PACKAGES = [
   { key:'div2',      label:'2nd Division 2026/27', icon:'⚽', price:DIV2_LIST_PRICE,
     discount: { amount:DIV2_DISCOUNT, label:'Έκπτωση συνεργασίας με τον Παγκύπριο Σύνδεσμο Προπονητών Ποδοσφαίρου' },
     partnerLogos: [CFCA_PARTNER],
+    extraSignatories: [CFCA_SIGNATORY],
     teamSla: { "Men's":72 },
     // The whole division signs the same season and the same two instalments, so
     // the package fills them too. SEASON-SPECIFIC: the label carries the season
@@ -1422,6 +1427,8 @@ function ContractForm({ navigate, editContractId }) {
     discountAmount:'', discountLabel:'',
     // Co-branding partner logos shown in the contract header.
     partnerLogos:[],
+    // Extra signature columns beyond Provider + Client.
+    extraSignatories:[],
   });
   const [titleEdited, setTitleEdited] = useState(isEdit);
   // Which service groups are expanded in the form (collapsible sections).
@@ -1487,6 +1494,7 @@ function ContractForm({ navigate, editContractId }) {
         discountAmount: existing.discountAmount ?? '',
         discountLabel: existing.discountLabel ?? '',
         partnerLogos: Array.isArray(existing.partnerLogos) ? existing.partnerLogos : [],
+        extraSignatories: Array.isArray(existing.extraSignatories) ? existing.extraSignatories : [],
         sponsorshipProperty: existing.sponsorshipProperty ?? '',
         sponsorshipPropertyDetail: existing.sponsorshipPropertyDetail ?? '',
         sponsorshipRights: Array.isArray(existing.sponsorshipRights) ? existing.sponsorshipRights : [],
@@ -1827,6 +1835,8 @@ function ContractForm({ navigate, editContractId }) {
       ...(pkg.discount ? { discountAmount: String(pkg.discount.amount), discountLabel: pkg.discount.label } : {}),
       // Co-branding partners shown in the contract header (2nd Division: ΠΑΣΠ).
       ...(pkg.partnerLogos ? { partnerLogos: pkg.partnerLogos } : {}),
+      // Additional signature columns (2nd Division: the association's rep).
+      ...(pkg.extraSignatories ? { extraSignatories: pkg.extraSignatories } : {}),
       value: String(Math.max(0, computeServiceLineItems(nextServices).reduce((sum,i)=>sum+i.amount,0) - pkgDiscount)),
       description: generateDescriptionFromServices(nextServices, { slaBands: buildSlaBands(teams, pkg.teamSla), slaHours: f.slaHours }) }));
   };
@@ -3349,6 +3359,16 @@ function ContractDocumentBody({ contract, client, company, showAdminWarnings = f
           );
         })()}
 
+        {/* Short form: one sentence naming the parties. Full form: the two
+            complete party paragraphs with registration/VAT/address. */}
+        {isShortForm(contract) ? (
+          <p className="text-sm text-slate-700 mb-8">{shortPreamble({
+            language: contract.language,
+            date: fmtDate(agreementDate(contract)),
+            companyName: company.name,
+            clientName: client.companyName,
+          })}</p>
+        ) : (<>
         <p className="text-sm text-slate-700 mb-6">
           {T.agreementMadeOn} <strong>{fmtDate(agreementDate(contract))}</strong> {T.between}
         </p>
@@ -3385,6 +3405,7 @@ function ContractDocumentBody({ contract, client, company, showAdminWarnings = f
           {' '}{isGreek(contract) ? '(ο «Πελάτης»).' : '(the "Client").'}
         </p>
         <p className="text-sm text-slate-700 mb-8">{T.partiesJointly}</p>
+        </>)}
 
         {/* About the Service Provider — informational credibility section, kept OUTSIDE
             the numbered-clause IIFE so it never shifts clause numbers. Rendered as a
@@ -3838,7 +3859,7 @@ function ContractDocumentBody({ contract, client, company, showAdminWarnings = f
 
         <div className="sos-pill mb-2" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}>{T.s_signatures}</div>
         <p className="text-xs text-slate-500 mb-6">{T.executedBy}</p>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-10 text-sm">
+        <div className={`grid grid-cols-1 gap-10 text-sm ${(contract.extraSignatories || []).length ? 'md:grid-cols-3' : 'md:grid-cols-2'}`}>
           {/* Service Provider — auto-applied Scios authorised signatory. */}
           <div>
             <div className="text-xs font-semibold uppercase tracking-wide mb-4" style={{ color:'var(--navy-deep)' }}>{T.forAndOnBehalfOf} {company.name}</div>
@@ -3877,6 +3898,16 @@ function ContractDocumentBody({ contract, client, company, showAdminWarnings = f
               <SignatureLines />
             )}
           </div>
+          {/* Additional signatories (2nd Division: the coaches association's
+              representative). Wet-ink only — pre-filled name/title, blank
+              signature and date lines. Not an e-signing party, so this does not
+              touch the evidence chain. Mirrors the PDF generators' columns. */}
+          {(contract.extraSignatories || []).map((sg, i) => (
+            <div key={i}>
+              <div className="text-xs font-semibold uppercase tracking-wide mb-4" style={{ color:'var(--navy-deep)' }}>{T.forAndOnBehalfOf} {sg.organisation || ''}</div>
+              <SignatureLines name={sg.name} title={sg.title} />
+            </div>
+          ))}
         </div>
 
         {/* Signature SCIOS rainbow hairline directly above the footer band */}
@@ -5373,6 +5404,7 @@ function normalizeSnapshot(snapshot) {
     discountAmount: pick(c, 'discountAmount', 'discount_amount'),
     discountLabel: pick(c, 'discountLabel', 'discount_label'),
     partnerLogos: pick(c, 'partnerLogos', 'partner_logos') || [],
+    extraSignatories: pick(c, 'extraSignatories', 'extra_signatories') || [],
     sponsorshipProperty: pick(c, 'sponsorshipProperty', 'sponsorship_property'),
     sponsorshipPropertyDetail: pick(c, 'sponsorshipPropertyDetail', 'sponsorship_property_detail'),
     sponsorshipRights: pick(c, 'sponsorshipRights', 'sponsorship_rights') || [],

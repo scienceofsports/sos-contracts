@@ -22,7 +22,7 @@
    ========================================================================= */
 import { jsPDF } from 'jspdf';
 import { loadPdfFonts, PDF_FONT } from './pdfFont.js';
-import { t as contractT, isGreek, elServiceGroup, durationSentence, governingLawSentence, closingNote, clauseName, bankTransferSentence, isShortForm } from './contractText.js';
+import { t as contractT, isGreek, elServiceGroup, durationSentence, governingLawSentence, closingNote, clauseName, bankTransferSentence, isShortForm, shortPreamble } from './contractText.js';
 import { fmtDate, fmtMoney, daysBetween, upper } from './format.js';
 import { contractDiscount, contractDiscountLabel, computeServiceLineItems, platformSeatsSummary, seatsForService, SERVICE_GROUPS, analysisScopeText, seasonLabelFromDates, commercialModelText, parseSpecialTerms, serviceLevelsLines, vatSummary, paymentTimingWording, agreementDate, clientPartyClause, clientVatDisplay, isPlayerFunded, playerFundedScopeRows, isSponsorship, hasMatchServices, computeSponsorshipRights, sponsorshipRightText, feesConsiderationPhrase, SPONSORSHIP_RIGHT_GROUPS, confidentialityParas, ipParas, terminationEffectPara } from './constants.js';
 
@@ -76,6 +76,13 @@ export async function generateContractPdf({ contract, client, company }) {
       logoBase64: p.logoBase64 || await imageUrlToDataUrl(p.logoUrl),
     });
   }
+
+  // The SCIOS mark ships with the app, so fall back to it when the company
+  // record carries no logo — the provider's own brand should never be missing
+  // from its own contract just because a DB field is blank. The DARK-background
+  // variant is the one that reads on the navy header band.
+  const sosLogoData = (await imageUrlToDataUrl(company?.logo))
+    || (await imageUrlToDataUrl('Logo-scios-dark.png'));
 
   const W = doc.internal.pageSize.getWidth();
   const H = doc.internal.pageSize.getHeight();
@@ -158,7 +165,7 @@ export async function generateContractPdf({ contract, client, company }) {
 
     // Each entry: an image (preferred) or a text fallback at its own size.
     const lockup = [
-      { img: company?.logo || null, text: 'SCIENCE OF SPORTS', size: 13 },
+      { img: sosLogoData, text: 'SCIENCE OF SPORTS', size: 13 },
       { img: client?.logoBase64 || null, text: upper(clientName), size: 12 },
     ];
     // Partner logos ride along after the client. `partnerLogos` is an array of
@@ -442,6 +449,10 @@ export async function generateContractPdf({ contract, client, company }) {
   };
 
   // --- Data prep -----------------------------------------------------------
+  // SHORT FORM (see isShortForm): a one-line preamble, and the standalone
+  // Confidentiality, IP, Liability, Force Majeure, Termination and Governing
+  // Law sections are omitted. Declared here because the preamble below needs it.
+  const shortForm = isShortForm(contract);
   const services = contract.services;
   const lineItems = services ? computeServiceLineItems(services, contract.language) : [];
   const termYears = contract.startDate && contract.endDate
@@ -467,7 +478,17 @@ export async function generateContractPdf({ contract, client, company }) {
   }
   rule();
 
-  // --- Preamble — both parties, full details. ------------------------------
+  // --- Preamble ------------------------------------------------------------
+  // Short form: one sentence naming the parties. Full form: the two complete
+  // party paragraphs with registration/VAT/address. See shortPreamble.
+  if (shortForm) {
+    text(shortPreamble({
+      language: contract.language,
+      date: fmtDate(agreementDate(contract)),
+      companyName: company?.name || '—',
+      clientName: client?.companyName || '—',
+    }), { size: 10, gap: 10 });
+  } else {
   text(`${T.agreementMadeOn} ${fmtDate(agreementDate(contract))} ${T.between}`, { size: 10, gap: 4 });
   text(isGreek(contract)
     ? `${company?.name || '—'}, εταιρεία εγγεγραμμένη κατά τους νόμους της Κυπριακής Δημοκρατίας με αριθμό εγγραφής ${company?.registrationNumber || '—'}, ΑΦΤ ${company?.vatNumber || '—'}, με έδρα ${company?.registeredAddress || '—'} (ο «Πάροχος»),`
@@ -497,6 +518,7 @@ export async function generateContractPdf({ contract, client, company }) {
     language: contract.language,
   }), { size: 10, gap: 2 });
   text(T.partiesJointly, { size: 10, gap: 10 });
+  }
 
   // --- About the Service Provider — navy pill + intro + credential bullets. --
   // Sales credibility copy, not contractual terms. The Greek document is a
@@ -540,11 +562,6 @@ export async function generateContractPdf({ contract, client, company }) {
   const commercialNum = commercial.intro ? n++ : null;
   const brandingNum = sponsorship ? n++ : null;
   const serviceLevelsNum = hasMatchServices(contract) ? n++ : null;
-  // SHORT FORM (see isShortForm): the standalone Confidentiality, IP, Liability
-  // and Force Majeure sections are replaced by one compact "general terms"
-  // clause, and Termination/Governing Law fold into it. Null numbers let the
-  // remaining clauses renumber contiguously and skip the render below.
-  const shortForm = isShortForm(contract);
   const confidentialityNum = shortForm ? null : n++;
   const ipNum = shortForm ? null : n++;
   const durationNum = n++;
@@ -1047,9 +1064,20 @@ export async function generateContractPdf({ contract, client, company }) {
   pillHeader(null, T.s_signatures);
   text(T.executedBy, { size: 8, color: GREY, gap: 12 });
 
-  const colW = (maxW - 30) / 2;
-  const colX = [M, M + colW + 30];
-  const heads = [`${T.forAndOnBehalfOf} ${companyName}`, `${T.forAndOnBehalfOf} ${clientName}`];
+  // Signature columns. Usually two (Provider, Client), but a contract may carry
+  // additional signatories — the 2nd Division agreement is countersigned by the
+  // coaches association, whose collaboration underpins the programme. Built as a
+  // list so the columns size themselves rather than being hard-coded at two.
+  const extraSignatories = (contract.extraSignatories || []).filter(Boolean);
+  const colCount = 2 + extraSignatories.length;
+  const colGap = colCount > 2 ? 18 : 30;
+  const colW = (maxW - colGap * (colCount - 1)) / colCount;
+  const colX = Array.from({ length: colCount }, (_, i) => M + i * (colW + colGap));
+  const heads = [
+    `${T.forAndOnBehalfOf} ${companyName}`,
+    `${T.forAndOnBehalfOf} ${clientName}`,
+    ...extraSignatories.map(sg => `${T.forAndOnBehalfOf} ${sg.organisation || ''}`),
+  ];
 
   const signed = !!contract.signedAt;
   // The provider counter-signs as of the agreement date — NOT sentAt, which
@@ -1060,6 +1088,12 @@ export async function generateContractPdf({ contract, client, company }) {
     { sigImg: company?.signatorySignature || null, sigFallback: company?.signatoryName || '', name: company?.signatoryName || '', title: company?.signatoryTitle || '', date: (company?.signatoryName ? fmtDate(provDate) : '') },
     // Client column = the client's drawn signature when signed (blank pre-sign).
     { sigImg: signed ? (contract.signerSignature || null) : null, sigFallback: signed ? (contract.signerName || '') : '', name: signed ? (contract.signerName || '') : '', title: signed ? (contract.signerTitle || '') : '', date: signed ? fmtDate(contract.signedAt) : '' },
+    // Additional signatories sign on paper: the name and title are pre-filled so
+    // it is unambiguous who signs, and the signature/date lines are left blank
+    // for them to complete by hand.
+    // sigFallback stays EMPTY: the name belongs on the Name line, not written
+    // across the signature rule as if it were a signature.
+    ...extraSignatories.map(sg => ({ sigImg: null, sigFallback: '', name: sg.name || '', title: sg.title || '', date: '' })),
   ];
 
   // Pre-compute the authorised-representative caption (client column only) so we
@@ -1077,6 +1111,11 @@ export async function generateContractPdf({ contract, client, company }) {
   const capReserve = repLines.length ? repLines.length * 8 + 4 : 0;
 
   ensure(190 + capReserve);
+  // Tallest heading, measured before drawing so every column reserves the same.
+  doc.setFont(FONT, 'bold');
+  doc.setFontSize(8.5);
+  const headReserveLines = Math.max(...heads.map(h => doc.splitTextToSize(upper(h), colW).slice(0, 2).length));
+
   const blockTop = y;
   let maxColBottom = y;
   cols.forEach((col, idx) => {
@@ -1087,7 +1126,13 @@ export async function generateContractPdf({ contract, client, company }) {
     doc.setFont(FONT, 'bold');
     doc.setFontSize(8.5);
     doc.setTextColor(...NAVY);
-    doc.text(upper(heads[idx]).slice(0, 60), x, yy);
+    // Narrower columns (3+) need the heading wrapped rather than truncated, or
+    // an association's full name is cut mid-word.
+    const headLines = doc.splitTextToSize(upper(heads[idx]), colW).slice(0, 2);
+    headLines.forEach((ln, i) => doc.text(ln, x, yy + i * 10));
+    // Reserve the TALLEST heading across all columns, so a one-line heading does
+    // not lift its signature line above a two-line neighbour's.
+    yy += (headReserveLines - 1) * 10;
     yy += 12;
 
     // Draw caption on the CLIENT column; reserve the same space on the other.
@@ -1108,7 +1153,7 @@ export async function generateContractPdf({ contract, client, company }) {
     let drewImg = false;
     if (col.sigImg) {
       // Provider (idx 0) counter-signature draws smaller than the client's.
-      const fit = idx === 0 ? fitImage(col.sigImg, 135, 46) : fitImage(col.sigImg, 190, 64);
+      const fit = idx === 0 ? fitImage(col.sigImg, Math.min(135, colW - 4), 46) : fitImage(col.sigImg, Math.min(190, colW - 4), 64);
       if (fit) {
         try {
           doc.addImage(col.sigImg, imgFormat(col.sigImg), x + 2, sigLineY - fit.h - 3, fit.w, fit.h);

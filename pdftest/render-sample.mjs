@@ -22,6 +22,7 @@ const _b64 = (f) => 'data:image/png;base64,' + _rf(f).toString('base64');
 const { generateContractPdf } = await import('../src/lib/contractPdf.js');
 
 const company = {
+  logo: _b64('public/Logo-scios-dark.png'),
   name: 'C.C. Science of Sports Ltd',
   registrationNumber: 'HE 123456',
   vatNumber: 'CY10123456X',
@@ -32,18 +33,18 @@ const company = {
 // A 2nd Division club — the contracts this work is aimed at. Greek club name
 // on purpose: that alone would have been mojibake before the font swap.
 const client = {
-  companyName: 'ΑΠΟΕΛ Λευκωσίας',
+  companyName: 'ΕΝΠ',
   entityType: 'club',
   country: 'CY',
   registrationNumber: 'HE 654321',
   vatNumber: 'CY10654321Y',
   address: 'Λεωφόρος Αθαλάσσας 100, Λευκωσία',
-  logoBase64: _b64('Club Logos/APOEL.png'),
+  logoBase64: _b64('Club Logos/ENP.png'),
 };
 
 const contract = {
   contractNumber: 'SOS-C-2026-TEST',
-  title: 'ΑΠΟΕΛ Λευκωσίας — Συμφωνία Υπηρεσιών',
+  title: 'ΕΝΠ — Συμφωνία Υπηρεσιών',
   contractKind: 'services',
   language: 'el',
   startDate: '2026-09-01',

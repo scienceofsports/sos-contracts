@@ -23,7 +23,18 @@
 -- ============================================================================
 
 ALTER TABLE public.contracts
-  ADD COLUMN IF NOT EXISTS partner_logos jsonb NOT NULL DEFAULT '[]'::jsonb;
+  ADD COLUMN IF NOT EXISTS partner_logos jsonb NOT NULL DEFAULT '[]'::jsonb,
+  -- Extra signature columns beyond Provider + Client: the 2nd Division
+  -- agreement is countersigned by the coaches association's representative.
+  -- [{organisation, name, title}] — they sign ON PAPER, so the name/title are
+  -- pre-filled and the signature/date lines are left blank to complete by hand.
+  -- This is NOT an e-signing party: it does not create a signing request and
+  -- does not affect the evidence chain, which stays Provider + Client.
+  ADD COLUMN IF NOT EXISTS extra_signatories jsonb NOT NULL DEFAULT '[]'::jsonb;
+
+COMMENT ON COLUMN public.contracts.extra_signatories IS
+  'Additional signature columns on the document: [{organisation, name, title}]. '
+  'Wet-ink only — not e-signing parties, and not part of the evidence chain.';
 
 COMMENT ON COLUMN public.contracts.partner_logos IS
   'Co-branding logos in the contract header: [{name, logoUrl}] or '
@@ -78,6 +89,7 @@ begin
   or (new.discount_amount      is distinct from old.discount_amount)  -- 0028
   or (new.discount_label       is distinct from old.discount_label)   -- 0028
   or (new.partner_logos        is distinct from old.partner_logos)    -- 0029
+  or (new.extra_signatories    is distinct from old.extra_signatories) -- 0029
   then
     raise exception
       'Cannot edit a % contract. The terms of an executed agreement are locked as legal evidence. Cancel it and issue an amendment/new contract instead.',

@@ -433,6 +433,25 @@ export function bankTransferSentence({ language, perInstalment, latePaymentPenal
   return `All payments shall be made by bank transfer following the issuance of a valid invoice by the Service Provider${qual}, in accordance with applicable VAT regulations.${penalty}`;
 }
 
+/**
+ * The one-line preamble used by the SHORT FORM, in place of the two full party
+ * paragraphs.
+ *
+ * ⚠️ This drops the parties' registration numbers, VAT numbers and registered
+ * addresses from the document. Those identify WHICH legal person is bound, so
+ * without them the agreement names the parties only by trading name. Requested
+ * by the owner for readability; see isShortForm for the other omissions.
+ *
+ * The client name is used as entered, so the admin record should hold the name
+ * the club actually signs under.
+ */
+export function shortPreamble({ language, date, companyName, clientName }) {
+  if (language === 'el') {
+    return `Η παρούσα Συμφωνία συνάπτεται στις ${date} μεταξύ της ${companyName} (ο «Πάροχος») και της ομάδας ${clientName} (ο «Πελάτης»).`;
+  }
+  return `This Agreement is made on ${date} between ${companyName} (the "Service Provider") and ${clientName} (the "Client").`;
+}
+
 /** Greek descriptor for the client party clause, by entity type. */
 export function elClientEntityDescriptor(entityType) {
   switch (entityType) {

@@ -218,6 +218,8 @@ export function contractFromRow(row, payments = [], events = []) {
     discountLabel: row.discount_label ?? null,
     // Co-branding partner logos in the contract header (migration 0029).
     partnerLogos: row.partner_logos ?? [],
+    // Extra signature columns beyond Provider + Client (migration 0029).
+    extraSignatories: row.extra_signatories ?? [],
     sponsorshipProperty: row.sponsorship_property ?? null,
     sponsorshipPropertyDetail: row.sponsorship_property_detail ?? null,
     sponsorshipRights: row.sponsorship_rights ?? [],
@@ -321,6 +323,7 @@ export function contractToRow(obj) {
   if ('discountAmount' in obj) row.discount_amount = obj.discountAmount === '' || obj.discountAmount == null ? null : Number(obj.discountAmount);
   if ('discountLabel' in obj) row.discount_label = nd(obj.discountLabel);
   if ('partnerLogos' in obj) row.partner_logos = Array.isArray(obj.partnerLogos) ? obj.partnerLogos : [];
+  if ('extraSignatories' in obj) row.extra_signatories = Array.isArray(obj.extraSignatories) ? obj.extraSignatories : [];
   if ('sponsorshipProperty' in obj) row.sponsorship_property = nd(obj.sponsorshipProperty);
   if ('sponsorshipPropertyDetail' in obj) row.sponsorship_property_detail = nd(obj.sponsorshipPropertyDetail);
   if ('sponsorshipRights' in obj) row.sponsorship_rights = Array.isArray(obj.sponsorshipRights) ? obj.sponsorshipRights : [];
