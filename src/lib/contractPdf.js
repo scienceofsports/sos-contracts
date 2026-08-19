@@ -22,7 +22,7 @@
    ========================================================================= */
 import { jsPDF } from 'jspdf';
 import { loadPdfFonts, PDF_FONT } from './pdfFont.js';
-import { t as contractT, isGreek, elServiceGroup, durationSentence, governingLawSentence, closingNote, clauseName, bankTransferSentence, isShortForm, shortGeneralTerms } from './contractText.js';
+import { t as contractT, isGreek, elServiceGroup, durationSentence, governingLawSentence, closingNote, clauseName, bankTransferSentence, isShortForm } from './contractText.js';
 import { fmtDate, fmtMoney, daysBetween, upper } from './format.js';
 import { computeServiceLineItems, platformSeatsSummary, seatsForService, SERVICE_GROUPS, analysisScopeText, seasonLabelFromDates, commercialModelText, parseSpecialTerms, serviceLevelsLines, vatSummary, paymentTimingWording, agreementDate, clientPartyClause, clientVatDisplay, isPlayerFunded, playerFundedScopeRows, isSponsorship, hasMatchServices, computeSponsorshipRights, sponsorshipRightText, feesConsiderationPhrase, SPONSORSHIP_RIGHT_GROUPS, confidentialityParas, ipParas, terminationEffectPara } from './constants.js';
 
@@ -504,7 +504,9 @@ export async function generateContractPdf({ contract, client, company }) {
   const governingLawNum = shortForm ? null : n++;
   const specialTermsParsed = parseSpecialTerms(contract.specialTerms);
   const specialTermsNum = specialTermsParsed.length ? n++ : null;
-  const entireAgreementNum = n++;
+  // SHORT FORM: no general-terms clause at all — the document ends with the
+  // commercial sections. See isShortForm for what this drops.
+  const entireAgreementNum = shortForm ? null : n++;
 
   // --- Purpose — STRUCTURED by service group when services exist. -----------
   pillHeader(purposeNum, T.s_purpose);
@@ -930,10 +932,7 @@ export async function generateContractPdf({ contract, client, company }) {
   }
 
   // --- Entire Agreement ----------------------------------------------------
-  clause(entireAgreementNum, T.s_entireAgreement,
-    ...(shortForm
-      ? shortGeneralTerms({ language: contract.language, terminationNum })
-      : [T.entireAgreement]));
+  if (entireAgreementNum) clause(entireAgreementNum, T.s_entireAgreement, T.entireAgreement);
 
   // --- Designated Contact block (present once captured at signing). ---------
   if (contract.contactName) {

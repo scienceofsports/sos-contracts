@@ -46,29 +46,29 @@ export function isGreek(contract) {
 }
 
 /**
- * SHORT FORM — a commercial one-to-two-page agreement.
+ * SHORT FORM — a purely commercial agreement.
  *
- * Constantinos asked for the 2nd Division document to carry "only the most
- * important" terms: it is sold division-wide to club chairmen, and the full
- * legal tail was the obstacle. So the short form keeps WHAT THE DEAL IS
- * (services, fee, term, payment) and drops the standalone Confidentiality,
- * IP, Liability and Force Majeure sections, folding what remains into one
- * compact "Γενικοί Όροι" clause.
+ * The 2nd Division programme is sold division-wide to club chairmen, and the
+ * legal clauses were the obstacle to signing, so this document states only
+ * WHAT THE DEAL IS: services, fee, term, payment schedule, special terms.
+ * Five sections over two pages.
  *
- * ⚠️ THIS IS A DELIBERATE REDUCTION IN LEGAL PROTECTION, made by the business
- * owner with the trade-off stated. Two consequences to know before extending
- * this to other contracts:
- *   * There is no longer a liability cap, so exposure is not limited to the
- *     fees paid.
- *   * There is no standalone IP clause, so ownership of the footage and
- *     reports rests on the short line in the general terms.
- * The minors/GDPR line is retained: SCIOS films youth football, and a written
- * basis for processing children's data is a regulatory requirement, not
- * contract length. Do not remove it without a data-protection review.
+ * ⚠️ EVERY protective clause is omitted — Confidentiality/GDPR, Intellectual
+ * Property, Limitation of Liability, Force Majeure, Termination and Governing
+ * Law all render only on the full form. This is a deliberate business decision
+ * taken by the owner with the trade-offs stated, NOT an oversight to be tidied
+ * up. Consequences worth knowing before extending it to any other contract:
+ *   * No liability cap: exposure is not limited to the fees paid.
+ *   * No IP clause: ownership of footage, reports and clips is not stated.
+ *   * No data-protection clause. SCIOS films youth football, so processing
+ *     children's data has no written basis in the contract — the parental
+ *     consent duty is not allocated to the club. If a data-protection review
+ *     ever requires one line back, that is the line.
+ *   * No notice period: there is no agreed route to end the term early.
  *
- * Tied to language for now because Greek is only used for the 2nd Division
- * programme. If a Greek FULL-form contract is ever needed, promote this to its
- * own contract field rather than inferring it from the language.
+ * Tied to language, because Greek is used only for this programme. A Greek
+ * FULL-form contract would need its own contract field rather than inferring
+ * the short form from the language.
  */
 export function isShortForm(contract) {
   return isGreek(contract);
@@ -431,29 +431,6 @@ export function bankTransferSentence({ language, perInstalment, latePaymentPenal
   }
   const qual = perInstalment ? ' for the applicable instalment' : '';
   return `All payments shall be made by bank transfer following the issuance of a valid invoice by the Service Provider${qual}, in accordance with applicable VAT regulations.${penalty}`;
-}
-
-/**
- * The single combined "general terms" clause used by the SHORT FORM, in place
- * of the separate Confidentiality / IP / Liability / Force Majeure sections.
- * Each line is the irreducible core of the clause it replaces.
- */
-export function shortGeneralTerms({ language, terminationNum }) {
-  if (language === 'el') {
-    return [
-      // Data protection. The minors line is the one that must not be cut.
-      'Τα δεδομένα και το υλικό του Πελάτη είναι εμπιστευτικά και χρησιμοποιούνται μόνο για τις υπηρεσίες της Συμφωνίας, σύμφωνα με τον GDPR. Όπου αφορούν ανηλίκους, ο Πελάτης εξασφαλίζει τις απαραίτητες συγκαταθέσεις γονέα ή κηδεμόνα.',
-      // IP, reduced to ownership on each side.
-      'Το υλικό που παράγεται για τον Πελάτη (βίντεο, αναφορές, κλιπ) προορίζεται για δική του χρήση. Η πλατφόρμα, το λογισμικό και οι μέθοδοι του Παρόχου παραμένουν δικά του.',
-      // Term, termination and governing law in one line.
-      `Κάθε Μέρος μπορεί να τερματίσει τη Συμφωνία με γραπτή ειδοποίηση τριών (3) μηνών. Η Συμφωνία διέπεται από το κυπριακό δίκαιο. Κάθε τροποποίηση γίνεται γραπτώς και υπογράφεται και από τα δύο Μέρη.`,
-    ];
-  }
-  return [
-    "The Client's data and materials are confidential and used only for the services under this Agreement, in accordance with the GDPR. Where they concern minors, the Client shall obtain any necessary parental or guardian consent.",
-    "The materials produced for the Client (video, reports, clips) are for the Client's own use. The Service Provider's platform, software and methods remain its own.",
-    "Either Party may terminate this Agreement with three (3) months' written notice. This Agreement is governed by Cyprus law. Any amendment must be made in writing and signed by both Parties.",
-  ];
 }
 
 /** Greek descriptor for the client party clause, by entity type. */

@@ -79,7 +79,7 @@ import {
 } from './lib/format.js';
 import { decodePortablePayload } from './lib/portable.js';
 import { downloadContractPdf } from './lib/contractPdf.js';
-import { t as contractT, isGreek, elClientEntityDescriptor, elServiceGroup, durationSentence, governingLawSentence, closingNote, clauseName, bankTransferSentence, isShortForm, shortGeneralTerms, LANGUAGES } from './lib/contractText.js';
+import { t as contractT, isGreek, elClientEntityDescriptor, elServiceGroup, durationSentence, governingLawSentence, closingNote, clauseName, bankTransferSentence, isShortForm, LANGUAGES } from './lib/contractText.js';
 import {
   companyService,
   clientService,
@@ -3368,7 +3368,9 @@ function ContractDocumentBody({ contract, client, company, showAdminWarnings = f
           const governingLawNum = shortForm ? null : n++;
           const specialTermsParsed = parseSpecialTerms(contract.specialTerms);
           const specialTermsNum = specialTermsParsed.length ? n++ : null;
-          const entireAgreementNum = n++;
+          // SHORT FORM: no general-terms clause at all — the document ends
+          // with the commercial sections. See isShortForm for what this drops.
+          const entireAgreementNum = shortForm ? null : n++;
           return (
             <React.Fragment>
               <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{purposeNum}.</span> {T.s_purpose}</div>
@@ -3711,12 +3713,10 @@ function ContractDocumentBody({ contract, client, company, showAdminWarnings = f
                 </React.Fragment>
               )}
 
+              {entireAgreementNum && <>
               <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{entireAgreementNum}.</span> {T.s_entireAgreement}</div>
-              {shortForm
-                ? shortGeneralTerms({ language: contract.language, terminationNum }).map((p, i, arr) => (
-                    <p key={i} className={i === arr.length - 1 ? 'text-sm text-slate-700 mb-12' : 'text-sm text-slate-700 mb-2'}>{p}</p>
-                  ))
-                : <p className="text-sm text-slate-700 mb-12">{T.entireAgreement}</p>}
+              <p className="text-sm text-slate-700 mb-12">{T.entireAgreement}</p>
+              </>}
             </React.Fragment>
           );
         })()}
