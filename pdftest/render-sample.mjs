@@ -55,7 +55,7 @@ const contract = {
   jurisdiction: 'Nicosia, Cyprus',
   paymentModel: 'club_funded',
   paymentType: 'milestone',
-  partnerLogos: [{ name: 'Cyprus Football Coaches Association', logoUrl: 'public/CFCA-logo.png' }],
+  partnerLogos: [{ name: 'Cyprus Football Coaches Association', logoBase64: _b64('public/CFCA-logo.png') }],
   discountAmount: 700,
   discountLabel: 'Έκπτωση συνεργασίας με τον Παγκύπριο Σύνδεσμο Προπονητών Ποδοσφαίρου',
   services: {

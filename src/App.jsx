@@ -81,7 +81,7 @@ import {
 } from './lib/format.js';
 import { decodePortablePayload } from './lib/portable.js';
 import { downloadContractPdf } from './lib/contractPdf.js';
-import { t as contractT, isGreek, elClientEntityDescriptor, elServiceGroup, durationSentence, governingLawSentence, closingNote, clauseName, bankTransferSentence, isShortForm, shortPreamble, LANGUAGES } from './lib/contractText.js';
+import { t as contractT, isGreek, elClientEntityDescriptor, elServiceGroup, durationSentence, governingLawSentence, closingNote, clauseName, bankTransferSentence, isShortForm, shortPreamble, feesSentence, LANGUAGES } from './lib/contractText.js';
 import {
   companyService,
   clientService,
@@ -3685,8 +3685,27 @@ function ContractDocumentBody({ contract, client, company, showAdminWarnings = f
               {(() => { const vs = vatSummary(contract, (a) => fmtMoney(a, contract.currency), client); const pt = paymentTimingWording(contract); return (
               <React.Fragment>
               <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{feesNum}.</span> {T.s_fees}</div>
-              <p className="text-sm text-slate-700 mb-2">{feesConsiderationPhrase(contract)}, the Client shall pay the Service Provider a total of <strong>{fmtMoney(vs.net, contract.currency)}</strong>{vs.applies ? ' (exclusive of VAT)' : ''}, payable <strong>{contract.paymentType === 'one_time' ? 'in a single payment' : contract.paymentType === 'milestone' ? 'in instalments' : contract.paymentType.replace('_',' ')}</strong>{pt.timingPhrase}</p>
-              {vs.sentence && <p className="text-sm text-slate-700 mb-2">{vs.sentence}</p>}
+              {/* Short form states net + VAT + gross ONCE. The long form keeps
+                  its two paragraphs. This block was also hard-coded English —
+                  it would have printed English fees wording on a Greek
+                  document — so the long form now reads from the dictionary. */}
+              {(() => {
+                const payWord = T[`payWord_${contract.paymentType}`] || (contract.paymentType || '').replace('_',' ');
+                const short = feesSentence({
+                  language: contract.language, short: isShortForm(contract),
+                  net: fmtMoney(vs.net, contract.currency), applies: vs.applies,
+                  vatRate: vs.ratePct, vat: fmtMoney(vs.vat, contract.currency),
+                  gross: fmtMoney(vs.gross, contract.currency),
+                  payWord, timingPhrase: pt.timingPhrase,
+                });
+                if (short) return <p className="text-sm text-slate-700 mb-2">{short}</p>;
+                return (
+                  <>
+                    <p className="text-sm text-slate-700 mb-2">{feesConsiderationPhrase(contract)}, {T.feesShallPay} <strong>{fmtMoney(vs.net, contract.currency)}</strong>{vs.applies ? ` ${T.feesExclVat}` : ''}, {T.feesPayable} <strong>{payWord}</strong>{pt.timingPhrase}</p>
+                    {vs.sentence && <p className="text-sm text-slate-700 mb-2">{vs.sentence}</p>}
+                  </>
+                );
+              })()}
               {Array.isArray(contract.payments) && contract.payments.length > 1 && (
                 <table className="w-full text-sm mb-4 border-collapse">
                   <thead>

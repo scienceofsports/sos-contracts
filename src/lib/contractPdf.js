@@ -22,7 +22,7 @@
    ========================================================================= */
 import { jsPDF } from 'jspdf';
 import { loadPdfFonts, PDF_FONT } from './pdfFont.js';
-import { t as contractT, isGreek, elServiceGroup, durationSentence, governingLawSentence, closingNote, clauseName, bankTransferSentence, isShortForm, shortPreamble } from './contractText.js';
+import { t as contractT, isGreek, elServiceGroup, durationSentence, governingLawSentence, closingNote, clauseName, bankTransferSentence, isShortForm, shortPreamble, feesSentence } from './contractText.js';
 import { fmtDate, fmtMoney, daysBetween, upper } from './format.js';
 import { contractDiscount, contractDiscountLabel, computeServiceLineItems, platformSeatsSummary, seatsForService, SERVICE_GROUPS, analysisScopeText, seasonLabelFromDates, commercialModelText, parseSpecialTerms, serviceLevelsLines, vatSummary, paymentTimingWording, agreementDate, clientPartyClause, clientVatDisplay, isPlayerFunded, playerFundedScopeRows, isSponsorship, hasMatchServices, computeSponsorshipRights, sponsorshipRightText, feesConsiderationPhrase, SPONSORSHIP_RIGHT_GROUPS, confidentialityParas, ipParas, terminationEffectPara } from './constants.js';
 
@@ -899,8 +899,21 @@ export async function generateContractPdf({ contract, client, company }) {
     pillHeader(feesNum, T.s_fees);
     const vs = vatSummary(contract, (a) => fmtMoney(a, contract.currency), client);
     const pt = paymentTimingWording(contract);
-    text(`${feesConsiderationPhrase(contract)}, ${T.feesShallPay} ${fmtMoney(vs.net, contract.currency)}${vs.applies ? ` ${T.feesExclVat}` : ''}, ${T.feesPayable} ${payWord}${pt.timingPhrase}`, { size: 10, gap: vs.sentence ? 3 : 6 });
-    if (vs.sentence) text(vs.sentence, { size: 10, gap: 6 });
+    // Short form states net + VAT + gross ONCE; the long form keeps its two
+    // paragraphs. The figures are identical either way.
+    const shortFees = feesSentence({
+      language: contract.language, short: shortForm,
+      net: fmtMoney(vs.net, contract.currency), applies: vs.applies,
+      vatRate: vs.ratePct, vat: fmtMoney(vs.vat, contract.currency),
+      gross: fmtMoney(vs.gross, contract.currency),
+      payWord, timingPhrase: pt.timingPhrase,
+    });
+    if (shortFees) {
+      text(shortFees, { size: 10, gap: 6 });
+    } else {
+      text(`${feesConsiderationPhrase(contract)}, ${T.feesShallPay} ${fmtMoney(vs.net, contract.currency)}${vs.applies ? ` ${T.feesExclVat}` : ''}, ${T.feesPayable} ${payWord}${pt.timingPhrase}`, { size: 10, gap: vs.sentence ? 3 : 6 });
+      if (vs.sentence) text(vs.sentence, { size: 10, gap: 6 });
+    }
     // Instalment schedule table (only when more than one payment).
     const pays = Array.isArray(contract.payments) ? contract.payments : [];
     if (pays.length > 1) {

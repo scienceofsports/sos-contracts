@@ -359,12 +359,16 @@ export function durationSentence({ language, startDate, endDate, termYears, term
     const approx = termYears ? ` (${termYears} ${termYears > 1 ? 'έτη' : 'έτος'})` : '';
     // On the short form there is no separate Termination clause to point at, so
     // the cross-reference is dropped rather than printing "Άρθρο null".
-    const ref = terminationNum ? ` σύμφωνα με το Άρθρο ${terminationNum}` : '';
-    return `Η Συμφωνία αρχίζει στις ${startDate} και ισχύει μέχρι τις ${endDate}${approx}, εκτός αν τερματιστεί νωρίτερα${ref}.`;
+    // With no Termination clause on the short form, "unless terminated earlier"
+    // refers to nothing, so the sentence simply states the term.
+    return terminationNum
+      ? `Η Συμφωνία αρχίζει στις ${startDate} και ισχύει μέχρι τις ${endDate}${approx}, εκτός αν τερματιστεί νωρίτερα σύμφωνα με το Άρθρο ${terminationNum}.`
+      : `Η Συμφωνία αρχίζει στις ${startDate} και ισχύει μέχρι τις ${endDate}${approx}.`;
   }
   const approx = termYears ? ` (${termYears} year${termYears > 1 ? 's' : ''})` : '';
-  const ref = terminationNum ? ` in accordance with Section ${terminationNum}` : '';
-  return `This Agreement shall commence on ${startDate} and shall remain in force until ${endDate}${approx}, unless terminated earlier${ref}.`;
+  return terminationNum
+    ? `This Agreement shall commence on ${startDate} and shall remain in force until ${endDate}${approx}, unless terminated earlier in accordance with Section ${terminationNum}.`
+    : `This Agreement shall commence on ${startDate} and shall remain in force until ${endDate}${approx}.`;
 }
 
 /**
@@ -450,6 +454,25 @@ export function shortPreamble({ language, date, companyName, clientName }) {
     return `Η παρούσα Συμφωνία συνάπτεται στις ${date} μεταξύ της ${companyName} (ο «Πάροχος») και της ομάδας ${clientName} (ο «Πελάτης»).`;
   }
   return `This Agreement is made on ${date} between ${companyName} (the "Service Provider") and ${clientName} (the "Client").`;
+}
+
+/**
+ * The Fees sentence.
+ *
+ * The long form states the net, then repeats the whole calculation in a second
+ * sentence ("The above amount is exclusive of VAT. VAT at 19% (€437) applies,
+ * giving a total payable of €2,737") — three statements of the same figures
+ * that the table directly above already shows. The SHORT form says it once:
+ * net, VAT rate and gross in a single sentence.
+ */
+export function feesSentence({ language, consideration, net, applies, vatRate, vat, gross, payWord, timingPhrase, short }) {
+  if (!short) return null;   // caller keeps the existing long-form wording
+  if (language === 'el') {
+    const vatPart = applies ? ` Με ΦΠΑ ${vatRate}% (${vat}), σύνολο ${gross}.` : '';
+    return `Ο Πελάτης καταβάλλει στον Πάροχο ${net} (χωρίς ΦΠΑ), ${payWord}${timingPhrase}${vatPart}`;
+  }
+  const vatPart = applies ? ` With VAT at ${vatRate}% (${vat}), the total is ${gross}.` : '';
+  return `The Client shall pay the Service Provider ${net} (excluding VAT), ${payWord}${timingPhrase}${vatPart}`;
 }
 
 /** Greek descriptor for the client party clause, by entity type. */
