@@ -3614,16 +3614,11 @@ function ContractDocumentBody({ contract, client, company, showAdminWarnings = f
                     <tbody>
                       {lineItems.map(i => (
                         <tr key={i.key} className="border-b border-[var(--border)]">
+                          {/* The seats line already appears beside the service
+                              description in the Purpose clause above; repeating
+                              it here said the same thing twice. Kept there. */}
                           <td className="py-2 px-3">
                             {i.label}
-                            {seatsForService(contract.services, i.key, contract.language) && (
-                              <div
-                                className="text-xs mt-1 inline-block rounded px-2 py-1 border-l-2"
-                                style={{ background:'rgba(34,199,230,.12)', borderColor:'var(--cyan)', color:'var(--navy-deep)', WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}
-                              >
-                                <span className="font-semibold">{T.accessLabel}</span> {seatsForService(contract.services, i.key, contract.language)} <span className="italic">{T.accessConfirmNoStop}</span>
-                              </div>
-                            )}
                           </td>
                           <td className="py-2 px-3 text-right font-data whitespace-nowrap">
                             {rowAmount(i)}

@@ -757,9 +757,10 @@ export async function generateContractPdf({ contract, client, company }) {
     doc.setFont(FONT, 'normal');
     lineItems.forEach((i) => {
       const priceStr = fmtMoney(i.listPrice, contract.currency);
-      // Compose the service label; platform access carries a seats subline.
-      const seats = seatsForService(services, i.key, contract.language);
-      const subline = seats ? `${T.accessLabel} ${seats} ${T.accessConfirmNoStop}` : '';
+      // The seats line already appears beside the service description in the
+      // Purpose clause above; repeating it in this table said the same thing
+      // twice on a two-page document. Kept there, dropped here.
+      const subline = '';
 
       // Measure wrapped label height so the row + rule size correctly.
       doc.setFontSize(9.5);
