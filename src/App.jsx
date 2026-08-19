@@ -5976,7 +5976,10 @@ function SigningFlow({ contractId, portablePayload, reqToken }) {
                   <span>I have read the full agreement</span>
                 </label>
                 <div className="flex items-center justify-between gap-3">
-                  <button type="button" onClick={()=>downloadContractPdf({ contract, client, company })} className="text-xs text-blue-600 hover:underline inline-flex items-center gap-1">⬇ Download PDF</button>
+                  {/* Async: the PDF's Unicode font is fetched on first use, so
+                      surface a failure instead of leaving a dead button (this
+                      is the signer's copy of the agreement). */}
+                  <button type="button" onClick={()=>{ downloadContractPdf({ contract, client, company }).catch(err => { console.error('[pdf] download failed', err); alert('Sorry — the PDF could not be generated. Please try again.'); }); }} className="text-xs text-blue-600 hover:underline inline-flex items-center gap-1">⬇ Download PDF</button>
                   <div className="flex items-center gap-2">
                     <button type="button" onClick={()=>setScreen(3)} className="px-4 py-2.5 text-sm rounded-lg border border-[var(--border)] text-slate-600 hover:bg-slate-50 transition">Back</button>
                     {isServer && <button type="button" onClick={()=>setShowDeclinePanel(true)} className="px-4 py-2.5 text-sm rounded-lg border border-[var(--border)] text-slate-600 hover:bg-slate-50 transition">Decline / Request changes</button>}

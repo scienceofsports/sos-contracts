@@ -21,11 +21,21 @@
    change it there too (and vice versa).
    ========================================================================= */
 import { jsPDF } from 'jspdf';
+import { loadPdfFonts, PDF_FONT } from './pdfFont.js';
 import { fmtDate, fmtMoney, daysBetween } from './format.js';
 import { computeServiceLineItems, platformSeatsSummary, seatsForService, SERVICE_GROUPS, analysisScopeText, seasonLabelFromDates, commercialModelText, parseSpecialTerms, serviceLevelsLines, vatSummary, paymentTimingWording, agreementDate, clientPartyClause, clientVatDisplay, isPlayerFunded, playerFundedScopeRows, isSponsorship, hasMatchServices, computeSponsorshipRights, sponsorshipRightText, feesConsiderationPhrase, SPONSORSHIP_RIGHT_GROUPS, confidentialityParas, ipParas, terminationEffectPara } from './constants.js';
 
-export function generateContractPdf({ contract, client, company }) {
+export async function generateContractPdf({ contract, client, company }) {
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+
+  // Embed Noto Sans so Greek renders (jsPDF's Helvetica is Latin-1 only, and
+  // drops Greek SILENTLY rather than throwing). Must happen before any text is
+  // measured or drawn: splitTextToSize/getTextWidth read the active font's
+  // metrics, so a late switch would leave every line wrapped to the wrong
+  // width. Falls back to Helvetica if the fonts can't be fetched — fine for a
+  // Latin contract, checked by the caller for a Greek one. See pdfFont.js.
+  const FONT = (await loadPdfFonts(doc)) ? PDF_FONT : 'helvetica';
+
   const W = doc.internal.pageSize.getWidth();
   const H = doc.internal.pageSize.getHeight();
   const M = 50;
@@ -98,7 +108,7 @@ export function generateContractPdf({ contract, client, company }) {
     const lockCenterY = 30;   // vertical centre of the lockup row
     const gap = 22;
     const crossSize = 16;
-    doc.setFont('helvetica', 'normal');
+    doc.setFont(FONT, 'normal');
     doc.setFontSize(crossSize);
     const crossW = doc.getTextWidth('×');
 
@@ -108,7 +118,7 @@ export function generateContractPdf({ contract, client, company }) {
     const sosFit = sosLogo ? fitImage(sosLogo, logoMaxW, logoH) : null;
     const cliFit = clientLogo ? fitImage(clientLogo, logoMaxW, logoH) : null;
 
-    doc.setFont('helvetica', 'bold');
+    doc.setFont(FONT, 'bold');
     doc.setFontSize(13);
     const sosW = sosFit ? sosFit.w : doc.getTextWidth('SCIENCE OF SPORTS');
     doc.setFontSize(12);
@@ -126,7 +136,7 @@ export function generateContractPdf({ contract, client, company }) {
       } catch (_) { placed = false; }
     }
     if (!placed) {
-      doc.setFont('helvetica', 'bold');
+      doc.setFont(FONT, 'bold');
       doc.setFontSize(13);
       doc.setTextColor(...WHITE);
       doc.text('SCIENCE OF SPORTS', cx, lockCenterY + 4);
@@ -134,7 +144,7 @@ export function generateContractPdf({ contract, client, company }) {
     cx += sosW + gap;
 
     // --- Cyan multiplication cross. ---
-    doc.setFont('helvetica', 'normal');
+    doc.setFont(FONT, 'normal');
     doc.setFontSize(crossSize);
     doc.setTextColor(...CYAN);
     doc.text('×', cx, lockCenterY + 5);
@@ -149,7 +159,7 @@ export function generateContractPdf({ contract, client, company }) {
       } catch (_) { placed = false; }
     }
     if (!placed) {
-      doc.setFont('helvetica', 'bold');
+      doc.setFont(FONT, 'bold');
       doc.setFontSize(12);
       doc.setTextColor(...WHITE);
       doc.text(clientName.toUpperCase(), cx, lockCenterY + 4);
@@ -157,7 +167,7 @@ export function generateContractPdf({ contract, client, company }) {
 
     // --- Cyan contract number, centred below the lockup. ---
     if (contractNumber) {
-      doc.setFont('helvetica', 'bold');
+      doc.setFont(FONT, 'bold');
       doc.setFontSize(9);
       doc.setTextColor(...CYAN);
       doc.text(contractNumber, W / 2, HEADER_BAND - 14, { align: 'center' });
@@ -171,12 +181,12 @@ export function generateContractPdf({ contract, client, company }) {
   const drawHeaderRest = () => {
     doc.setFillColor(...NAVY);
     doc.rect(0, 0, W, 26, 'F');
-    doc.setFont('helvetica', 'bold');
+    doc.setFont(FONT, 'bold');
     doc.setFontSize(10);
     doc.setTextColor(...WHITE);
     doc.text('SCIENCE OF SPORTS', M, 17);
     if (contractNumber) {
-      doc.setFont('helvetica', 'normal');
+      doc.setFont(FONT, 'normal');
       doc.setFontSize(8);
       doc.setTextColor(...CYAN);
       doc.text(contractNumber, W - M, 17, { align: 'right' });
@@ -208,7 +218,7 @@ export function generateContractPdf({ contract, client, company }) {
     drawRainbow(H - FOOTER_BAND - 3);
     doc.setFillColor(...NAVY);
     doc.rect(0, H - FOOTER_BAND, W, FOOTER_BAND, 'F');
-    doc.setFont('helvetica', 'bold');
+    doc.setFont(FONT, 'bold');
     doc.setFontSize(7.5);
     doc.setTextColor(...WHITE);
     doc.text(companyName, M, H - 20);
@@ -216,11 +226,11 @@ export function generateContractPdf({ contract, client, company }) {
     const reg = company?.registrationNumber || 'HE 449875';
     const vat = company?.vatNumber;
     const line2 = `${email} · +357 22 396997 · Reg. No. ${reg}${vat ? ' · VAT ' + vat : ''}`;
-    doc.setFont('helvetica', 'normal');
+    doc.setFont(FONT, 'normal');
     doc.setFontSize(7);
     doc.setTextColor(...FOOTER_GREY);
     doc.text(line2, M, H - 10);
-    doc.setFont('helvetica', 'italic');
+    doc.setFont(FONT, 'italic');
     doc.setFontSize(8.5);
     doc.setTextColor(...CYAN);
     doc.text('Transforming matches into knowledge.', W - M, H - 14, { align: 'right' });
@@ -248,7 +258,7 @@ export function generateContractPdf({ contract, client, company }) {
     const color = opts.color ?? BLACK;
     const x = opts.x ?? M;
     const width = opts.width ?? maxW;
-    doc.setFont('helvetica', style);
+    doc.setFont(FONT, style);
     doc.setFontSize(size);
     doc.setTextColor(...color);
     const lines = doc.splitTextToSize(String(str ?? ''), width);
@@ -277,7 +287,7 @@ export function generateContractPdf({ contract, client, company }) {
     ensure(PILL_H + 12);
     y += 4;                     // breathing room above the pill
     const numStr = num != null ? `${num}.` : '';
-    doc.setFont('helvetica', 'bold');
+    doc.setFont(FONT, 'bold');
     doc.setFontSize(PILL_TEXT);
     const numW = numStr ? doc.getTextWidth(numStr) : 0;
     const numGap = numStr ? 6 : 0;
@@ -345,7 +355,7 @@ export function generateContractPdf({ contract, client, company }) {
     const size = 8;
     const padX = 6;
     const chipH = 12;
-    doc.setFont('helvetica', 'bold');
+    doc.setFont(FONT, 'bold');
     doc.setFontSize(size);
     const w = doc.getTextWidth(label) + padX * 2;
     doc.setFillColor(...CHIP_GREEN_BG);
@@ -361,7 +371,7 @@ export function generateContractPdf({ contract, client, company }) {
     const size = 9;
     const padX = 6;
     const lineH = size + 3;
-    doc.setFont('helvetica', 'bold');
+    doc.setFont(FONT, 'bold');
     doc.setFontSize(size);
     const lines = doc.splitTextToSize(String(str ?? ''), width - padX * 2);
     const boxH = lines.length * lineH + 8;
@@ -392,7 +402,7 @@ export function generateContractPdf({ contract, client, company }) {
     const parts = (contract.title || 'Service Agreement').split(/\s+[—–-]\s+/);
     const centered = (str, size, gap) => {
       ensure(size + 6);
-      doc.setFont('helvetica', 'bold');
+      doc.setFont(FONT, 'bold');
       doc.setFontSize(size);
       doc.setTextColor(...NAVY);
       y += size;
@@ -501,7 +511,7 @@ export function generateContractPdf({ contract, client, company }) {
       const ghBaseline = y;
       doc.setFillColor(...CYAN);
       doc.rect(M, ghBaseline - 8, 3, 10, 'F');
-      doc.setFont('helvetica', 'bold');
+      doc.setFont(FONT, 'bold');
       doc.setFontSize(9);
       doc.setTextColor(...NAVY);
       doc.text(group.toUpperCase(), M + 8, ghBaseline);
@@ -516,13 +526,13 @@ export function generateContractPdf({ contract, client, company }) {
         y += 10;                  // baseline for the label line
         const labelBaseline = y;
         let lx = itemX;
-        doc.setFont('helvetica', 'bold');
+        doc.setFont(FONT, 'bold');
         doc.setFontSize(9.5);
         doc.setTextColor(...NAVY);
         doc.text(i.label, lx, labelBaseline);
         lx += doc.getTextWidth(i.label);
         if (qtyNote) {
-          doc.setFont('helvetica', 'normal');
+          doc.setFont(FONT, 'normal');
           doc.setTextColor(...GREY);
           doc.text(qtyNote, lx, labelBaseline);
           lx += doc.getTextWidth(qtyNote);
@@ -559,7 +569,7 @@ export function generateContractPdf({ contract, client, company }) {
         const ghBaseline = y;
         doc.setFillColor(...CYAN);
         doc.rect(M, ghBaseline - 8, 3, 10, 'F');
-        doc.setFont('helvetica', 'bold');
+        doc.setFont(FONT, 'bold');
         doc.setFontSize(9);
         doc.setTextColor(...NAVY);
         doc.text(group.toUpperCase(), M + 8, ghBaseline);
@@ -569,7 +579,7 @@ export function generateContractPdf({ contract, client, company }) {
           const itemW = maxW - 12;
           ensure(16);
           y += 10;
-          doc.setFont('helvetica', 'bold');
+          doc.setFont(FONT, 'bold');
           doc.setFontSize(9.5);
           doc.setTextColor(...NAVY);
           // The rights phrase can wrap, so lay it out with the wrapping helper
@@ -620,7 +630,7 @@ export function generateContractPdf({ contract, client, company }) {
     const headTop = y;
     doc.setFillColor(...NAVY);
     doc.rect(M, headTop, maxW, headH, 'F');
-    doc.setFont('helvetica', 'bold');
+    doc.setFont(FONT, 'bold');
     doc.setFontSize(8.5);
     doc.setTextColor(...WHITE);
     doc.text('SERVICE', M + cellPadX, headTop + 13);
@@ -629,7 +639,7 @@ export function generateContractPdf({ contract, client, company }) {
 
     // Body rows: wrapped service label (+ optional seats subline) on the left,
     // qty on the right, thin rule under each row.
-    doc.setFont('helvetica', 'normal');
+    doc.setFont(FONT, 'normal');
     lineItems.forEach((i) => {
       const priceStr = fmtMoney(i.listPrice, contract.currency);
       // Compose the service label; platform access carries a seats subline.
@@ -647,7 +657,7 @@ export function generateContractPdf({ contract, client, company }) {
       const rowTop = y;
 
       // Service label (navy).
-      doc.setFont('helvetica', 'normal');
+      doc.setFont(FONT, 'normal');
       doc.setFontSize(9.5);
       doc.setTextColor(...BLACK);
       let ly = rowTop + 12;
@@ -663,7 +673,7 @@ export function generateContractPdf({ contract, client, company }) {
         doc.roundedRect(boxX, boxTop, boxW, boxH, 2, 2, 'F');
         doc.setFillColor(...CYAN);
         doc.rect(boxX, boxTop, 2, boxH, 'F');
-        doc.setFont('helvetica', 'bold');
+        doc.setFont(FONT, 'bold');
         doc.setFontSize(8.5);
         doc.setTextColor(...NAVY);
         let sy = boxTop + 9;
@@ -680,29 +690,29 @@ export function generateContractPdf({ contract, client, company }) {
         // catalogue items remain "Included" deliverables. The player-funded
         // contribution is added as its own row after the loop.
         if (Number(i.listPrice) > 0) {
-          doc.setFont('helvetica', 'normal'); doc.setTextColor(...BLACK);
+          doc.setFont(FONT, 'normal'); doc.setTextColor(...BLACK);
           doc.text(fmtMoney(i.listPrice, contract.currency), rightX, amtBaseline, { align: 'right' });
         } else {
-          doc.setFont('helvetica', 'bold'); doc.setTextColor(16, 150, 105);
+          doc.setFont(FONT, 'bold'); doc.setTextColor(16, 150, 105);
           doc.text('Included', rightX, amtBaseline, { align: 'right' });
         }
       } else if (i.included && i.listPrice > 0) {
         // Waived a real value: struck-through list price + "Incl."
         const inclW = doc.getTextWidth('Incl.');
-        doc.setFont('helvetica', 'bold'); doc.setTextColor(16, 150, 105);
+        doc.setFont(FONT, 'bold'); doc.setTextColor(16, 150, 105);
         doc.text('Incl.', rightX, amtBaseline, { align: 'right' });
         const priceX = rightX - inclW - 6;
-        doc.setFont('helvetica', 'normal'); doc.setTextColor(150, 160, 170);
+        doc.setFont(FONT, 'normal'); doc.setTextColor(150, 160, 170);
         doc.text(priceStr, priceX, amtBaseline, { align: 'right' });
         const pw = doc.getTextWidth(priceStr);
         doc.setDrawColor(150, 160, 170); doc.setLineWidth(0.6);
         doc.line(priceX - pw, amtBaseline - 3, priceX, amtBaseline - 3);
       } else if (i.included) {
         // No value to strike — just "Included".
-        doc.setFont('helvetica', 'bold'); doc.setTextColor(16, 150, 105);
+        doc.setFont(FONT, 'bold'); doc.setTextColor(16, 150, 105);
         doc.text('Included', rightX, amtBaseline, { align: 'right' });
       } else {
-        doc.setFont('helvetica', 'normal'); doc.setTextColor(...BLACK);
+        doc.setFont(FONT, 'normal'); doc.setTextColor(...BLACK);
         doc.text(priceStr, rightX, amtBaseline, { align: 'right' });
       }
 
@@ -717,7 +727,7 @@ export function generateContractPdf({ contract, client, company }) {
     if (pf && pfRows?.playerLine) {
       ensure(rowH);
       const baseline = y + 12;
-      doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); doc.setTextColor(...BLACK);
+      doc.setFont(FONT, 'normal'); doc.setFontSize(9.5); doc.setTextColor(...BLACK);
       doc.text(pfRows.playerLine.label, M + cellPadX, baseline);
       doc.text(fmtMoney(pfRows.playerLine.amount, contract.currency), W - M - cellPadX, baseline, { align: 'right' });
       y += rowH;
@@ -732,14 +742,14 @@ export function generateContractPdf({ contract, client, company }) {
     doc.setLineWidth(1);
     doc.line(M, y, W - M, y);
     y += 15;
-    doc.setFont('helvetica', 'bold');
+    doc.setFont(FONT, 'bold');
     doc.setFontSize(10.5);
     doc.setTextColor(...NAVY);
     doc.text(scopeVs.applies ? 'Total Contract Value (excl. VAT)' : 'Total Contract Value', M + cellPadX, y);
     doc.text(fmtMoney(scopeVs.net, contract.currency), W - M - cellPadX, y, { align: 'right' });
     y += 12;
     if (scopeVs.applies) {
-      doc.setFont('helvetica', 'normal');
+      doc.setFont(FONT, 'normal');
       doc.setFontSize(9.5);
       doc.setTextColor(90, 100, 110);
       doc.text(`VAT (${scopeVs.ratePct}%)`, M + cellPadX, y);
@@ -748,7 +758,7 @@ export function generateContractPdf({ contract, client, company }) {
       doc.setDrawColor(...NAVY);
       doc.setLineWidth(0.6);
       doc.line(M, y - 9, W - M, y - 9);
-      doc.setFont('helvetica', 'bold');
+      doc.setFont(FONT, 'bold');
       doc.setFontSize(10.5);
       doc.setTextColor(...NAVY);
       doc.text('Total incl. VAT', M + cellPadX, y);
@@ -768,7 +778,7 @@ export function generateContractPdf({ contract, client, company }) {
       const oaBaseline = y;
       doc.setFillColor(...CYAN);
       doc.rect(M, oaBaseline - 8, 3, 10, 'F');
-      doc.setFont('helvetica', 'bold');
+      doc.setFont(FONT, 'bold');
       doc.setFontSize(9);
       doc.setTextColor(...NAVY);
       doc.text('OPPONENT ACCESS', M + 8, oaBaseline);
@@ -795,7 +805,7 @@ export function generateContractPdf({ contract, client, company }) {
       const dateX = M + maxW * 0.5;
       ensure(16);
       y += 12;
-      doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(...NAVY);
+      doc.setFont(FONT, 'bold'); doc.setFontSize(8); doc.setTextColor(...NAVY);
       doc.text('PAYMENT', M + 6, y);
       doc.text('DUE DATE', dateX, y);
       doc.text((vs.amountLabel || 'Amount').toUpperCase(), amtX, y, { align: 'right' });
@@ -803,10 +813,10 @@ export function generateContractPdf({ contract, client, company }) {
       doc.setDrawColor(...NAVY); doc.setLineWidth(0.5); doc.line(M, y, W - M, y);
       pays.forEach((p, i) => {
         ensure(16); y += 13;
-        doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); doc.setTextColor(...BLACK);
+        doc.setFont(FONT, 'normal'); doc.setFontSize(9.5); doc.setTextColor(...BLACK);
         doc.text(`Instalment ${i + 1}`, M + 6, y);
         doc.text(p.dueDate ? fmtDate(p.dueDate) : '—', dateX, y);
-        doc.setFont('helvetica', 'bold');
+        doc.setFont(FONT, 'bold');
         doc.text(fmtMoney(p.totalAmount != null ? p.totalAmount : p.amount, contract.currency), amtX, y, { align: 'right' });
         y += 3;
         doc.setDrawColor(220, 224, 230); doc.setLineWidth(0.4); doc.line(M, y, W - M, y);
@@ -926,9 +936,9 @@ export function generateContractPdf({ contract, client, company }) {
     const padX = 16, padY = 14, innerW = maxW - padX * 2;
     const body = `Science of Sports is proud to partner with ${clientName} and is committed to delivering performance analysis of the highest professional standard throughout this Agreement.`;
     const emph = 'Transforming matches into knowledge — together.';
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
+    doc.setFont(FONT, 'normal'); doc.setFontSize(10);
     const bodyLines = doc.splitTextToSize(body, innerW);
-    doc.setFont('helvetica', 'bold');
+    doc.setFont(FONT, 'bold');
     const emphLines = doc.splitTextToSize(emph, innerW);
     const boxH = padY * 2 + bodyLines.length * 14 + 6 + emphLines.length * 14;
     ensure(boxH + 12);
@@ -936,10 +946,10 @@ export function generateContractPdf({ contract, client, company }) {
     doc.setFillColor(...NAVY);
     doc.roundedRect(M, boxTop, maxW, boxH, 4, 4, 'F');
     let ty = boxTop + padY;
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(230, 236, 247);
+    doc.setFont(FONT, 'normal'); doc.setFontSize(10); doc.setTextColor(230, 236, 247);
     bodyLines.forEach((ln) => { ty += 10; doc.text(ln, M + padX, ty); ty += 4; });
     ty += 6;
-    doc.setFont('helvetica', 'bold'); doc.setTextColor(...CYAN);
+    doc.setFont(FONT, 'bold'); doc.setTextColor(...CYAN);
     emphLines.forEach((ln) => { ty += 10; doc.text(ln, M + padX, ty); ty += 4; });
     y = boxTop + boxH + 14;
   }
@@ -970,7 +980,7 @@ export function generateContractPdf({ contract, client, company }) {
   // aligned. Party heading stays the Client (bound); caption records who signed.
   let repLines = [];
   if (contract.signerOnBehalf && contract.representativeCompany) {
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(7);
+    doc.setFont(FONT, 'normal'); doc.setFontSize(7);
     const reg = contract.representativeRegistration ? ` (Reg. No. ${contract.representativeRegistration})` : '';
     repLines = doc.splitTextToSize(`Signed by ${contract.representativeCompany}${reg}, as duly authorised representative`, colW).slice(0, 2);
     if (contract.signerAuthorityBasis) {
@@ -987,7 +997,7 @@ export function generateContractPdf({ contract, client, company }) {
     let yy = blockTop;
     // Column header, navy uppercase.
     yy += 9;
-    doc.setFont('helvetica', 'bold');
+    doc.setFont(FONT, 'bold');
     doc.setFontSize(8.5);
     doc.setTextColor(...NAVY);
     doc.text(heads[idx].toUpperCase().slice(0, 60), x, yy);
@@ -995,7 +1005,7 @@ export function generateContractPdf({ contract, client, company }) {
 
     // Draw caption on the CLIENT column; reserve the same space on the other.
     if (idx === 1 && repLines.length) {
-      doc.setFont('helvetica', 'normal');
+      doc.setFont(FONT, 'normal');
       doc.setFontSize(7);
       doc.setTextColor(...GREY);
       repLines.forEach((ln, i) => doc.text(ln, x, yy + i * 8));
@@ -1020,7 +1030,7 @@ export function generateContractPdf({ contract, client, company }) {
       }
     }
     if (!drewImg && col.sigFallback) {
-      doc.setFont('helvetica', 'italic');
+      doc.setFont(FONT, 'italic');
       doc.setFontSize(20);
       doc.setTextColor(...BLACK);
       doc.text(col.sigFallback, x + 2, sigLineY - 6);
@@ -1028,7 +1038,7 @@ export function generateContractPdf({ contract, client, company }) {
     // Signature line + label.
     doc.setDrawColor(150, 160, 170);
     doc.line(x, sigLineY, x + colW, sigLineY);
-    doc.setFont('helvetica', 'normal');
+    doc.setFont(FONT, 'normal');
     doc.setFontSize(7);
     doc.setTextColor(140, 148, 156);
     doc.text('SIGNATURE', x, sigLineY + 10);
@@ -1036,14 +1046,14 @@ export function generateContractPdf({ contract, client, company }) {
 
     const field = (label, val) => {
       if (val) {
-        doc.setFont('helvetica', 'normal');
+        doc.setFont(FONT, 'normal');
         doc.setFontSize(9);
         doc.setTextColor(...BLACK);
         doc.text(String(val), x + 2, yy - 3);
       }
       doc.setDrawColor(150, 160, 170);
       doc.line(x, yy + 2, x + colW, yy + 2);
-      doc.setFont('helvetica', 'normal');
+      doc.setFont(FONT, 'normal');
       doc.setFontSize(7);
       doc.setTextColor(140, 148, 156);
       doc.text(label.toUpperCase(), x, yy + 12);
@@ -1077,7 +1087,8 @@ export function generateContractPdf({ contract, client, company }) {
 }
 
 // Convenience: trigger a browser download of the contract PDF.
-export function downloadContractPdf({ contract, client, company }) {
-  const doc = generateContractPdf({ contract, client, company });
+// Async because the Unicode font is fetched on first use (see pdfFont.js).
+export async function downloadContractPdf({ contract, client, company }) {
+  const doc = await generateContractPdf({ contract, client, company });
   doc.save(`${contract.contractNumber || 'contract'}.pdf`);
 }
