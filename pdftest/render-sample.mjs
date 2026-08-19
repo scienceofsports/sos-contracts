@@ -36,18 +36,17 @@ const company = {
 // A 2nd Division club — the contracts this work is aimed at. Greek club name
 // on purpose: that alone would have been mojibake before the font swap.
 const client = {
-  companyName: 'ΕΝΠ',
+  companyName: '[Όνομα Σωματείου]',
   entityType: 'club',
   country: 'CY',
   registrationNumber: 'HE 654321',
   vatNumber: 'CY10654321Y',
   address: 'Λεωφόρος Αθαλάσσας 100, Λευκωσία',
-  logoBase64: _b64('Club Logos/ENP.png'),
 };
 
 const contract = {
   contractNumber: 'SOS-C-2026-TEST',
-  title: 'ΕΝΠ — Συμφωνία Υπηρεσιών',
+  title: '[Όνομα Σωματείου] — Συμφωνία Υπηρεσιών',
   contractKind: 'services',
   language: 'el',
   startDate: '2026-09-01',

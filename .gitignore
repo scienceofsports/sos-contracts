@@ -12,3 +12,4 @@ deno.lock
 pdftest/*.pdf
 pdftest/*.png
 pdftest/Club Logos/
+pdftest/contracts/
