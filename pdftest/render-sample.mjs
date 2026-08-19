@@ -48,8 +48,10 @@ const contract = {
   jurisdiction: 'Nicosia, Cyprus',
   paymentModel: 'club_funded',
   paymentType: 'milestone',
+  discountAmount: 700,
+  discountLabel: 'Έκπτωση συνεργασίας με τον Παγκύπριο Σύνδεσμο Προπονητών Ποδοσφαίρου',
   services: {
-    platform_access: { selected: true, qty: 1, rate: 2300, directorSeats: 2, coachSeats: 5, playerSeats: 0 },
+    platform_access: { selected: true, qty: 1, rate: 3000, directorSeats: 2, coachSeats: 5, playerSeats: 0 },
   },
   teamSla: { "Men's": 72 },
   payments: [
@@ -57,7 +59,7 @@ const contract = {
     { dueDate: '2026-11-15', amount: 1150, vatAmount: 218.5, totalAmount: 1368.5 },
   ],
   specialTerms: JSON.stringify([
-    { relatesTo: 'Fees & Payment', text: 'Η κανονική ετήσια χρέωση είναι €3.000. Μέσω της συνεργασίας με τον Παγκύπριο Σύνδεσμο Προπονητών Ποδοσφαίρου εφαρμόζεται έκπτωση €700, δίνοντας χρέωση €2.300 (πλέον ΦΠΑ). Η έκπτωση αφορά τη σεζόν 2026/2027.' },
+    { relatesTo: 'Fees & Payment', text: 'Η έκπτωση των €700 από τη συνεργασία του Παρόχου με τον Παγκύπριο Σύνδεσμο Προπονητών Ποδοσφαίρου αφορά τη σεζόν 2026/2027 και δεν μεταφέρεται αυτόματα σε επόμενη σεζόν.' },
     { relatesTo: 'Scope of Services', text: 'Η πρόσβαση παραχωρείται μόνο στον τεχνικό διευθυντή και στο προπονητικό επιτελείο. Οι παίκτες μπορούν να εγγραφούν ξεχωριστά με €150 ανά παίκτη τον χρόνο.' },
   ]),
 };

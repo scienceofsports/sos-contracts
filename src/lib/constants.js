@@ -807,6 +807,26 @@ export function isPlayerFunded(contract) {
   return basis === 'player_funded' || model === 'players_all' || model === 'club_players';
 }
 
+/**
+ * The NET discount to subtract from the services total, or 0 when there is none.
+ * Accepts either camelCase (app) or snake_case (frozen snapshot) so all three
+ * renderers resolve the same figure. See migration 0028.
+ */
+export function contractDiscount(contract) {
+  const raw = contract?.discountAmount ?? contract?.discount_amount;
+  const n = Number(raw) || 0;
+  // Guard against a negative slipping past the DB check (e.g. a legacy snapshot):
+  // a discount can only ever reduce the total.
+  return n > 0 ? Math.round(n * 100) / 100 : 0;
+}
+
+/** The label shown on the discount row, with a sensible default. */
+export function contractDiscountLabel(contract, language) {
+  const raw = contract?.discountLabel ?? contract?.discount_label;
+  if (raw) return raw;
+  return language === 'el' ? 'Έκπτωση' : 'Discount';
+}
+
 export function commercialValue(contract, servicesTotal) {
   const model = contract?.paymentModel || null;
   const fee = Number(contract.playerMonthlyFee) || 0;

@@ -212,6 +212,10 @@ export function contractFromRow(row, payments = [], events = []) {
     // ---- Document language (migration 0027). Defaults to 'en' so every
     // pre-0027 row renders exactly the document it renders today.
     language: row.language ?? 'en',
+    // ---- Visible discount row (migration 0028). Null = no discount row, which
+    // is exactly the pre-0028 document.
+    discountAmount: row.discount_amount ?? null,
+    discountLabel: row.discount_label ?? null,
     sponsorshipProperty: row.sponsorship_property ?? null,
     sponsorshipPropertyDetail: row.sponsorship_property_detail ?? null,
     sponsorshipRights: row.sponsorship_rights ?? [],
@@ -310,6 +314,10 @@ export function contractToRow(obj) {
   // Document language (0027). Falls back to 'en' (the column is NOT NULL with a
   // CHECK constraint) so a patch can never blank it into a constraint error.
   if ('language' in obj) row.language = obj.language || 'en';
+  // Discount (0028). Empty string => null so a cleared field doesn't persist as
+  // 0 and print a "-€0.00" row.
+  if ('discountAmount' in obj) row.discount_amount = obj.discountAmount === '' || obj.discountAmount == null ? null : Number(obj.discountAmount);
+  if ('discountLabel' in obj) row.discount_label = nd(obj.discountLabel);
   if ('sponsorshipProperty' in obj) row.sponsorship_property = nd(obj.sponsorshipProperty);
   if ('sponsorshipPropertyDetail' in obj) row.sponsorship_property_detail = nd(obj.sponsorshipPropertyDetail);
   if ('sponsorshipRights' in obj) row.sponsorship_rights = Array.isArray(obj.sponsorshipRights) ? obj.sponsorshipRights : [];

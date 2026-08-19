@@ -8,6 +8,8 @@ import {
   SERVICE_GROUPS,
   UNLIMITED_SEATS,
   computeServiceLineItems,
+  contractDiscount,
+  contractDiscountLabel,
   platformSeatsSummary,
   seatsForService,
   generateDescriptionFromServices,
@@ -1134,7 +1136,10 @@ const CONTRACT_PACKAGES = [
     teamSla: { U14:72, U15:72, U16:72, U17:24, U19:24, "Men's":24 } },
   { key:'essential', label:'Essential', icon:'🥉', price:10000,
     teamSla: Object.fromEntries(ALL_TEAMS.map(t => [t, 72])) },
-  { key:'div2',      label:'2nd Division 2026/27', icon:'⚽', price:DIV2_LIST_PRICE - DIV2_DISCOUNT,
+  // Platform is billed at the LIST price and the CFCA discount is a visible row
+  // (0028), so the club can see the €700 it is being given. Net still €2,300.
+  { key:'div2',      label:'2nd Division 2026/27', icon:'⚽', price:DIV2_LIST_PRICE,
+    discount: { amount:DIV2_DISCOUNT, label:'Έκπτωση συνεργασίας με τον Παγκύπριο Σύνδεσμο Προπονητών Ποδοσφαίρου' },
     teamSla: { "Men's":72 },
     // The whole division signs the same season and the same two instalments, so
     // the package fills them too. SEASON-SPECIFIC: the label carries the season
@@ -1155,7 +1160,7 @@ const CONTRACT_PACKAGES = [
     // short-form wording — see contractText.js.
     language: 'el',
     specialTerms: [
-      { relatesTo:'Fees & Payment', text:`Η κανονική ετήσια χρέωση για τις υπηρεσίες της παρούσας Συμφωνίας είναι €${DIV2_LIST_PRICE.toLocaleString('el-GR')}. Μέσω της συνεργασίας του Παρόχου με τον Παγκύπριο Σύνδεσμο Προπονητών Ποδοσφαίρου, εφαρμόζεται έκπτωση €${DIV2_DISCOUNT}, δίνοντας τη χρέωση των €${(DIV2_LIST_PRICE - DIV2_DISCOUNT).toLocaleString('el-GR')} (πλέον ΦΠΑ) που αναφέρεται στις Χρεώσεις & Πληρωμή. Η έκπτωση αφορά τη σεζόν 2026/2027 και δεν μεταφέρεται αυτόματα σε επόμενη σεζόν.` },
+      { relatesTo:'Fees & Payment', text:`Η έκπτωση των €${DIV2_DISCOUNT} από τη συνεργασία του Παρόχου με τον Παγκύπριο Σύνδεσμο Προπονητών Ποδοσφαίρου αφορά τη σεζόν 2026/2027 και δεν μεταφέρεται αυτόματα σε επόμενη σεζόν.` },
       { relatesTo:'Scope of Services', text:`Η πρόσβαση στην πλατφόρμα παραχωρείται μόνο στον τεχνικό διευθυντή και στο προπονητικό επιτελείο του Πελάτη. Οι παίκτες μπορούν, εφόσον το επιθυμούν, να εγγραφούν ξεχωριστά για πρόσβαση στα δικά τους κλιπ με €${DIV2_PLAYER_FEE} ανά παίκτη τον χρόνο. Οι εγγραφές αυτές συμφωνούνται απευθείας μεταξύ του κάθε παίκτη και του Παρόχου, δεν αποτελούν μέρος των χρεώσεων του Πελάτη και δεν δημιουργούν καμία υποχρέωση για τον Πελάτη. Ο Πελάτης δεν υποχρεούται να εξασφαλίσει ελάχιστο αριθμό εγγραφών.` },
     ] },
 ];
@@ -1406,6 +1411,8 @@ function ContractForm({ navigate, editContractId }) {
     // switches it to Greek, since that programme is sold division-wide to club
     // officers who read Greek.
     language:'en',
+    // Visible discount row (0028). Blank by default.
+    discountAmount:'', discountLabel:'',
   });
   const [titleEdited, setTitleEdited] = useState(isEdit);
   // Which service groups are expanded in the form (collapsible sections).
@@ -1468,6 +1475,8 @@ function ContractForm({ navigate, editContractId }) {
         oppPlayerAnalysis: !!existing.oppPlayerAnalysis,
         contractKind: existing.contractKind || 'services',
         language: existing.language || 'en',
+        discountAmount: existing.discountAmount ?? '',
+        discountLabel: existing.discountLabel ?? '',
         sponsorshipProperty: existing.sponsorshipProperty ?? '',
         sponsorshipPropertyDetail: existing.sponsorshipPropertyDetail ?? '',
         sponsorshipRights: Array.isArray(existing.sponsorshipRights) ? existing.sponsorshipRights : [],
@@ -1671,6 +1680,21 @@ function ContractForm({ navigate, editContractId }) {
       });
       return;
     }
+    // Changing the discount must re-derive the value: the discount reduces what
+    // is actually billed, so leaving the old value would show a discount row
+    // that the total does not reflect. Services-based deals only — a
+    // player-funded value is entered by hand.
+    if (k === 'discountAmount') {
+      setForm(f => {
+        const next = { ...f, discountAmount: v };
+        if (f.billingBasis !== 'player_funded') {
+          const svcTotal = computeServiceLineItems(services).reduce((sum, i) => sum + i.amount, 0);
+          next.value = String(Math.max(0, svcTotal - (Number(v) || 0)));
+        }
+        return next;
+      });
+      return;
+    }
     setForm(f => ({ ...f, [k]: v }));
   };
 
@@ -1716,7 +1740,9 @@ function ContractForm({ navigate, editContractId }) {
         // Services drive the value only for a services-based deal; for a
         // player-funded deal the value comes from the calculator (Shared) or is
         // entered manually (Player-funded), so never overwrite it here.
-        value: f.billingBasis === 'player_funded' ? f.value : String(computeServiceLineItems(next).reduce((sum,i)=>sum+i.amount,0)),
+        // Services drive the value, less any visible discount (0028) — the
+        // discount row must actually reduce what is billed, not just be shown.
+        value: f.billingBasis === 'player_funded' ? f.value : String(Math.max(0, computeServiceLineItems(next).reduce((sum,i)=>sum+i.amount,0) - (Number(f.discountAmount) || 0))),
         description: generateDescriptionFromServices(next, docSlaCtx(f)),
         title: titleEdited ? f.title : generateTitle(f.clientId, next),
         packageEdited: (f.packageKey && (changesPackagePrice || changesPackageServices)) ? true : f.packageEdited,
@@ -1752,6 +1778,9 @@ function ContractForm({ navigate, editContractId }) {
     // package uses it to grant director/coach access with NO player seats.
     const nextServices = { ...services, platform_access: { ...services.platform_access, selected: true, included: false, rate: pkg.price, ...(pkg.seats || {}) } };
     setServices(nextServices);
+    // The value must land NET of the package discount; setServices' own effect
+    // recomputes from form.discountAmount, which this call is still setting.
+    const pkgDiscount = Number(pkg.discount?.amount) || 0;
     // Special terms live in their own state (serialized to form.specialTerms on
     // save), so a package's pre-authored terms are applied here, not via setForm.
     // Appended to whatever the user already wrote rather than replacing it.
@@ -1783,6 +1812,10 @@ function ContractForm({ navigate, editContractId }) {
       // sold division-wide in Greek). Packages that omit it leave the current
       // choice alone rather than forcing English back on.
       ...(pkg.language ? { language: pkg.language } : {}),
+      // A package may carry a visible discount row (the 2nd Division CFCA
+      // discount). Packages without one leave any existing discount alone.
+      ...(pkg.discount ? { discountAmount: String(pkg.discount.amount), discountLabel: pkg.discount.label } : {}),
+      value: String(Math.max(0, computeServiceLineItems(nextServices).reduce((sum,i)=>sum+i.amount,0) - pkgDiscount)),
       description: generateDescriptionFromServices(nextServices, { slaBands: buildSlaBands(teams, pkg.teamSla), slaHours: f.slaHours }) }));
   };
   // Build the slaBands storage [{teams,hours}] from the per-team map, grouping
@@ -2192,8 +2225,31 @@ function ContractForm({ navigate, editContractId }) {
         </Field>
         <p className="text-xs text-slate-500 -mt-2 mb-4">
           {form.language === 'el'
-            ? 'Ελληνικά — the short-form Greek agreement. Every clause (GDPR, IP, liability cap) is preserved; the wording is plainer and roughly half the length.'
-            : 'The full English agreement.'}
+            ? 'Ελληνικά — the SHORT COMMERCIAL form: services, fee, term and special terms only, over two pages. The Confidentiality/GDPR, IP, liability and termination clauses are NOT included.'
+            : 'The full English agreement, including all legal clauses.'}
+        </p>
+
+        {/* Visible discount row (0028). Shown on the document as its own negative
+            line and subtracted from the value, so a client can see the reduction
+            it was granted rather than only a smaller final number. */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <Field label="Discount (net, ex-VAT)">
+            <input
+              type="number" min="0" step="0.01" value={form.discountAmount}
+              onChange={e=>set('discountAmount', e.target.value)}
+              placeholder="0.00" className={inputCls(false)}
+            />
+          </Field>
+          <Field label="Discount reason (shown on the contract)">
+            <input
+              type="text" value={form.discountLabel}
+              onChange={e=>set('discountLabel', e.target.value)}
+              placeholder="e.g. Έκπτωση συνεργασίας ΠΑΣΠ" className={inputCls(false)}
+            />
+          </Field>
+        </div>
+        <p className="text-xs text-slate-500 -mt-2 mb-4">
+          Subtracted from the services total before VAT. Leave blank for no discount row.
         </p>
 
         {isSponsorshipForm ? (
@@ -3520,6 +3576,14 @@ function ContractDocumentBody({ contract, client, company, showAdminWarnings = f
                           </td>
                         </tr>
                       ))}
+                      {/* Discount row (0028) — its own negative line so the client
+                          sees the reduction granted, not just a lower total. */}
+                      {contractDiscount(contract) > 0 && (
+                        <tr className="border-b border-[var(--border)]">
+                          <td className="py-2 px-3" style={{ color:'#059669' }}>{contractDiscountLabel(contract, contract.language)}</td>
+                          <td className="py-2 px-3 text-right font-data whitespace-nowrap" style={{ color:'#059669' }}>-{fmtMoney(contractDiscount(contract), contract.currency)}</td>
+                        </tr>
+                      )}
                       {/* Player-funded contribution — the net player portion, a
                           separate VAT-free line so the club sees it distinctly. */}
                       {pf && pfRows?.playerLine && (
@@ -3529,17 +3593,17 @@ function ContractDocumentBody({ contract, client, company, showAdminWarnings = f
                         </tr>
                       )}
                       <tr style={{ borderTop:'2px solid var(--navy-deep)' }}>
-                        <td className={`py-3 px-3 font-semibold ${svs.applies ? '' : ''}`} style={{ color:'var(--navy-deep)' }}>{svs.applies ? 'Total Contract Value (excl. VAT)' : 'Total Contract Value'}</td>
+                        <td className={`py-3 px-3 font-semibold ${svs.applies ? '' : ''}`} style={{ color:'var(--navy-deep)' }}>{svs.applies ? T.totalContractValue : T.totalContractValuePlain}</td>
                         <td className="py-3 px-3 text-right font-data font-bold" style={{ color:'var(--navy-deep)' }}>{fmtMoney(svs.net, contract.currency)}</td>
                       </tr>
                       {svs.applies && (
                         <React.Fragment>
                           <tr>
-                            <td className="py-2 px-3 text-slate-600">VAT ({svs.ratePct}%)</td>
+                            <td className="py-2 px-3 text-slate-600">{T.vatLine} ({svs.ratePct}%)</td>
                             <td className="py-2 px-3 text-right font-data text-slate-600">{fmtMoney(svs.vat, contract.currency)}</td>
                           </tr>
                           <tr style={{ borderTop:'1px solid var(--navy-deep)' }}>
-                            <td className="py-3 px-3 font-bold" style={{ color:'var(--navy-deep)' }}>Total incl. VAT</td>
+                            <td className="py-3 px-3 font-bold" style={{ color:'var(--navy-deep)' }}>{T.totalInclVat}</td>
                             <td className="py-3 px-3 text-right font-data font-bold" style={{ color:'var(--navy-deep)' }}>{fmtMoney(svs.gross, contract.currency)}</td>
                           </tr>
                         </React.Fragment>
@@ -5278,6 +5342,11 @@ function normalizeSnapshot(snapshot) {
     // the PDF they were emailed. Legacy snapshots carry no language and
     // correctly default to 'en'.
     language: pick(c, 'language') || 'en',
+    // Discount row (0028) — without these a frozen snapshot would re-render the
+    // full list price with no discount line, i.e. showing the client a larger
+    // number than the one they signed.
+    discountAmount: pick(c, 'discountAmount', 'discount_amount'),
+    discountLabel: pick(c, 'discountLabel', 'discount_label'),
     sponsorshipProperty: pick(c, 'sponsorshipProperty', 'sponsorship_property'),
     sponsorshipPropertyDetail: pick(c, 'sponsorshipPropertyDetail', 'sponsorship_property_detail'),
     sponsorshipRights: pick(c, 'sponsorshipRights', 'sponsorship_rights') || [],

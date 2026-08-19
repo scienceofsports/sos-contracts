@@ -24,7 +24,7 @@ import { jsPDF } from 'jspdf';
 import { loadPdfFonts, PDF_FONT } from './pdfFont.js';
 import { t as contractT, isGreek, elServiceGroup, durationSentence, governingLawSentence, closingNote, clauseName, bankTransferSentence, isShortForm } from './contractText.js';
 import { fmtDate, fmtMoney, daysBetween, upper } from './format.js';
-import { computeServiceLineItems, platformSeatsSummary, seatsForService, SERVICE_GROUPS, analysisScopeText, seasonLabelFromDates, commercialModelText, parseSpecialTerms, serviceLevelsLines, vatSummary, paymentTimingWording, agreementDate, clientPartyClause, clientVatDisplay, isPlayerFunded, playerFundedScopeRows, isSponsorship, hasMatchServices, computeSponsorshipRights, sponsorshipRightText, feesConsiderationPhrase, SPONSORSHIP_RIGHT_GROUPS, confidentialityParas, ipParas, terminationEffectPara } from './constants.js';
+import { contractDiscount, contractDiscountLabel, computeServiceLineItems, platformSeatsSummary, seatsForService, SERVICE_GROUPS, analysisScopeText, seasonLabelFromDates, commercialModelText, parseSpecialTerms, serviceLevelsLines, vatSummary, paymentTimingWording, agreementDate, clientPartyClause, clientVatDisplay, isPlayerFunded, playerFundedScopeRows, isSponsorship, hasMatchServices, computeSponsorshipRights, sponsorshipRightText, feesConsiderationPhrase, SPONSORSHIP_RIGHT_GROUPS, confidentialityParas, ipParas, terminationEffectPara } from './constants.js';
 
 export async function generateContractPdf({ contract, client, company }) {
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
@@ -739,14 +739,34 @@ export async function generateContractPdf({ contract, client, company }) {
       doc.line(M, y, W - M, y);
     });
 
+    // Discount row (0028) — shown as its own negative line so the client can see
+    // the reduction it was granted rather than only a lower final number.
+    const discount = contractDiscount(contract);
+    // Single-line row height — `rowH` above is per-item state scoped to the
+    // items loop and is not in scope here.
+    const extraRowH = 22;
+    if (discount > 0) {
+      ensure(extraRowH);
+      const baseline = y + 12;
+      doc.setFont(FONT, 'normal'); doc.setFontSize(9.5); doc.setTextColor(16, 150, 105);
+      const dLabel = contractDiscountLabel(contract, contract.language);
+      // The label can be long (it names the association), so wrap it rather than
+      // letting it run under the amount.
+      const dLines = doc.splitTextToSize(dLabel, maxW - cellPadX * 2 - 90);
+      dLines.forEach((ln, li) => doc.text(ln, M + cellPadX, baseline + li * 11));
+      doc.text(`-${fmtMoney(discount, contract.currency)}`, W - M - cellPadX, baseline, { align: 'right' });
+      y += Math.max(extraRowH, 12 + dLines.length * 11);
+      doc.setDrawColor(220, 224, 230); doc.setLineWidth(0.5); doc.line(M, y, W - M, y);
+    }
+
     // Player-funded contribution — the net player portion as its own VAT-free row.
     if (pf && pfRows?.playerLine) {
-      ensure(rowH);
+      ensure(extraRowH);
       const baseline = y + 12;
       doc.setFont(FONT, 'normal'); doc.setFontSize(9.5); doc.setTextColor(...BLACK);
       doc.text(pfRows.playerLine.label, M + cellPadX, baseline);
       doc.text(fmtMoney(pfRows.playerLine.amount, contract.currency), W - M - cellPadX, baseline, { align: 'right' });
-      y += rowH;
+      y += extraRowH;
       doc.setDrawColor(220, 224, 230); doc.setLineWidth(0.5); doc.line(M, y, W - M, y);
     }
 
