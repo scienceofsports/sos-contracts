@@ -96,6 +96,13 @@ export async function generateContractPdf({ contract, client, company }) {
   const sosLogoData = (await imageUrlToDataUrl(company?.logo))
     || (await imageUrlToDataUrl('Logo-scios-dark.png'));
 
+  // Same idea for the provider's counter-signature: it normally comes from the
+  // company record (uploaded once in Settings), but fall back to the file
+  // shipped in public/ so a contract is never issued with SCIOS's own signature
+  // line blank because a DB field has not been filled in yet.
+  const sosSignatureData = (await imageUrlToDataUrl(company?.signatorySignature))
+    || (await imageUrlToDataUrl('signature-constantinos.png'));
+
   const W = doc.internal.pageSize.getWidth();
   const H = doc.internal.pageSize.getHeight();
   const M = 50;
@@ -123,7 +130,7 @@ export async function generateContractPdf({ contract, client, company }) {
   const HEADER_BAND = 78;        // navy band height on page 1
   const CONTENT_TOP_P1 = 100;    // below the page-1 band + rainbow
   const CONTENT_TOP_REST = 50;   // below the slim running header (pages 2+)
-  const FOOTER_BAND = 34;
+  const FOOTER_BAND = 40;
   const BOTTOM = FOOTER_BAND + 10; // keep content above the footer band
 
   // Document wording for this contract's language (English fallback per key).
@@ -296,19 +303,26 @@ export async function generateContractPdf({ contract, client, company }) {
     doc.setFont(FONT, 'bold');
     doc.setFontSize(7.5);
     doc.setTextColor(...WHITE);
-    doc.text(companyName, M, H - 20);
+    doc.text(companyName, M, H - 24);
+    // Registered office, then the contact/identifier line. Both fall back to the
+    // real company details so a blank DB field never leaves the footer wrong.
+    const addr = company?.registeredAddress
+      || 'Michalaki Karaoli, Anemomylos Building, Floor 5, 1095 Nicosia, Cyprus';
     const email = company?.contactEmail || 'info@scienceofsports.net';
+    const phone = company?.contactPhone || '+357 22 396997';
     const reg = company?.registrationNumber || 'HE 449875';
     const vat = company?.vatNumber;
-    const line2 = `${email} · +357 22 396997 · ${T.regNoShort} ${reg}${vat ? ` · ${T.vatShort} ` + vat : ''}`;
+    const line3 = `${email} · ${phone} · ${reg}${vat ? ` · ${T.vatShort} ` + vat : ''}`;
     doc.setFont(FONT, 'normal');
-    doc.setFontSize(7);
+    doc.setFontSize(6.5);
     doc.setTextColor(...FOOTER_GREY);
-    doc.text(line2, M, H - 10);
+    doc.text(addr, M, H - 15);
+    doc.setFontSize(7);
+    doc.text(line3, M, H - 7);
     doc.setFont(FONT, 'italic');
     doc.setFontSize(8.5);
     doc.setTextColor(...CYAN);
-    doc.text('Transforming matches into knowledge.', W - M, H - 14, { align: 'right' });
+    doc.text('Transforming matches into knowledge', W - M, H - 14, { align: 'right' });
   };
 
   // -------------------------------------------------------------------------
@@ -1116,7 +1130,7 @@ export async function generateContractPdf({ contract, client, company }) {
   const provDate = agreementDate(contract);
   const cols = [
     // Provider column = Scios authorised signatory (auto counter-signature).
-    { sigImg: company?.signatorySignature || null, sigFallback: company?.signatoryName || '', name: company?.signatoryName || '', title: company?.signatoryTitle || '', date: (company?.signatoryName ? fmtDate(provDate) : '') },
+    { sigImg: sosSignatureData, sigFallback: company?.signatoryName || '', name: company?.signatoryName || '', title: company?.signatoryTitle || '', date: fmtDate(provDate) },
     // Client column = the client's drawn signature when signed (blank pre-sign).
     { sigImg: signed ? (contract.signerSignature || null) : null, sigFallback: signed ? (contract.signerName || '') : '', name: signed ? (contract.signerName || '') : '', title: signed ? (contract.signerTitle || '') : '', date: signed ? fmtDate(contract.signedAt) : '' },
     // Additional signatories sign on paper: the name and title are pre-filled so

@@ -23,11 +23,14 @@ const { generateContractPdf } = await import('../src/lib/contractPdf.js');
 
 const company = {
   logo: _b64('public/Logo-scios-dark.png'),
+  signatoryName: 'Constantinos Charalambides',
+  signatoryTitle: 'CEO',
+  signatorySignature: _b64('public/signature-constantinos.png'),
   name: 'C.C. Science of Sports Ltd',
-  registrationNumber: 'HE 123456',
-  vatNumber: 'CY10123456X',
-  registeredAddress: 'Michalaki Karaoli 2, 1095 Nicosia, Cyprus',
-  bankName: 'Bank of Cyprus', bankIBAN: 'CY00 0000 0000 0000', bankSWIFT: 'BCYPCY2N',
+  registrationNumber: 'HE 449875',
+  vatNumber: '',
+  registeredAddress: 'Michalaki Karaoli, Anemomylos Building, Floor 5, 1095 Nicosia, Cyprus',
+  bankName: 'Eurobank Limited', bankIBAN: 'CY61 0050 0109 0001 0901 H183 8501', bankSWIFT: 'HEBACY2N',
 };
 
 // A 2nd Division club — the contracts this work is aimed at. Greek club name
@@ -55,7 +58,7 @@ const contract = {
   jurisdiction: 'Nicosia, Cyprus',
   paymentModel: 'club_funded',
   paymentType: 'milestone',
-  extraSignatories: [{ organisation: 'Παγκύπριος Σύνδεσμος Προπονητών Ποδοσφαίρου', name: 'Μιχάλης Σεργίου', title: '', signature: _b64('public/signature-sergiou.png'), date: '19/08/2026' }],
+  extraSignatories: [{ organisation: 'Παγκύπριος Σύνδεσμος Προπονητών Ποδοσφαίρου', name: 'Μιχάλης Σεργίου', title: 'Πρόεδρος', signature: _b64('public/signature-sergiou.png'), date: '19/08/2026' }],
   partnerLogos: [{ name: 'Cyprus Football Coaches Association', logoBase64: _b64('public/CFCA-logo.png') }],
   discountAmount: 700,
   discountLabel: 'Έκπτωση συνεργασίας με τον Παγκύπριο Σύνδεσμο Προπονητών Ποδοσφαίρου',

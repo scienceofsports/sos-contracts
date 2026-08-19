@@ -1140,7 +1140,7 @@ const CFCA_PARTNER = { name: 'Cyprus Football Coaches Association', logoUrl: 'CF
 const CFCA_SIGNATORY = {
   organisation: 'Παγκύπριος Σύνδεσμος Προπονητών Ποδοσφαίρου',
   name: 'Μιχάλης Σεργίου',
-  title: '',
+  title: 'Πρόεδρος',
   signatureUrl: 'signature-sergiou.png',
 };
 const DIV2_LIST_PRICE = 3000;
