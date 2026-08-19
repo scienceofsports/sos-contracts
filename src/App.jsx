@@ -79,7 +79,7 @@ import {
 } from './lib/format.js';
 import { decodePortablePayload } from './lib/portable.js';
 import { downloadContractPdf } from './lib/contractPdf.js';
-import { t as contractT, isGreek, elClientEntityDescriptor, elServiceGroup, durationSentence, governingLawSentence, closingNote, clauseName, bankTransferSentence, LANGUAGES } from './lib/contractText.js';
+import { t as contractT, isGreek, elClientEntityDescriptor, elServiceGroup, durationSentence, governingLawSentence, closingNote, clauseName, bankTransferSentence, isShortForm, shortGeneralTerms, LANGUAGES } from './lib/contractText.js';
 import {
   companyService,
   clientService,
@@ -3354,13 +3354,18 @@ function ContractDocumentBody({ contract, client, company, showAdminWarnings = f
           // sponsorship covers none, and neither does an agency subscription —
           // printing "72-hour SLA after each match" on those would be untrue.
           const serviceLevelsNum = hasMatchServices(contract) ? n++ : null;
-          const confidentialityNum = n++;
-          const ipNum = n++;
+          // SHORT FORM (see isShortForm): the standalone Confidentiality, IP,
+          // Liability and Force Majeure sections are replaced by one compact
+          // "general terms" clause, and Termination/Governing Law fold into it.
+          // Numbers stay null so the remaining clauses renumber contiguously.
+          const shortForm = isShortForm(contract);
+          const confidentialityNum = shortForm ? null : n++;
+          const ipNum = shortForm ? null : n++;
           const durationNum = n++;
-          const terminationNum = n++;
-          const liabilityNum = n++;
-          const forceMajeureNum = n++;
-          const governingLawNum = n++;
+          const terminationNum = shortForm ? null : n++;
+          const liabilityNum = shortForm ? null : n++;
+          const forceMajeureNum = shortForm ? null : n++;
+          const governingLawNum = shortForm ? null : n++;
           const specialTermsParsed = parseSpecialTerms(contract.specialTerms);
           const specialTermsNum = specialTermsParsed.length ? n++ : null;
           const entireAgreementNum = n++;
@@ -3640,6 +3645,7 @@ function ContractDocumentBody({ contract, client, company, showAdminWarnings = f
                   Client as data CONTROLLER and SCIOS as PROCESSOR — correct when
                   SCIOS analyses the Client's players, but false on a sponsorship,
                   where SCIOS processes no personal data for the sponsor at all. */}
+              {confidentialityNum && <>
               <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{confidentialityNum}.</span> {T.s_confidentiality}</div>
               <div className="mb-8 pl-4 pr-5 py-4 rounded-r-lg" style={{ background:'#EEF0FB', borderLeft:'3px solid var(--navy-deep)', WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}>
                 {(() => {
@@ -3657,28 +3663,39 @@ function ContractDocumentBody({ contract, client, company, showAdminWarnings = f
                   on a sponsorship there are no deliverables, and that wording would
                   hand a sponsor a perpetual licence over SCIOS's match footage. The
                   sponsorship variant instead keeps each Party's marks their own. */}
+              </>}
+              {ipNum && <>
               <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{ipNum}.</span> {T.s_ip}</div>
               {ipParas(contract).map((p, i, arr) => (
                 <p key={i} className={i === arr.length - 1 ? 'text-sm text-slate-700 mb-8' : 'text-sm text-slate-700 mb-3'}>{p}</p>
               ))}
+              </>}
 
               <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{durationNum}.</span> {T.s_duration}</div>
               <p className="text-sm text-slate-700 mb-8">{durationSentence({ language: contract.language, startDate: fmtDate(contract.startDate), endDate: fmtDate(contract.endDate), termYears, terminationNum })}</p>
 
+              {terminationNum && <>
               <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{terminationNum}.</span> {T.s_termination}</div>
               <p className="text-sm text-slate-700 mb-2">{T.terminationNotice}</p>
               {/* On a sponsorship there are no Deliverables to hand back; what
                   matters is that exposure stops and fees already earned stand. */}
               <p className="text-sm text-slate-700 mb-8">{terminationEffectPara(contract)}</p>
+              </>}
 
+              {liabilityNum && <>
               <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{liabilityNum}.</span> {T.s_liability}</div>
               <p className="text-sm text-slate-700 mb-8">{T.liability}</p>
+              </>}
 
+              {forceMajeureNum && <>
               <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{forceMajeureNum}.</span> {T.s_forceMajeure}</div>
               <p className="text-sm text-slate-700 mb-8">{T.forceMajeure}</p>
+              </>}
 
+              {governingLawNum && <>
               <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{governingLawNum}.</span> {T.s_governingLaw}</div>
               <p className="text-sm text-slate-700 mb-8">{governingLawSentence({ language: contract.language, governingLaw: contract.governingLaw, jurisdiction: contract.jurisdiction })}</p>
+              </>}
 
               {specialTermsNum && (
                 <React.Fragment>
@@ -3695,7 +3712,11 @@ function ContractDocumentBody({ contract, client, company, showAdminWarnings = f
               )}
 
               <div className="sos-pill mb-3" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}><span className="num">{entireAgreementNum}.</span> {T.s_entireAgreement}</div>
-              <p className="text-sm text-slate-700 mb-12">{T.entireAgreement}</p>
+              {shortForm
+                ? shortGeneralTerms({ language: contract.language, terminationNum }).map((p, i, arr) => (
+                    <p key={i} className={i === arr.length - 1 ? 'text-sm text-slate-700 mb-12' : 'text-sm text-slate-700 mb-2'}>{p}</p>
+                  ))
+                : <p className="text-sm text-slate-700 mb-12">{T.entireAgreement}</p>}
             </React.Fragment>
           );
         })()}
@@ -3716,13 +3737,15 @@ function ContractDocumentBody({ contract, client, company, showAdminWarnings = f
           </React.Fragment>
         )}
 
-        {/* Navy closing panel — warm, confident sign-off before the signatures. */}
-        <div className="rounded-lg px-6 py-5 mb-10" style={{ background:'var(--navy-deep)', WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}>
+        {/* Navy closing panel — warm, confident sign-off before the signatures.
+            Omitted on the short form: it is the largest remaining block that is
+            not a term of the deal. */}
+        {!isShortForm(contract) && <div className="rounded-lg px-6 py-5 mb-10" style={{ background:'var(--navy-deep)', WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}>
           <p className="text-sm leading-relaxed" style={{ color:'#E6ECF7' }}>
             {closingNote({ language: contract.language, clientName: client.companyName })}
             <span className="font-semibold" style={{ color:'var(--cyan)' }}> {T.closingTagline}</span>
           </p>
-        </div>
+        </div>}
 
         <div className="sos-pill mb-2" style={{ WebkitPrintColorAdjust:'exact', printColorAdjust:'exact' }}>{T.s_signatures}</div>
         <p className="text-xs text-slate-500 mb-6">{T.executedBy}</p>

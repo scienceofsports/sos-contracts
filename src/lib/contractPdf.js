@@ -22,7 +22,7 @@
    ========================================================================= */
 import { jsPDF } from 'jspdf';
 import { loadPdfFonts, PDF_FONT } from './pdfFont.js';
-import { t as contractT, isGreek, elServiceGroup, durationSentence, governingLawSentence, closingNote, clauseName, bankTransferSentence } from './contractText.js';
+import { t as contractT, isGreek, elServiceGroup, durationSentence, governingLawSentence, closingNote, clauseName, bankTransferSentence, isShortForm, shortGeneralTerms } from './contractText.js';
 import { fmtDate, fmtMoney, daysBetween, upper } from './format.js';
 import { computeServiceLineItems, platformSeatsSummary, seatsForService, SERVICE_GROUPS, analysisScopeText, seasonLabelFromDates, commercialModelText, parseSpecialTerms, serviceLevelsLines, vatSummary, paymentTimingWording, agreementDate, clientPartyClause, clientVatDisplay, isPlayerFunded, playerFundedScopeRows, isSponsorship, hasMatchServices, computeSponsorshipRights, sponsorshipRightText, feesConsiderationPhrase, SPONSORSHIP_RIGHT_GROUPS, confidentialityParas, ipParas, terminationEffectPara } from './constants.js';
 
@@ -490,13 +490,18 @@ export async function generateContractPdf({ contract, client, company }) {
   const commercialNum = commercial.intro ? n++ : null;
   const brandingNum = sponsorship ? n++ : null;
   const serviceLevelsNum = hasMatchServices(contract) ? n++ : null;
-  const confidentialityNum = n++;
-  const ipNum = n++;
+  // SHORT FORM (see isShortForm): the standalone Confidentiality, IP, Liability
+  // and Force Majeure sections are replaced by one compact "general terms"
+  // clause, and Termination/Governing Law fold into it. Null numbers let the
+  // remaining clauses renumber contiguously and skip the render below.
+  const shortForm = isShortForm(contract);
+  const confidentialityNum = shortForm ? null : n++;
+  const ipNum = shortForm ? null : n++;
   const durationNum = n++;
-  const terminationNum = n++;
-  const liabilityNum = n++;
-  const forceMajeureNum = n++;
-  const governingLawNum = n++;
+  const terminationNum = shortForm ? null : n++;
+  const liabilityNum = shortForm ? null : n++;
+  const forceMajeureNum = shortForm ? null : n++;
+  const governingLawNum = shortForm ? null : n++;
   const specialTermsParsed = parseSpecialTerms(contract.specialTerms);
   const specialTermsNum = specialTermsParsed.length ? n++ : null;
   const entireAgreementNum = n++;
@@ -884,34 +889,34 @@ export async function generateContractPdf({ contract, client, company }) {
   // --- Confidentiality & Data Protection (lilac callout) -------------------
   // Sponsorship uses an independent-controllers variant (SCIOS is not the
   // sponsor's data processor) — see confidentialityParas in constants.js.
-  {
+  if (confidentialityNum) {
     const cp = confidentialityParas(contract);
     calloutClause(confidentialityNum, T.s_confidentiality, cp.lead, ...cp.paras);
   }
 
   // --- Intellectual Property Rights ----------------------------------------
   // Sponsorship must NOT license the Deliverables to the Client — see ipParas.
-  clause(ipNum, T.s_ip, ...ipParas(contract));
+  if (ipNum) clause(ipNum, T.s_ip, ...ipParas(contract));
 
   // --- Duration ------------------------------------------------------------
   clause(durationNum, T.s_duration,
     durationSentence({ language: contract.language, startDate: fmtDate(contract.startDate), endDate: fmtDate(contract.endDate), termYears, terminationNum }));
 
   // --- Termination ---------------------------------------------------------
-  clause(terminationNum, T.s_termination,
+  if (terminationNum) clause(terminationNum, T.s_termination,
     T.terminationNotice,
     terminationEffectPara(contract));
 
   // --- Limitation of Liability ---------------------------------------------
-  clause(liabilityNum, T.s_liability,
+  if (liabilityNum) clause(liabilityNum, T.s_liability,
     T.liability);
 
   // --- Force Majeure -------------------------------------------------------
-  clause(forceMajeureNum, T.s_forceMajeure,
+  if (forceMajeureNum) clause(forceMajeureNum, T.s_forceMajeure,
     T.forceMajeure);
 
   // --- Governing Law & Jurisdiction ----------------------------------------
-  clause(governingLawNum, T.s_governingLaw,
+  if (governingLawNum) clause(governingLawNum, T.s_governingLaw,
     governingLawSentence({ language: contract.language, governingLaw: contract.governingLaw, jurisdiction: contract.jurisdiction }));
 
   // --- Special Terms (optional) — numbered list, each optionally clause-ref'd.
@@ -926,7 +931,9 @@ export async function generateContractPdf({ contract, client, company }) {
 
   // --- Entire Agreement ----------------------------------------------------
   clause(entireAgreementNum, T.s_entireAgreement,
-    T.entireAgreement);
+    ...(shortForm
+      ? shortGeneralTerms({ language: contract.language, terminationNum })
+      : [T.entireAgreement]));
 
   // --- Designated Contact block (present once captured at signing). ---------
   if (contract.contactName) {
@@ -941,7 +948,9 @@ export async function generateContractPdf({ contract, client, company }) {
   }
 
   // --- Navy closing panel — warm, confident sign-off before signatures. ----
-  {
+  // Warm sign-off panel — omitted on the short form, where it is the largest
+  // remaining block that is not a term of the deal.
+  if (!shortForm) {
     const padX = 16, padY = 14, innerW = maxW - padX * 2;
     const body = closingNote({ language: contract.language, clientName });
     const emph = T.closingTagline;
@@ -1074,10 +1083,18 @@ export async function generateContractPdf({ contract, client, company }) {
     if (yy > maxColBottom) maxColBottom = yy;
   });
   y = maxColBottom + 8;
-  rule();
 
-  // --- Signature note. -----------------------------------------------------
-  text(T.reviewNote, { size: 9, color: GREY });
+  // Closing rule + signer note are trailing decoration, so they must never be
+  // what starts a new page: `rule()` calls ensure(), which would break to a
+  // fresh page and draw a lone hairline on it, and that page then defeats the
+  // empty-page check below (y has advanced past pageContentStart). Only draw
+  // them if they genuinely fit on the current page.
+  const tailNeed = 12 + (shortForm ? 0 : 30);
+  if (y + tailNeed <= H - BOTTOM) {
+    rule();
+    // Signer guidance, not a term of the deal — omitted on the short form.
+    if (!shortForm) text(T.reviewNote, { size: 9, color: GREY });
+  }
 
   // Drop a trailing page that ended up with no body content (a page-break
   // artifact where the last block spilled but drew nothing meaningful).
