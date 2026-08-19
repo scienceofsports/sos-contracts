@@ -129,7 +129,8 @@ export async function generateContractPdf({ contract, client, company }) {
   // running header. Content must never sit under a band.
   const HEADER_BAND = 78;        // navy band height on page 1
   const CONTENT_TOP_P1 = 100;    // below the page-1 band + rainbow
-  const CONTENT_TOP_REST = 50;   // below the slim running header (pages 2+)
+  const HEADER_BAND_REST = 46;   // navy band height on pages 2+ (same lockup, smaller)
+  const CONTENT_TOP_REST = 66;   // below the pages-2+ band + rainbow
   const FOOTER_BAND = 40;
   const BOTTOM = FOOTER_BAND + 10; // keep content above the footer band
 
@@ -168,33 +169,38 @@ export async function generateContractPdf({ contract, client, company }) {
   // Header band with the two-logo lockup (Scios × client) + cyan contract number
   // + rainbow hairline. Drawn on PAGE 1 only.
   // -------------------------------------------------------------------------
-  const drawHeaderP1 = () => {
+  // Draws the branded header band. Pages 2+ pass `compact`, which renders the
+  // SAME logo lockup at reduced scale rather than a text-only running header —
+  // a different header on page 2 reads as a different document.
+  const drawHeaderBand = (compact = false) => {
+    const bandH = compact ? HEADER_BAND_REST : HEADER_BAND;
+    const scale = compact ? 0.62 : 1;
     doc.setFillColor(...NAVY);
-    doc.rect(0, 0, W, HEADER_BAND, 'F');
+    doc.rect(0, 0, W, bandH, 'F');
 
     // The lockup is a ROW of logos: SCIOS × Client, plus any partner logos the
     // contract carries (the 2nd Division agreement adds the coaches association,
     // whose collaboration funds the discount). Built as a list rather than three
     // hard-coded slots so a further partner needs no layout work.
-    const logoH = 44;
-    const logoMaxW = 200;
-    const lockCenterY = 30;   // vertical centre of the lockup row
-    const gap = 22;
-    const crossSize = 16;
+    const logoH = 44 * scale;
+    const logoMaxW = 200 * scale;
+    const lockCenterY = bandH / 2 - (compact ? 0 : 9);  // centre of the lockup row
+    const gap = 22 * scale;
+    const crossSize = 16 * scale;
     doc.setFont(FONT, 'normal');
     doc.setFontSize(crossSize);
     const crossW = doc.getTextWidth('×');
 
     // Each entry: an image (preferred) or a text fallback at its own size.
     const lockup = [
-      { img: sosLogoData, text: 'SCIENCE OF SPORTS', size: 13 },
-      { img: client?.logoBase64 || null, text: upper(clientName), size: 12 },
+      { img: sosLogoData, text: 'SCIENCE OF SPORTS', size: 13 * scale },
+      { img: client?.logoBase64 || null, text: upper(clientName), size: 12 * scale },
     ];
     // Partner logos ride along after the client. `partnerLogos` is an array of
     // { logoBase64, name } on the contract.
     for (const partner of partnerLogos) {
       if (!partner) continue;
-      lockup.push({ img: partner.logoBase64 || null, text: upper(partner.name || ''), size: 11 });
+      lockup.push({ img: partner.logoBase64 || null, text: upper(partner.name || ''), size: 11 * scale });
     }
 
     // Measure every element first so the whole row can be centred.
@@ -247,34 +253,23 @@ export async function generateContractPdf({ contract, client, company }) {
       cx += el.w + gap;
     });
 
-    // --- Cyan contract number, centred below the lockup. ---
+    // --- Cyan contract number. Centred under the lockup on page 1; on the
+    // compact band there is no room below it, so it sits at the right edge. ---
     if (contractNumber) {
       doc.setFont(FONT, 'bold');
-      doc.setFontSize(9);
+      doc.setFontSize(compact ? 7.5 : 9);
       doc.setTextColor(...CYAN);
-      doc.text(contractNumber, W / 2, HEADER_BAND - 14, { align: 'center' });
+      if (compact) doc.text(contractNumber, W - M, bandH / 2 + 2.5, { align: 'right' });
+      else doc.text(contractNumber, W / 2, bandH - 14, { align: 'center' });
     }
 
     // --- Rainbow hairline directly under the band. ---
-    drawRainbow(HEADER_BAND);
+    drawRainbow(bandH);
   };
+  const drawHeaderP1 = () => drawHeaderBand(false);
+  const drawHeaderRest = () => drawHeaderBand(true);
 
   // Slim running header for pages 2+.
-  const drawHeaderRest = () => {
-    doc.setFillColor(...NAVY);
-    doc.rect(0, 0, W, 26, 'F');
-    doc.setFont(FONT, 'bold');
-    doc.setFontSize(10);
-    doc.setTextColor(...WHITE);
-    doc.text('SCIENCE OF SPORTS', M, 17);
-    if (contractNumber) {
-      doc.setFont(FONT, 'normal');
-      doc.setFontSize(8);
-      doc.setTextColor(...CYAN);
-      doc.text(contractNumber, W - M, 17, { align: 'right' });
-    }
-    drawRainbow(26);
-  };
 
   // Full-spectrum rainbow strip (matches the on-screen CSS gradient), drawn as
   // many thin interpolated slices so it reads as a smooth gradient edge-to-edge.
