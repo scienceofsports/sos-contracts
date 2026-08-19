@@ -29,6 +29,45 @@ export function fmtDateTime(iso) {
   return `${fmtDate(iso)} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')} UTC`;
 }
 
+/**
+ * Uppercase that follows GREEK orthography.
+ *
+ * Greek drops the acute accent when a word is set in capitals: Λευκωσία ->
+ * ΛΕΥΚΩΣΙΑ, not ΛΕΥΚΩΣΊΑ. Plain toUpperCase() keeps the accent (it maps ί ->
+ * Ί), which to a Greek reader looks like a spelling mistake — and the contract
+ * sets client names and section headings in caps, so it would appear in the
+ * title of every Greek document.
+ *
+ * The dialytika is a different mark and must SURVIVE, because it changes
+ * pronunciation: it stays on its own (ϊ -> Ϊ) and, where a letter carries both
+ * accent and dialytika, the accent goes and the dialytika remains (ΐ -> Ϊ).
+ * Final sigma uppercases to plain Σ, which toUpperCase() already handles.
+ *
+ * Latin text is unaffected, so this is safe to use everywhere.
+ */
+const GREEK_CAPS = {
+  'ά':'Α','έ':'Ε','ή':'Η','ί':'Ι','ό':'Ο','ύ':'Υ','ώ':'Ω',
+  'Ά':'Α','Έ':'Ε','Ή':'Η','Ί':'Ι','Ό':'Ο','Ύ':'Υ','Ώ':'Ω',
+  'ΐ':'Ϊ','ΰ':'Ϋ',           // accent + dialytika -> dialytika only
+  'ϊ':'Ϊ','ϋ':'Ϋ',           // dialytika alone survives
+};
+export function upper(s) {
+  return String(s ?? '')
+    .toUpperCase()
+    .replace(/[άέήίόύώΆΈΉΊΌΎΏΐΰϊϋ]/g, c => GREEK_CAPS[c] || c)
+    // U+0390/U+03B0 uppercase to a DECOMPOSED pair (base letter + combining
+    // marks) rather than one character, so the map above can leave a stray
+    // accent behind. Strip the combining acute/tonos (U+0301, U+0344) but keep
+    // the combining dialytika (U+0308), which changes pronunciation...
+    .replace(/[́̈́]/g, '')
+    // ...then recompose, so a dialytika always comes out as the single
+    // precomposed character. Without this, upper() can return two different
+    // byte sequences for visually identical text -- and the contract body is
+    // SHA-256 hashed as evidence, so that difference is not cosmetic.
+    .normalize('NFC');
+}
+
+
 export function fmtMoney(amount, currency) {
   const sym = CURRENCY_SYMBOL[currency] || '';
   const n = Number(amount || 0);

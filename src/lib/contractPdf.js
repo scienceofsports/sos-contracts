@@ -22,7 +22,7 @@
    ========================================================================= */
 import { jsPDF } from 'jspdf';
 import { loadPdfFonts, PDF_FONT } from './pdfFont.js';
-import { fmtDate, fmtMoney, daysBetween } from './format.js';
+import { fmtDate, fmtMoney, daysBetween, upper } from './format.js';
 import { computeServiceLineItems, platformSeatsSummary, seatsForService, SERVICE_GROUPS, analysisScopeText, seasonLabelFromDates, commercialModelText, parseSpecialTerms, serviceLevelsLines, vatSummary, paymentTimingWording, agreementDate, clientPartyClause, clientVatDisplay, isPlayerFunded, playerFundedScopeRows, isSponsorship, hasMatchServices, computeSponsorshipRights, sponsorshipRightText, feesConsiderationPhrase, SPONSORSHIP_RIGHT_GROUPS, confidentialityParas, ipParas, terminationEffectPara } from './constants.js';
 
 export async function generateContractPdf({ contract, client, company }) {
@@ -122,7 +122,7 @@ export async function generateContractPdf({ contract, client, company }) {
     doc.setFontSize(13);
     const sosW = sosFit ? sosFit.w : doc.getTextWidth('SCIENCE OF SPORTS');
     doc.setFontSize(12);
-    const cliW = cliFit ? cliFit.w : doc.getTextWidth(clientName.toUpperCase());
+    const cliW = cliFit ? cliFit.w : doc.getTextWidth(upper(clientName));
 
     const totalW = sosW + gap + crossW + gap + cliW;
     let cx = (W - totalW) / 2;
@@ -162,7 +162,7 @@ export async function generateContractPdf({ contract, client, company }) {
       doc.setFont(FONT, 'bold');
       doc.setFontSize(12);
       doc.setTextColor(...WHITE);
-      doc.text(clientName.toUpperCase(), cx, lockCenterY + 4);
+      doc.text(upper(clientName), cx, lockCenterY + 4);
     }
 
     // --- Cyan contract number, centred below the lockup. ---
@@ -409,8 +409,8 @@ export async function generateContractPdf({ contract, client, company }) {
       doc.text(str, W / 2, y, { align: 'center' });
       y += gap;
     };
-    centered((parts[0] || '').toUpperCase(), 18, parts.length > 1 ? 4 : 8);
-    if (parts.length > 1) centered(parts.slice(1).join(' - ').toUpperCase(), 13, 8);
+    centered(upper(parts[0] || ''), 18, parts.length > 1 ? 4 : 8);
+    if (parts.length > 1) centered(upper(parts.slice(1).join(' - ')), 13, 8);
   }
   rule();
 
@@ -426,7 +426,7 @@ export async function generateContractPdf({ contract, client, company }) {
   const ISO = { CY: 'Cyprus', GR: 'Greece', GB: 'United Kingdom', SA: 'Saudi Arabia', MT: 'Malta' };
   const rawCountry = (client?.country || '').trim();
   const clientCountry = rawCountry
-    ? (/^[A-Za-z]{2}$/.test(rawCountry) ? (ISO[rawCountry.toUpperCase()] || rawCountry.toUpperCase()) : rawCountry)
+    ? (/^[A-Za-z]{2}$/.test(rawCountry) ? (ISO[upper(rawCountry)] || upper(rawCountry)) : rawCountry)
     : '[ country to be confirmed on signing ]';
   const clientReg = client?.registrationNumber || TBC;
   const clientAddr = client?.address || TBC;
@@ -514,7 +514,7 @@ export async function generateContractPdf({ contract, client, company }) {
       doc.setFont(FONT, 'bold');
       doc.setFontSize(9);
       doc.setTextColor(...NAVY);
-      doc.text(group.toUpperCase(), M + 8, ghBaseline);
+      doc.text(upper(group), M + 8, ghBaseline);
       y += 4;
       groupItems.forEach((i) => {
         const qtyNote = i.unit === 'per_match' ? ` (${i.qty} matches)` : i.unit === 'per_unit' ? ` (${i.qty})` : '';
@@ -572,7 +572,7 @@ export async function generateContractPdf({ contract, client, company }) {
         doc.setFont(FONT, 'bold');
         doc.setFontSize(9);
         doc.setTextColor(...NAVY);
-        doc.text(group.toUpperCase(), M + 8, ghBaseline);
+        doc.text(upper(group), M + 8, ghBaseline);
         y += 4;
         groupRows.forEach((r) => {
           const itemX = M + 12;
@@ -808,7 +808,7 @@ export async function generateContractPdf({ contract, client, company }) {
       doc.setFont(FONT, 'bold'); doc.setFontSize(8); doc.setTextColor(...NAVY);
       doc.text('PAYMENT', M + 6, y);
       doc.text('DUE DATE', dateX, y);
-      doc.text((vs.amountLabel || 'Amount').toUpperCase(), amtX, y, { align: 'right' });
+      doc.text(upper(vs.amountLabel || 'Amount'), amtX, y, { align: 'right' });
       y += 3;
       doc.setDrawColor(...NAVY); doc.setLineWidth(0.5); doc.line(M, y, W - M, y);
       pays.forEach((p, i) => {
@@ -1000,7 +1000,7 @@ export async function generateContractPdf({ contract, client, company }) {
     doc.setFont(FONT, 'bold');
     doc.setFontSize(8.5);
     doc.setTextColor(...NAVY);
-    doc.text(heads[idx].toUpperCase().slice(0, 60), x, yy);
+    doc.text(upper(heads[idx]).slice(0, 60), x, yy);
     yy += 12;
 
     // Draw caption on the CLIENT column; reserve the same space on the other.
@@ -1056,7 +1056,7 @@ export async function generateContractPdf({ contract, client, company }) {
       doc.setFont(FONT, 'normal');
       doc.setFontSize(7);
       doc.setTextColor(140, 148, 156);
-      doc.text(label.toUpperCase(), x, yy + 12);
+      doc.text(upper(label), x, yy + 12);
       yy += 28;
     };
     field('Name', col.name);
