@@ -113,6 +113,9 @@ function LoginScreen() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  // 'login' | 'forgot' | 'sent' — the forgot-password panel reuses this screen
+  // rather than a separate route, so the email field carries straight over.
+  const [mode, setMode] = useState('login');
 
   const submit = async (e) => {
     e.preventDefault();
@@ -128,6 +131,73 @@ function LoginScreen() {
       setBusy(false);
     }
   };
+
+  const sendReset = async (e) => {
+    e.preventDefault();
+    setError('');
+    if (!validateEmail(email)) { setError('Enter a valid email address.'); return; }
+    setBusy(true);
+    try {
+      await userService.requestPasswordReset(email);
+      setMode('sent');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const shell = (body, subtitle) => (
+    <div className="min-h-screen flex items-center justify-center bg-[var(--navy-deep)] px-4">
+      <div className="w-full max-w-md">
+        <div className="text-center mb-8">
+          <img src="Logo-scios-dark.png" alt="SCIOS" className="h-14 w-auto object-contain mx-auto mb-4" />
+          <div className="text-white font-display">SCIOS Contracts</div>
+          <div className="text-slate-400 text-sm mt-1">{subtitle}</div>
+        </div>
+        {body}
+        <div className="text-center text-slate-500 text-xs mt-6">Transforming matches into knowledge.</div>
+      </div>
+    </div>
+  );
+
+  if (mode === 'sent') {
+    return shell(
+      <div className="bg-white rounded-xl shadow-2xl overflow-hidden">
+        <div className="sos-rainbow" />
+        <div className="p-5 sm:p-8 text-center">
+          <div className="text-4xl mb-4">📧</div>
+          <div className="font-heading mb-2">Check your email</div>
+          <p className="text-sm text-slate-600 mb-5">
+            If an account exists for <strong>{email}</strong>, we've sent a link to set a new password.
+            It expires in one hour — check your junk folder if it doesn't arrive.
+          </p>
+          <button onClick={()=>{ setMode('login'); setError(''); }} className="text-sm text-[var(--blue-primary)] hover:underline">Back to sign in</button>
+        </div>
+      </div>,
+      'Password reset',
+    );
+  }
+
+  if (mode === 'forgot') {
+    return shell(
+      <form onSubmit={sendReset} className="bg-white rounded-xl shadow-2xl overflow-hidden">
+        <div className="sos-rainbow" />
+        <div className="p-5 sm:p-8">
+          <p className="text-sm text-slate-600 mb-5">Enter your work email and we'll send you a link to set a new password.</p>
+          <Field label="Email" required>
+            <input type="email" value={email} onChange={e=>setEmail(e.target.value)} className={inputCls(false)} placeholder="you@scienceofsports.net" autoFocus />
+          </Field>
+          {error && <p className="text-xs text-red-500 mb-4">{error}</p>}
+          <button disabled={busy} className="w-full py-2.5 bg-[var(--cyan)] text-[var(--navy-deep)] rounded-lg text-sm font-semibold hover:bg-[var(--cyan-deep)] transition disabled:opacity-50">
+            {busy ? 'Sending…' : 'Send Reset Link'}
+          </button>
+          <button type="button" onClick={()=>{ setMode('login'); setError(''); }} className="w-full mt-3 text-sm text-slate-500 hover:text-slate-700">Back to sign in</button>
+        </div>
+      </form>,
+      'Password reset',
+    );
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-[var(--navy-deep)] px-4">
@@ -149,6 +219,9 @@ function LoginScreen() {
             {error && <p className="text-xs text-red-500 mb-4">{error}</p>}
             <button disabled={busy} className="w-full py-2.5 bg-[var(--cyan)] text-[var(--navy-deep)] rounded-lg text-sm font-semibold hover:bg-[var(--cyan-deep)] transition disabled:opacity-50">
               {busy ? 'Signing in…' : 'Sign In'}
+            </button>
+            <button type="button" onClick={()=>{ setMode('forgot'); setError(''); setPassword(''); }} className="w-full mt-4 text-xs text-slate-500 hover:text-[var(--blue-primary)] hover:underline">
+              Forgot password?
             </button>
           </div>
         </form>
@@ -6533,30 +6606,32 @@ function AuthedApp() {
   );
 }
 
-function AccountSetupFlow({ token }) {
-  const [user, setUser] = useState(undefined);
+function SetPasswordFlow() {
+  const auth = useAuth();
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
 
-  useEffect(() => { userService.getBySetupToken(token).then(setUser); }, [token]);
-
-  if (user === undefined) {
-    return <div className="min-h-screen flex items-center justify-center bg-[var(--navy-deep)]"><div className="text-white text-sm">Loading…</div></div>;
-  }
-
-  if (!user) {
+  // The recovery link already signed us in (detectSessionInUrl), so there is a
+  // live session here and updateUser() can set the password without the old one.
+  // If there is no session, the link was invalid, already used, or expired.
+  if (!auth.loading && !auth.user) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[var(--navy-deep)] px-4">
         <div className="bg-white rounded-xl shadow-2xl p-8 max-w-md text-center">
           <div className="text-4xl mb-4">⏰</div>
-          <div className="font-heading mb-2">This setup link is invalid or has expired</div>
-          <p className="text-sm text-slate-500">Ask your admin to send you a new setup link.</p>
+          <div className="font-heading mb-2">This link is invalid or has expired</div>
+          <p className="text-sm text-slate-500 mb-5">Password links can only be used once and expire after an hour. Request a new one from the sign-in page.</p>
+          <a href={location.pathname} className="inline-block px-4 py-2 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">Back to Sign In</a>
         </div>
       </div>
     );
+  }
+
+  if (auth.loading) {
+    return <div className="min-h-screen flex items-center justify-center bg-[var(--navy-deep)]"><div className="text-white text-sm">Loading…</div></div>;
   }
 
   if (done) {
@@ -6565,8 +6640,8 @@ function AccountSetupFlow({ token }) {
         <div className="bg-white rounded-xl shadow-2xl p-8 max-w-md text-center">
           <div className="text-4xl mb-4">✅</div>
           <div className="font-heading mb-2">Password set</div>
-          <p className="text-sm text-slate-500 mb-5">You can now log in with your email and new password.</p>
-          <a href={location.pathname} className="inline-block px-4 py-2 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">Go to Login</a>
+          <p className="text-sm text-slate-500 mb-5">You're signed in. Use this password next time you log in.</p>
+          <button onClick={()=>{ auth.clearRecovery(); location.hash = ''; }} className="inline-block px-4 py-2 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition">Continue to SCIOS Contracts</button>
         </div>
       </div>
     );
@@ -6579,7 +6654,7 @@ function AccountSetupFlow({ token }) {
     if (password !== confirm) { setError('Passwords do not match.'); return; }
     setBusy(true);
     try {
-      await userService.completeSetup(token, password);
+      await userService.setPassword(password);
       setDone(true);
     } catch (err) {
       setError(err.message);
@@ -6594,20 +6669,23 @@ function AccountSetupFlow({ token }) {
         <div className="text-center mb-8">
           <img src="Logo-scios-dark.png" alt="SCIOS" className="h-14 w-auto object-contain mx-auto mb-4" />
           <div className="text-white font-display">SCIOS Contracts</div>
-          <div className="text-slate-400 text-sm mt-1">Set up your account</div>
+          <div className="text-slate-400 text-sm mt-1">Choose a password</div>
         </div>
-        <form onSubmit={submit} className="bg-white rounded-xl shadow-2xl p-8">
-          <p className="text-sm text-slate-600 mb-5">Welcome, {user.name}. Choose a password for <strong>{user.email}</strong> to activate your account.</p>
-          <Field label="New Password" required>
-            <input type="password" value={password} onChange={e=>setPassword(e.target.value)} className={inputCls(false)} placeholder="Minimum 8 characters" autoFocus />
-          </Field>
-          <Field label="Confirm Password" required>
-            <input type="password" value={confirm} onChange={e=>setConfirm(e.target.value)} className={inputCls(false)} />
-          </Field>
-          {error && <p className="text-xs text-red-500 mb-4">{error}</p>}
-          <button disabled={busy} className="w-full py-2.5 bg-[var(--blue-primary)] text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition disabled:opacity-50">
-            {busy ? 'Saving…' : 'Set Password & Activate'}
-          </button>
+        <form onSubmit={submit} className="bg-white rounded-xl shadow-2xl overflow-hidden">
+          <div className="sos-rainbow" />
+          <div className="p-5 sm:p-8">
+            <p className="text-sm text-slate-600 mb-5">Set a password for <strong>{auth.user?.email}</strong>. You'll use it to sign in from now on.</p>
+            <Field label="New Password" required>
+              <input type="password" value={password} onChange={e=>setPassword(e.target.value)} className={inputCls(false)} placeholder="Minimum 8 characters" autoFocus />
+            </Field>
+            <Field label="Confirm Password" required>
+              <input type="password" value={confirm} onChange={e=>setConfirm(e.target.value)} className={inputCls(false)} />
+            </Field>
+            {error && <p className="text-xs text-red-500 mb-4">{error}</p>}
+            <button disabled={busy} className="w-full py-2.5 bg-[var(--cyan)] text-[var(--navy-deep)] rounded-lg text-sm font-semibold hover:bg-[var(--cyan-deep)] transition disabled:opacity-50">
+              {busy ? 'Saving…' : 'Set Password'}
+            </button>
+          </div>
         </form>
       </div>
     </div>
@@ -6636,9 +6714,13 @@ function App() {
     return <SigningFlow contractId={signMatch[1]} />;
   }
 
-  const setupMatch = hash.match(/^#\/setup\/([^/]+)/);
-  if (setupMatch) {
-    return <AccountSetupFlow token={setupMatch[1]} />;
+  // Password reset / first-time setup. `auth.recovery` is set when Supabase
+  // reports PASSWORD_RECOVERY (or the URL still carries type=recovery). It must
+  // be checked BEFORE the auth.user branch below: the recovery link signs the
+  // user in, so without this they'd land on the dashboard and never be asked to
+  // choose a password. #/reset is also the redirect target we ask Supabase for.
+  if (auth.recovery || /^#\/(reset|setup)/.test(hash)) {
+    return <SetPasswordFlow />;
   }
 
   if (auth.loading) {

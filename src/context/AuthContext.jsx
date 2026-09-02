@@ -13,6 +13,10 @@ export const AuthContext = React.createContext(null);
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  // True once Supabase reports PASSWORD_RECOVERY — i.e. the session we hold came
+  // from a reset link, not a normal sign-in. App() uses this to force the
+  // set-password screen instead of dropping the user into the dashboard.
+  const [recovery, setRecovery] = useState(false);
 
   const loadProfile = useCallback(async () => {
     try {
@@ -27,8 +31,17 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     // Initial load + subscribe to future auth changes (login/logout/refresh).
+    // A recovery link is consumed by detectSessionInUrl before React mounts, so
+    // the event can fire before we subscribe. Supabase leaves `type=recovery` in
+    // the URL hash, so check that too rather than relying on the event alone.
+    if (typeof window !== 'undefined' && /[#&?]type=recovery/.test(window.location.hash)) {
+      setRecovery(true);
+    }
     loadProfile();
-    const unsubscribe = onAuthChange(() => { loadProfile(); });
+    const unsubscribe = onAuthChange((_session, event) => {
+      if (event === 'PASSWORD_RECOVERY') setRecovery(true);
+      loadProfile();
+    });
     return unsubscribe;
   }, [loadProfile]);
 
@@ -37,10 +50,12 @@ export function AuthProvider({ children }) {
     setUser(u);
     return u;
   };
-  const logout = async () => { await userService.logout(); setUser(null); };
+  const logout = async () => { await userService.logout(); setUser(null); setRecovery(false); };
+  // Called once the user has actually chosen a new password.
+  const clearRecovery = () => setRecovery(false);
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, isAdmin: user && user.role === 'admin' }}>
+    <AuthContext.Provider value={{ user, loading, login, logout, recovery, clearRecovery, isAdmin: user && user.role === 'admin' }}>
       {children}
     </AuthContext.Provider>
   );

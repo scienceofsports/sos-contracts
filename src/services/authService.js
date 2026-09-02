@@ -8,8 +8,8 @@
 
    Method-name parity with the old userService is preserved where the UI calls
    it (getAll, getById, getCurrentUser, login, logout, create, delete). The old
-   setup-token flow (getBySetupToken/completeSetup) is replaced by Supabase's
-   invite/recovery emails; those methods remain but delegate to Supabase.
+   setup-token flow is gone: password reset and first-time setup now go through
+   Supabase recovery emails (requestPasswordReset -> setPassword).
    ========================================================================= */
 
 import { supabase } from '../lib/supabase.js';
@@ -110,19 +110,39 @@ export const userService = {
     if (error) throw new Error(error.message);
   },
 
-  // Legacy setup-token flow — replaced by Supabase invite/recovery. Kept as
-  // safe no-ops so any lingering references don't crash.
-  getBySetupToken: async () => null,
-  completeSetup: async () => {
-    throw new Error('Account setup is now handled via the email link Supabase sends you.');
+  // Email the user a password-reset link. Supabase sends a recovery email whose
+  // link carries a one-time token; `detectSessionInUrl` on our client exchanges
+  // it for a real (short-lived) session, which is what lets setPassword() below
+  // work without the old password. The redirect must be an allow-listed URL in
+  // Authentication -> URL Configuration.
+  requestPasswordReset: async (email) => {
+    const redirectTo = typeof window !== 'undefined'
+      ? `${window.location.origin}${window.location.pathname}#/reset`
+      : undefined;
+    const { error } = await supabase.auth.resetPasswordForEmail(
+      (email || '').trim().toLowerCase(),
+      { redirectTo },
+    );
+    // Deliberately do NOT surface "no such user" — that would let anyone probe
+    // which staff emails exist. The UI shows the same confirmation either way.
+    if (error && !/user not found/i.test(error.message)) throw new Error(error.message);
   },
+
+  // Set a new password for the CURRENTLY authenticated user. Used both by the
+  // recovery flow (session came from the emailed link) and by a signed-in user
+  // changing their own password.
+  setPassword: async (password) => {
+    const { error } = await supabase.auth.updateUser({ password });
+    if (error) throw new Error(error.message);
+  },
+
 };
 
 // Subscribe to Supabase auth state changes (login/logout/refresh). Returns an
 // unsubscribe function. Used by AuthContext.
 export function onAuthChange(callback) {
-  const { data } = supabase.auth.onAuthStateChange((_event, session) => {
-    callback(session);
+  const { data } = supabase.auth.onAuthStateChange((event, session) => {
+    callback(session, event);
   });
   return () => data.subscription.unsubscribe();
 }
